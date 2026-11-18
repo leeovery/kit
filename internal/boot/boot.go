@@ -8,8 +8,8 @@
 package boot
 
 import (
+	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -36,8 +36,8 @@ const (
 type Asker interface {
 	// Choose asks step's question, its answers under it: the answer's place.
 	Choose(ctx context.Context, step, question string, answers []Answer) (int, error)
-	// Name asks for a name, typed.
-	Name(ctx context.Context, step, question string) (string, error)
+	// Text asks for text typed, suggested to start with.
+	Text(ctx context.Context, step, question, suggested string) (string, error)
 	// Pick waits for one of keys, the keys at the foot saying what each
 	// does, till ctx is done: the key pressed.
 	Pick(ctx context.Context, step string, keys []Key) (string, error)
@@ -160,19 +160,19 @@ func (b *Boot) config() *config.Config {
 	return nil
 }
 
-// repo is the config repository's name on GitHub, for login.
+// repo is the config repository's name on GitHub, for login: as --config
+// names it, else their kit-config.
 func (b *Boot) repo(login string) string {
-	if b.Repo != "" {
-		return b.Repo
-	}
-	return login + "/kit-config"
+	return cmp.Or(b.Repo, login+"/"+Suggested)
 }
 
 // gitHubStep signs in to GitHub, on the phone, and reads the config
-// repository: done when GitHub takes the sign-in kit holds, and the config
+// repository (readConfig), or chooses one for kit-config to start in on
+// this Mac: done when GitHub takes the sign-in kit holds, and the config
 // repository is there to read, cloned or its copy fetched by this boot, or
-// by the boot that handed over: a copy an earlier boot left is fetched
-// again, as kit-config may have changed since.
+// by the boot that handed over, or chosen to start in by this boot: a copy
+// an earlier boot left is fetched again, as kit-config may have changed
+// since.
 func (b *Boot) gitHubStep() engine.Step {
 	return engine.Step{
 		Name: GitHubStep, Title: "GitHub", Area: AreaSignIn,
@@ -184,8 +184,18 @@ func (b *Boot) gitHubStep() engine.Step {
 				return stands
 			}
 			b.hold(token, login)
+			st, err := kitstate.Load[state](b.State, stateName)
+			if err != nil {
+				return check.Result{State: check.Failed, Reason: err.Error()}
+			}
+			read := b.cloned() || b.HandedOver || b.isFetched()
 			cfg := b.config()
-			if cfg == nil || !b.cloned() && !b.HandedOver && !b.isFetched() {
+			switch {
+			case read && st.Fresh != nil && st.Fresh.Create:
+				return check.Result{State: check.OK, Summary: login + " · " + st.Repo + ", new, private"}
+			case read && st.Fresh != nil:
+				return check.Result{State: check.OK, Summary: login + " · " + st.Repo + ", private, empty"}
+			case cfg == nil || !read:
 				return check.Result{State: check.Attention, Summary: login + " · kit-config not read yet"}
 			}
 			return check.Result{State: check.OK, Summary: login + " · kit-config has " + and(cfg.MacNames())}
@@ -199,24 +209,13 @@ func (b *Boot) gitHubStep() engine.Step {
 				}
 				b.hold(token, login)
 			}
-			repo := b.repo(login)
-			b.doing(GitHubStep, "reading "+repo)
-			private, err := b.GitHub.Private(ctx, token, repo)
-			switch {
-			case errors.Is(err, ErrNotFound):
-				return fmt.Errorf("%s isn't on GitHub, or this sign-in can't see it: name yours with --config owner/name", repo)
-			case err != nil:
-				return fmt.Errorf("find %s: %w", repo, err)
-			case !private:
-				return fmt.Errorf("%s is public on GitHub, and a config repository is always private: make it private, then boot again", repo)
-			}
-			if err := b.GitHub.fetch(ctx, token, repo, b.archive()); err != nil {
-				return fmt.Errorf("read %s: %w", repo, err)
+			if err := b.readConfig(ctx, token, login); err != nil {
+				return err
 			}
 			b.mu.Lock()
 			b.fetched = true
 			b.mu.Unlock()
-			return kitstate.Update(b.State, stateName, func(st *state) { st.Repo = repo })
+			return nil
 		},
 	}
 }
@@ -262,7 +261,7 @@ func (b *Boot) macStep() engine.Step {
 		Apply: func(ctx context.Context, _ check.Result) error {
 			cfg := b.config()
 			if cfg == nil {
-				return errors.New("kit-config hasn't been read")
+				return b.nameFirst(ctx)
 			}
 			named, err := config.ReadMachine(b.State)
 			if err != nil {
@@ -287,7 +286,7 @@ func (b *Boot) macStep() engine.Step {
 				if !known {
 					st.NewMac, st.From = name, from
 				}
-				if (known || from != "") && named == "" {
+				if (known || from != "") && named == "" && st.Fresh == nil {
 					st.SetUp = true
 				}
 			}); err != nil {
@@ -315,15 +314,8 @@ func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from strin
 	case i < len(macs):
 		return macs[i], "", nil
 	}
-	question := "its name, as kit-config will know it"
-	for {
-		if name, err = b.Ask.Name(ctx, MacStep, question); err != nil {
-			return "", "", err
-		}
-		if config.ValidName(name) {
-			break
-		}
-		question = "that can't name a Mac: lower case letters, digits and dashes"
+	if name, err = b.askName(ctx); err != nil {
+		return "", "", err
 	}
 	if cfg.Knows(name) {
 		return name, "", nil
@@ -337,6 +329,21 @@ func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from strin
 	}
 	return name, macs[i-1], nil
 }
+
+// askName asks for a new Mac's name, asked again till it can name one.
+func (b *Boot) askName(ctx context.Context) (string, error) {
+	question := "its name, as kit-config will know it"
+	for {
+		name, err := b.Ask.Text(ctx, MacStep, question, "")
+		if err != nil || validName(name) {
+			return name, err
+		}
+		question = "that can't name a Mac: lower case letters, digits and dashes"
+	}
+}
+
+// validName reports whether name can name a Mac, as kit.toml has them.
+func validName(name string) bool { return config.ValidName(name) && name != config.Shared }
 
 // and lists names as words do: a, b and c; none, no Macs.
 func and(names []string) string {
@@ -364,6 +371,18 @@ type state struct {
 	// set-up began: read as SetUp, so a Mac part-way through set-up then
 	// carries on.
 	Began time.Time `json:"began,omitzero"`
+	// Fresh is kit-config starting on this Mac, in Repo, till its first
+	// files are pushed; Started, that it did.
+	Fresh   *fresh `json:"fresh,omitempty"`
+	Started bool   `json:"started,omitempty"`
+}
+
+// fresh is kit-config starting on this Mac: whether its repository's to be
+// created, rather than one empty, and the terminal this Mac uses, one kit
+// knows, by name, or "" for macOS's own.
+type fresh struct {
+	Create   bool   `json:"create,omitempty"`
+	Terminal string `json:"terminal,omitempty"`
 }
 
 const stateName = "bootstrap.json"

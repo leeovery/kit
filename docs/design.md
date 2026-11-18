@@ -1269,7 +1269,25 @@ hand; proven from a blank Mac in a virtual machine. Run in that terminal already
 carries on there as Homebrew's kit, becoming it. install.sh runs its download from a temporary
 folder, removed once the boot has handed over or ended, so nothing's left but Homebrew's kit; a
 build of kit's own (`KIT_FROM`) goes in `~/.local/bin` and runs throughout, the boot installing
-no kit.
+no kit. The config is `--config owner/name`, else the one a boot before chose, else the
+person's `kit-config`; the install line gives no flags, so with none of those there (the
+maintainer, 18 Nov 2026), at a terminal, GitHub's row asks, the same question and code as `kit
+setup`'s (`boot.Account.ChooseRepo`): one of their private repositories, listed in one call and
+never looked inside, one named as owner/name, or one created, private, on the signed-in account,
+`kit-config` suggested. One not there, public, holding no kit.toml (its fetched copy removed),
+or holding files when it was to be created is refused before anything's written, and the
+question asked again, saying why. One empty (GitHub lists no branch), or to be created and not
+there yet, starts kit-config on this Mac: the boot asks the terminal the Mac uses (one
+`apps.Terminals` knows, or macOS's own), plans the boot order from it, and names the Mac without
+a list; the kit-config step creates the repository through GitHub's CLI unless it's there,
+clones it, sets it on main as setup does (`boot.OnMain`), writes `config.Start`'s first files
+(this Mac the primary, that terminal, the Mac's folder with an empty declarations file),
+commits them, as the GitHub account (its name, its private address) when git has no author
+yet, and pushes once every push URL is proven private (`boot.ProvenPrivate`, shared with
+setup), its branch made by the push (`BranchMayBeMissing`). The record (`fresh`) keeps the
+choice, so a boot run again asks nothing again; once pushed, it's a config as any other.
+Without a terminal it stops, naming `--config`: a new config is made at a terminal, or with
+`kit setup`.
 
 **12. Data restore — built.** `[restore]`, copied from the Mac a new one starts from, over SSH
 and pinned to its host key, else from its backups; the boot its one trigger.

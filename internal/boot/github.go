@@ -2,6 +2,7 @@ package boot
 
 import (
 	"archive/tar"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -208,6 +209,30 @@ func (g GitHub) Repos(ctx context.Context, token string) ([]string, error) {
 		names[i] = r.FullName
 	}
 	return names, nil
+}
+
+// Empty reports whether the repository named repo, as owner/name, has no
+// branch: nothing's ever been pushed to it.
+func (g GitHub) Empty(ctx context.Context, token, repo string) (bool, error) {
+	var branches []struct{}
+	if err := g.get(ctx, token, "/repos/"+repo+"/branches?per_page=1", &branches); err != nil {
+		return false, err
+	}
+	return len(branches) == 0, nil
+}
+
+// Author is who token signs in as, as git names a commit's author: their
+// name, else their login; and the address GitHub keeps private for them.
+func (g GitHub) Author(ctx context.Context, token string) (name, email string, err error) {
+	var user struct {
+		ID    int64  `json:"id"`
+		Login string `json:"login"`
+		Name  string `json:"name"`
+	}
+	if err := g.get(ctx, token, "/user", &user); err != nil {
+		return "", "", err
+	}
+	return cmp.Or(user.Name, user.Login), fmt.Sprintf("%d+%s@users.noreply.github.com", user.ID, user.Login), nil
 }
 
 // fetch fetches the repository named repo, its default branch as it stands,

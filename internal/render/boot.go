@@ -483,7 +483,14 @@ func (f *BootFace) blocks(width int, live bool) []block {
 			heading = append([]string{""}, heading...)
 		}
 		r := f.rows[a.steps[0].Name]
+		asking := f.q != nil && f.q.kind != picking && slices.ContainsFunc(a.steps, func(s event.Step) bool { return s.Name == f.q.step })
 		switch {
+		case !a.order && asking:
+			lines := heading
+			for _, s := range a.steps {
+				lines = append(lines, b.Rows(width, f.stepRow(s, b, live))...)
+			}
+			out = append(out, block{state: look.NeedsYou, lines: lines})
 		case !a.order && len(a.steps) == 1 && (r == nil || r.finished == nil):
 			lines := heading
 			for _, l := range look.Wrap(a.steps[0].Waiting, width-4) {
@@ -905,9 +912,9 @@ func (f *BootFace) Choose(ctx context.Context, step, text string, choices []look
 	return a.chosen, err
 }
 
-// Name asks for a name, typed in step's row.
-func (f *BootFace) Name(ctx context.Context, step, text string) (string, error) {
-	a, err := f.ask(ctx, &question{step: step, kind: naming, text: text})
+// Text asks for text, typed in step's row, typed to start with.
+func (f *BootFace) Text(ctx context.Context, step, text, typed string) (string, error) {
+	a, err := f.ask(ctx, &question{step: step, kind: naming, text: text, typed: []rune(typed)})
 	return a.text, err
 }
 

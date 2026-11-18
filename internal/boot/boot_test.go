@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -27,7 +29,8 @@ import (
 )
 
 // gitHub is GitHub as a test has it: a code to sign in with, the answers to
-// polling it, in turn, then the sign-in; and a config repository.
+// polling it, in turn, then the sign-in; a config repository, and others,
+// each empty when it has no archive.
 type gitHub struct {
 	mu      sync.Mutex
 	codes   int
@@ -36,6 +39,25 @@ type gitHub struct {
 	public  bool
 	repo    string
 	archive []byte
+	others  map[string]repo
+}
+
+// repo is one of the others GitHub has: public or not, and its archive,
+// none when it's empty.
+type repo struct {
+	public  bool
+	archive []byte
+}
+
+// find is the repository GitHub has called name, and whether it has it.
+func (g *gitHub) find(name string) (repo, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if name == g.repo {
+		return repo{public: g.public, archive: g.archive}, true
+	}
+	r, ok := g.others[name]
+	return r, ok
 }
 
 func (g *gitHub) serve(t *testing.T) GitHub {
@@ -72,21 +94,45 @@ func (g *gitHub) serve(t *testing.T) GitHub {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"login": "someone"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"login": "someone", "id": 1234, "name": "Some One"})
 	})
-	mux.HandleFunc("GET /repos/{owner}/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if !signedIn(r) || r.PathValue("owner")+"/"+r.PathValue("name") != g.repo {
-			w.WriteHeader(http.StatusNotFound)
-			return
+	mux.HandleFunc("GET /user/repos", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		list := []map[string]string{}
+		for _, name := range slices.Sorted(maps.Keys(g.others)) {
+			if !g.others[name].public {
+				list = append(list, map[string]string{"full_name": name})
+			}
 		}
-		_ = json.NewEncoder(w).Encode(map[string]bool{"private": !g.public})
+		_ = json.NewEncoder(w).Encode(list)
+	})
+	found := func(w http.ResponseWriter, r *http.Request) (repo, bool) {
+		rp, ok := g.find(r.PathValue("owner") + "/" + r.PathValue("name"))
+		if !ok || !signedIn(r) {
+			w.WriteHeader(http.StatusNotFound)
+			return repo{}, false
+		}
+		return rp, true
+	}
+	mux.HandleFunc("GET /repos/{owner}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if rp, ok := found(w, r); ok {
+			_ = json.NewEncoder(w).Encode(map[string]bool{"private": !rp.public})
+		}
+	})
+	mux.HandleFunc("GET /repos/{owner}/{name}/branches", func(w http.ResponseWriter, r *http.Request) {
+		if rp, ok := found(w, r); ok {
+			branches := []map[string]string{}
+			if rp.archive != nil {
+				branches = append(branches, map[string]string{"name": "main"})
+			}
+			_ = json.NewEncoder(w).Encode(branches)
+		}
 	})
 	mux.HandleFunc("GET /repos/{owner}/{name}/tarball", func(w http.ResponseWriter, r *http.Request) {
-		if !signedIn(r) {
-			w.WriteHeader(http.StatusNotFound)
-			return
+		if rp, ok := found(w, r); ok {
+			_, _ = w.Write(rp.archive)
 		}
-		_, _ = w.Write(g.archive)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -165,7 +211,10 @@ func (a *asker) Choose(_ context.Context, step, question string, answers []Answe
 	return a.choose, a.err
 }
 
-func (a *asker) Name(_ context.Context, step, question string) (string, error) {
+func (a *asker) Text(_ context.Context, step, question, suggested string) (string, error) {
+	if suggested != "" {
+		question += " [" + suggested + "]"
+	}
 	a.note(step + ": " + question)
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -417,22 +466,38 @@ func TestGitHubSignInHere(t *testing.T) {
 }
 
 // A config repository that's public is refused: the data layer is always
-// private. One that isn't there says how to name another.
+// private. One --config names that isn't there, or holds no kit.toml, says
+// how to name another. With none named and the person's kit-config not
+// there, the boot asks which, failing as its asker does without a
+// terminal.
 func TestGitHubRefusesAPublicConfig(t *testing.T) {
+	noTerminal := errors.New("no terminal to ask at")
 	for _, tt := range []struct {
-		name   string
-		public bool
-		repo   string
-		want   string
+		name, repo, config string
+		public             bool
+		files              map[string]string
+		ask                *asker
+		want               string
+		asked              []string
 	}{
-		{"public", true, "someone/kit-config", "public on GitHub"},
-		{"missing", false, "someone/elsewhere", "--config owner/name"},
+		{name: "public", repo: "someone/kit-config", public: true, ask: &asker{}, want: "public on GitHub"},
+		{name: "missing, named", repo: "someone/elsewhere", config: "someone/nowhere", ask: &asker{},
+			want: "someone/nowhere isn't on GitHub, or this sign-in can't see it: name yours with --config owner/name"},
+		{name: "no kit.toml, named", repo: "someone/notes", config: "someone/notes", files: map[string]string{"README.md": "notes\n"}, ask: &asker{},
+			want: "someone/notes holds no kit.toml, so it's no config repository: name yours with --config owner/name"},
+		{name: "missing, no terminal", repo: "someone/elsewhere", ask: &asker{err: noTerminal}, want: noTerminal.Error(),
+			asked: []string{noConfig}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			gh := &gitHub{token: "gho_secret", public: tt.public, repo: tt.repo, archive: archive(t, map[string]string{config.File: kitToml})}
+			files := tt.files
+			if files == nil {
+				files = map[string]string{config.File: kitToml}
+			}
+			gh := &gitHub{token: "gho_secret", public: tt.public, repo: tt.repo, archive: archive(t, files)}
 			run := runnertest.New(t)
 			run.On("security", "find-generic-password", "-s", keychainItem, "-w").Prints("gho_secret")
-			b, _ := newBoot(t, run, gh.serve(t), &asker{})
+			b, _ := newBoot(t, run, gh.serve(t), tt.ask)
+			b.Repo = tt.config
 			step := b.gitHubStep()
 			_ = step.Check(context.Background())
 			if err := step.Apply(context.Background(), check.Result{}); err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -440,6 +505,143 @@ func TestGitHubRefusesAPublicConfig(t *testing.T) {
 			}
 			if _, err := os.Stat(b.archive()); err == nil {
 				t.Error("read the config repository anyway")
+			}
+			if !slices.Equal(tt.ask.asked, tt.asked) {
+				t.Errorf("asked %q; want %q", tt.ask.asked, tt.asked)
+			}
+		})
+	}
+}
+
+// The answers to which repository is kit-config, and to the terminal a new
+// one's Mac uses, as the boot's asker notes them.
+const (
+	create   = "Create kit-config (a new private repository on someone's account)"
+	join     = "Join one of yours (pick from your private repositories)"
+	another  = "Another name (create it under a name of your own)"
+	noConfig = "github: someone has no repository named kit-config " + create + ", " + join + ", " + another
+	which    = "github: which of your private repositories? "
+	pasted   = "Another (named as owner/name)"
+	terminal = "github: kit-config starts on this Mac: which terminal will it use? Ghostty (installed, then kit carries on there), Terminal (macOS's own: kit carries on here)"
+)
+
+// refused is the question asked again, saying why the repository named
+// last was refused.
+func refused(why string) string {
+	return "github: " + why + " " + create + ", " + join + ", " + another
+}
+
+// With no kit-config of theirs and none named, the person chooses: one of
+// their private repositories, listed, never looked inside; one named as
+// owner/name; or one created, kit-config suggested. One that's empty, or
+// to be created, starts kit-config on this Mac, the terminal it uses
+// asked, nothing read. One refused, not there, public, holding files when
+// it was to be created, or no kit.toml, isn't read, and the question's
+// asked again, saying why.
+func TestGitHubWithNoKitConfig(t *testing.T) {
+	notes := repo{archive: archive(t, map[string]string{"README.md": "notes\n"})}
+	configs := repo{archive: archive(t, map[string]string{config.File: kitToml, "laptop/declarations": "", "studio/declarations": ""})}
+	for _, tt := range []struct {
+		name    string
+		others  map[string]repo
+		ask     *asker
+		asked   []string
+		repo    string
+		fresh   *fresh
+		summary string
+	}{
+		{name: "created", ask: &asker{}, asked: []string{noConfig, terminal},
+			repo: "someone/kit-config", fresh: &fresh{Create: true, Terminal: "ghostty"}, summary: "someone · someone/kit-config, new, private"},
+		{name: "created, named", ask: &asker{chooses: []int{2, 1}, name: "my-config"}, asked: []string{noConfig, "github: its name, a new private repository on someone's account [kit-config]", terminal},
+			repo: "someone/my-config", fresh: &fresh{Create: true}, summary: "someone · someone/my-config, new, private"},
+		{name: "picked", others: map[string]repo{"someone/configs": configs, "someone/notes": notes}, ask: &asker{chooses: []int{1, 0}},
+			asked: []string{noConfig, which + "someone/configs, someone/notes, " + pasted},
+			repo:  "someone/configs", summary: "someone · kit-config has laptop and studio"},
+		{name: "picked, empty", others: map[string]repo{"someone/empty": {}}, ask: &asker{chooses: []int{1, 0, 0}},
+			asked: []string{noConfig, which + "someone/empty, " + pasted, terminal},
+			repo:  "someone/empty", fresh: &fresh{Terminal: "ghostty"}, summary: "someone · someone/empty, private, empty"},
+		{name: "picked, no kit.toml", others: map[string]repo{"someone/notes": notes}, ask: &asker{chooses: []int{1, 0, 0, 1}},
+			asked: []string{noConfig, which + "someone/notes, " + pasted, refused("someone/notes holds no kit.toml, so it's no config repository"), terminal},
+			repo:  "someone/kit-config", fresh: &fresh{Create: true}, summary: "someone · someone/kit-config, new, private"},
+		{name: "pasted, public", others: map[string]repo{"other/public": {public: true, archive: configs.archive}}, ask: &asker{chooses: []int{1, 0, 0, 0}, name: "other/public"},
+			asked: []string{noConfig, which + pasted, "github: its name, as owner/name", refused("other/public is public on GitHub, and a config repository is always private"), terminal},
+			repo:  "someone/kit-config", fresh: &fresh{Create: true, Terminal: "ghostty"}, summary: "someone · someone/kit-config, new, private"},
+		{name: "pasted, not there", ask: &asker{chooses: []int{1, 0, 0, 0}, names: []string{"other/nowhere"}},
+			asked: []string{noConfig, which + pasted, "github: its name, as owner/name", refused("other/nowhere isn't on GitHub, or this sign-in can't see it"), terminal},
+			repo:  "someone/kit-config", fresh: &fresh{Create: true, Terminal: "ghostty"}, summary: "someone · someone/kit-config, new, private"},
+		{name: "created, there with files", others: map[string]repo{"someone/notes": notes}, ask: &asker{chooses: []int{2, 0, 0}, names: []string{"notes"}},
+			asked: []string{noConfig, "github: its name, a new private repository on someone's account [kit-config]", refused("someone/notes is on GitHub already, holding files"), terminal},
+			repo:  "someone/kit-config", fresh: &fresh{Create: true, Terminal: "ghostty"}, summary: "someone · someone/kit-config, new, private"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gh := &gitHub{token: "gho_secret", repo: "someone/elsewhere", others: tt.others}
+			run := runnertest.New(t)
+			run.On("security", "find-generic-password", "-s", keychainItem, "-w").Prints("gho_secret")
+			b, _ := newBoot(t, run, gh.serve(t), tt.ask)
+			step := b.gitHubStep()
+			_ = step.Check(context.Background())
+			if err := step.Apply(context.Background(), check.Result{}); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			if !slices.Equal(tt.ask.asked, tt.asked) {
+				t.Errorf("asked\n%s\nwant\n%s", strings.Join(tt.ask.asked, "\n"), strings.Join(tt.asked, "\n"))
+			}
+			st, _ := kitstate.Load[state](b.State, stateName)
+			if st.Repo != tt.repo || !reflect.DeepEqual(st.Fresh, tt.fresh) {
+				t.Errorf("recorded %s, fresh %+v; want %s, fresh %+v", st.Repo, st.Fresh, tt.repo, tt.fresh)
+			}
+			if _, err := os.Stat(b.archive()); (err == nil) != (tt.fresh == nil) {
+				t.Errorf("the boot's copy there: %v; want it only for a config read", err == nil)
+			}
+			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != tt.summary {
+				t.Errorf("check after = %+v; want %q", res, tt.summary)
+			}
+		})
+	}
+}
+
+// A boot started again, kit-config chosen to start on this Mac, asks
+// nothing again: the repository not created yet, or created and still
+// empty, starts here as before; once it holds kit-config's first files,
+// pushed by the boot before, it's read.
+func TestGitHubWithNoKitConfigStartedAgain(t *testing.T) {
+	gh := &gitHub{token: "gho_secret", repo: "someone/elsewhere", others: map[string]repo{}}
+	api := gh.serve(t)
+	run := runnertest.New(t)
+	run.On("security", "find-generic-password", "-s", keychainItem, "-w").Prints("gho_secret")
+	first, _ := newBoot(t, run, api, &asker{})
+	step := first.gitHubStep()
+	_ = step.Check(context.Background())
+	if err := step.Apply(context.Background(), check.Result{}); err != nil {
+		t.Fatalf("the first boot's apply = %v", err)
+	}
+	for _, tt := range []struct {
+		name    string
+		there   *repo
+		summary string
+	}{
+		{"not created yet", nil, "someone · someone/kit-config, new, private"},
+		{"created, empty", &repo{}, "someone · someone/kit-config, new, private"},
+		{"pushed", &repo{archive: archive(t, map[string]string{config.File: kitToml})}, "someone · kit-config has laptop and studio"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.there != nil {
+				gh.mu.Lock()
+				gh.others["someone/kit-config"] = *tt.there
+				gh.mu.Unlock()
+			}
+			ask := &asker{err: errors.New("asked again")}
+			again, _ := newBoot(t, run, api, ask)
+			again.State, again.Data, again.Config = first.State, first.Data, first.Config
+			step := again.gitHubStep()
+			if res := step.Check(context.Background()); res.State != check.Attention {
+				t.Fatalf("before = %+v; want kit-config chosen again", res)
+			}
+			if err := step.Apply(context.Background(), check.Result{}); err != nil || len(ask.asked) > 0 {
+				t.Fatalf("apply = %v, asking %q; want nothing asked", err, ask.asked)
+			}
+			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != tt.summary {
+				t.Errorf("after = %+v; want %q", res, tt.summary)
 			}
 		})
 	}

@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
@@ -212,11 +210,7 @@ func (s *Setup) ready(ctx context.Context, token, repo string, create bool) erro
 	s.doing(ConfigStep, "reading "+repo)
 	private, err := s.GitHub.Private(ctx, token, repo)
 	if errors.Is(err, boot.ErrNotFound) && create {
-		s.doing(ConfigStep, "creating "+repo)
-		if _, err := s.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "create", repo, "--private"}, Timeout: time.Minute}); err != nil {
-			return fmt.Errorf("create %s: %w", repo, err)
-		}
-		return nil
+		return s.account().CreateRepo(ctx, ConfigStep, repo)
 	}
 	return refusal(repo, private, err)
 }
@@ -269,41 +263,23 @@ func (s *Setup) lookAtClone(ctx context.Context, rec record) (cut bool, err erro
 	return false, errors.Join(refused, s.update(func(r *record) { *r = record{} }))
 }
 
-// setting is one of git's settings in the config repository's clone: how
-// it's read, and set, and what it's set to.
-type setting struct {
-	get, set []string
-	want     string
-}
-
-// gitConfig is the setting git config keeps called key, set to want.
-func gitConfig(key, want string) setting {
-	return setting{get: []string{"config", "--get", key}, set: []string{"config", key, want}, want: want}
-}
-
 // settings are git's settings rec's clone takes: git signing in through
 // GitHub's CLI, for the config repository alone, as the boot clones it;
-// and, kit-config starting on this Mac, the clone on main, tracking main
-// alone, as kit-config's clone does, though the remote has no branch till
-// the first push.
-func settings(rec record) []setting {
-	out := []setting{gitConfig("credential.https://github.com.helper", boot.GitCredentials)}
+// and, kit-config starting on this Mac, those it takes to start there
+// (boot.OnMain).
+func settings(rec record) []boot.Setting {
+	out := []boot.Setting{boot.GitSetting("credential.https://github.com.helper", boot.GitCredentials)}
 	if !rec.Empty {
 		return out
 	}
-	return append(out,
-		setting{get: []string{"symbolic-ref", "HEAD"}, set: []string{"symbolic-ref", "HEAD", "refs/heads/main"}, want: "refs/heads/main"},
-		gitConfig("remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main"),
-		gitConfig("branch.main.remote", "origin"),
-		gitConfig("branch.main.merge", "refs/heads/main"),
-	)
+	return append(out, boot.OnMain...)
 }
 
 // unset are the settings rec's clone takes that it hasn't.
-func (s *Setup) unset(ctx context.Context, rec record) []setting {
-	var unset []setting
+func (s *Setup) unset(ctx context.Context, rec record) []boot.Setting {
+	var unset []boot.Setting
 	for _, st := range settings(rec) {
-		if res, err := s.git(ctx, st.get...); err != nil || strings.TrimSpace(string(res.Stdout)) != st.want {
+		if res, err := s.git(ctx, st.Get...); err != nil || strings.TrimSpace(string(res.Stdout)) != st.Want {
 			unset = append(unset, st)
 		}
 	}
@@ -311,9 +287,9 @@ func (s *Setup) unset(ctx context.Context, rec record) []setting {
 }
 
 // set sets each of settings in the clone.
-func (s *Setup) set(ctx context.Context, settings []setting) error {
+func (s *Setup) set(ctx context.Context, settings []boot.Setting) error {
 	for _, st := range settings {
-		if _, err := s.git(ctx, st.set...); err != nil {
+		if _, err := s.git(ctx, st.Set...); err != nil {
 			return fmt.Errorf("set git in kit-config's clone: %w", err)
 		}
 	}
@@ -325,32 +301,6 @@ func (s *Setup) git(ctx context.Context, args ...string) (runner.Result, error) 
 	return s.Run.Run(ctx, runner.Command{Name: "git", Args: append([]string{"-C", s.Dirs.Config}, args...)})
 }
 
-// The names a repository can have on GitHub: one of the person's, and one
-// as owner/name.
-var (
-	repoName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	fullName = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
-)
-
-// created is name, a new repository's on login's account, as owner/name.
-func created(login, name string) (string, bool, error) {
-	if !repoName.MatchString(name) || name == "." || name == ".." {
-		return "", false, fmt.Errorf("%q can't name a repository on GitHub: letters, digits, dots, dashes and underscores, as in kit-config", name)
-	}
-	return login + "/" + name, true, nil
-}
-
-// joined is repo, one to join, as owner/name.
-func joined(repo string) (string, bool, error) {
-	if !fullName.MatchString(repo) {
-		return "", false, fmt.Errorf("%q isn't a repository on GitHub, as owner/name", repo)
-	}
-	return repo, false, nil
-}
-
-// suggested is the name setup suggests for a new config repository.
-const suggested = "kit-config"
-
 // chooseRepo is the config repository, as owner/name, and whether it's to
 // be created: as a flag says, else asked. The person's kit-config is
 // offered when they have one; else a new one, one of their private
@@ -361,64 +311,16 @@ func (s *Setup) chooseRepo(ctx context.Context, token, login string) (string, bo
 	case g.Create != "" && g.Join != "":
 		return "", false, errors.New("--create and --join both name kit-config: give one")
 	case g.Create != "":
-		return created(login, g.Create)
+		return boot.NewRepo(login, g.Create)
 	case g.Join != "":
-		return joined(g.Join)
+		return boot.TheirRepo(g.Join)
 	case s.Ask == nil:
-		return "", false, s.unanswered("--create <name> makes a new config repository (" + suggested + ", unless you've one), or --join owner/name joins one of yours")
+		return "", false, s.unanswered("--create <name> makes a new config repository (" + boot.Suggested + ", unless you've one), or --join owner/name joins one of yours")
 	}
-	mine := login + "/" + suggested
+	mine := login + "/" + boot.Suggested
 	_, err := s.GitHub.Private(ctx, token, mine)
-	has := err == nil
 	if err != nil && !errors.Is(err, boot.ErrNotFound) {
 		return "", false, fmt.Errorf("find %s: %w", mine, err)
 	}
-	ownNew := boot.Answer{Label: "Create " + suggested, Does: "a new private repository on " + login + "'s account"}
-	pick := boot.Answer{Label: "Join one of yours", Does: "pick from your private repositories"}
-	other := boot.Answer{Label: "Another name", Does: "create it under a name of your own"}
-	question, answers := login+" has no repository named "+suggested, []boot.Answer{ownNew, pick, other}
-	if has {
-		question = login + " has " + suggested
-		answers = []boot.Answer{{Label: "Join " + mine, Does: "your " + suggested}, {Label: "Join another of yours", Does: pick.Does}, {Label: "Create a new one", Does: other.Does}}
-	}
-	i, err := s.Ask.Choose(ctx, ConfigStep, question, answers)
-	switch {
-	case err != nil:
-		return "", false, err
-	case i == 0:
-		return mine, !has, nil
-	case i == 1:
-		return s.pickRepo(ctx, token)
-	}
-	name, err := s.Ask.Text(ctx, ConfigStep, "its name, a new private repository on "+login+"'s account", suggested)
-	if err != nil {
-		return "", false, err
-	}
-	return created(login, name)
-}
-
-// pickRepo is one of the person's private repositories, picked from them,
-// or another named, to join.
-func (s *Setup) pickRepo(ctx context.Context, token string) (string, bool, error) {
-	repos, err := s.GitHub.Repos(ctx, token)
-	if err != nil {
-		return "", false, fmt.Errorf("list your private repositories: %w", err)
-	}
-	answers := make([]boot.Answer, 0, len(repos)+1)
-	for _, r := range repos {
-		answers = append(answers, boot.Answer{Label: r})
-	}
-	answers = append(answers, boot.Answer{Label: "Another", Does: "named as owner/name"})
-	i, err := s.Ask.Choose(ctx, ConfigStep, "which of your private repositories?", answers)
-	switch {
-	case err != nil:
-		return "", false, err
-	case i < len(repos):
-		return repos[i], false, nil
-	}
-	name, err := s.Ask.Text(ctx, ConfigStep, "its name, as owner/name", "")
-	if err != nil {
-		return "", false, err
-	}
-	return joined(name)
+	return s.account().ChooseRepo(ctx, s.Ask, ConfigStep, token, login, err == nil, "")
 }

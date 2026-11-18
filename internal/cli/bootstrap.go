@@ -49,7 +49,14 @@ Homebrew.
 With a terminal named, you give it Full Disk Access, then kit opens it and
 carries on there, from Homebrew's kit: the whole of kit apply, then a fresh
 shell. Run from a build of kit's own (KIT_FROM, to the install script), it
-installs no kit, and carries on with that build.`,
+installs no kit, and carries on with that build.
+
+kit-config is your repository named kit-config, unless --config names
+another. With neither there, it asks: one of your private repositories,
+one named as owner/name, or a new one, created private. A new or empty one
+starts with this Mac alone, and the terminal you choose, committed and
+pushed. Without a terminal it stops, naming --config: a new one is made at
+a terminal, or with kit setup.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			carryingOn := handedOver && a.Getenv(carryOn) != ""
@@ -390,8 +397,9 @@ func choices(answers []boot.Answer) []look.Choice {
 	return cs
 }
 
-func (a bootAsker) Name(ctx context.Context, step, question string) (string, error) {
-	return a.face.Name(ctx, step, question)
+func (a bootAsker) Text(ctx context.Context, step, question, suggested string) (string, error) {
+	text, err := a.face.Text(ctx, step, question, suggested)
+	return strings.TrimSpace(text), err
 }
 
 func (a bootAsker) Pick(ctx context.Context, step string, keys []boot.Key) (string, error) {
@@ -423,12 +431,21 @@ var errNoTerminal = errors.New("no terminal to ask at")
 // (boot.FirstKey).
 type plainAsker struct{ boot.FirstKey }
 
-func (*plainAsker) Choose(_ context.Context, step, _ string, _ []boot.Answer) (int, error) {
-	return 0, fmt.Errorf("%w: give this Mac's name with --mac (the %s step)", errNoTerminal, step)
+func (*plainAsker) Choose(_ context.Context, step, question string, _ []boot.Answer) (int, error) {
+	return 0, unanswered(step, question)
 }
 
-func (*plainAsker) Name(_ context.Context, step, _ string) (string, error) {
-	return "", fmt.Errorf("%w: give this Mac's name with --mac (the %s step)", errNoTerminal, step)
+func (*plainAsker) Text(_ context.Context, step, question, _ string) (string, error) {
+	return "", unanswered(step, question)
+}
+
+// unanswered is step's question, asked without a terminal: an error naming
+// the flag that answers it.
+func unanswered(step, question string) error {
+	if step == boot.GitHubStep {
+		return fmt.Errorf("%w: %s: name your config repository with --config owner/name; a new one is made at a terminal, or with kit setup (the %s step)", errNoTerminal, question, step)
+	}
+	return fmt.Errorf("%w: give this Mac's name with --mac (the %s step)", errNoTerminal, step)
 }
 
 // Secret fails: a password is typed at a terminal.

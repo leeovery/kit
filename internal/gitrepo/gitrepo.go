@@ -28,6 +28,9 @@ type Repo struct {
 	// there: a clone of that branch alone, whose fetch git fails without it,
 	// pushes it anew. Never kit-config's: its branch gone is a failure.
 	BranchMayBeMissing bool
+	// Env is added to the environment git runs in, as an author for a Mac
+	// whose git has none yet.
+	Env []string
 }
 
 // sleep waits d, as Sleep does.
@@ -46,7 +49,7 @@ func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {
 // command is git's args in the repository, in the C locale, as kit reads
 // what git says, and git translates its words, fatal: among them.
 func (r Repo) command(args ...string) runner.Command {
-	return runner.Command{Name: "git", Args: slices.Concat([]string{"-C", r.Dir}, args), Env: []string{"LC_ALL=C"}}
+	return runner.Command{Name: "git", Args: slices.Concat([]string{"-C", r.Dir}, args), Env: append([]string{"LC_ALL=C"}, r.Env...)}
 }
 
 // gitOn runs git's args on paths in the repository, each taken as it's

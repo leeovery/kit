@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -68,12 +69,16 @@ func (b *Boot) Order() []engine.Step {
 	return order
 }
 
-// terminal is the terminal kit.toml names, as kit knows it.
+// terminal is the terminal kit.toml names, as kit knows it: for kit-config
+// starting on this Mac, before it's cloned, the one chosen for it.
 func (b *Boot) terminal(cfg *config.Config) (apps.Terminal, bool) {
-	if cfg == nil {
-		return apps.Terminal{}, false
+	name := ""
+	if cfg != nil {
+		name = cfg.Terminal
+	} else if st, _ := kitstate.Load[state](b.State, stateName); st.Fresh != nil {
+		name = st.Fresh.Terminal
 	}
-	t, ok := apps.Terminals[cfg.Terminal]
+	t, ok := apps.Terminals[name]
 	return t, ok
 }
 
@@ -426,13 +431,21 @@ func (b *Boot) version(bundle string) (string, bool) {
 // the sign-in, then links its files into the home folder, so the terminal
 // opens set up: done when it's cloned and its files are linked. A new Mac
 // is added to kit.toml, uncommitted: git has no name to commit with till
-// kit-config's settings are applied.
+// kit-config's settings are applied. kit-config starting on this Mac has
+// its repository created, if it's to be, and its first files pushed
+// (pushFirst), before it's done.
 func (b *Boot) configStep() engine.Step {
 	return engine.Step{
 		Name: ConfigStep, Title: "kit-config",
 		Check: func(ctx context.Context) check.Result {
-			if !b.cloned() {
+			st, err := kitstate.Load[state](b.State, stateName)
+			switch {
+			case err != nil:
+				return check.Result{State: check.Failed, Reason: err.Error()}
+			case !b.cloned():
 				return check.Result{State: check.Attention, Summary: "not cloned yet"}
+			case st.Fresh != nil:
+				return check.Result{State: check.Attention, Summary: "cloned · first files not pushed yet"}
 			}
 			files, err := b.files()
 			if err != nil {
@@ -442,7 +455,11 @@ func (b *Boot) configStep() engine.Step {
 			if found.State == check.Failed || found.State == check.Deferred {
 				return found
 			}
-			says := []string{"cloned", fmt.Sprintf("%d %s", found.Counts["linked"], look.Plural(found.Counts["linked"], "file linked", "files linked"))}
+			says := []string{"cloned"}
+			if st.Started {
+				says = append(says, "first files pushed")
+			}
+			says = append(says, fmt.Sprintf("%d %s", found.Counts["linked"], look.Plural(found.Counts["linked"], "file linked", "files linked")))
 			for _, it := range found.Items {
 				if it.Action != "" {
 					return check.Result{State: check.Attention, Summary: "cloned · files to link", Items: found.Items}
@@ -451,7 +468,7 @@ func (b *Boot) configStep() engine.Step {
 			if n := found.Counts[linked.Diverged]; n > 0 {
 				says = append(says, fmt.Sprintf("%d %s", n, look.Plural(n, "differs: kit reconcile settles it", "differ: kit reconcile settles them")))
 			}
-			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != "" {
+			if st.NewMac != "" {
 				if cfg, err := config.Load(b.Config, b.Kinds); err == nil && cfg.Knows(st.NewMac) {
 					says = append(says, st.NewMac+" added to kit.toml")
 				}
@@ -463,6 +480,9 @@ func (b *Boot) configStep() engine.Step {
 				if err := b.clone(ctx); err != nil {
 					return err
 				}
+			}
+			if err := b.pushFirst(ctx); err != nil {
+				return err
 			}
 			if err := b.addNewMac(); err != nil {
 				return err
@@ -497,12 +517,18 @@ func (b *Boot) clone(ctx context.Context) error {
 	if token == "" {
 		return errors.New("not signed in to GitHub")
 	}
-	repo := b.repo(login)
-	if st, _ := kitstate.Load[state](b.State, stateName); st.Repo != "" {
-		repo = st.Repo
+	st, err := kitstate.Load[state](b.State, stateName)
+	if err != nil {
+		return err
 	}
+	repo := cmp.Or(st.Repo, b.repo(login))
 	if err := b.account().HandOver(ctx, ConfigStep, token); err != nil {
 		return err
+	}
+	if st.Fresh != nil && st.Fresh.Create {
+		if err := b.create(ctx, token, repo); err != nil {
+			return err
+		}
 	}
 	return b.account().Clone(ctx, ConfigStep, repo, b.Config)
 }
