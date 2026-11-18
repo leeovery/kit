@@ -652,7 +652,9 @@ the `prefs` feature on, started afresh from this Mac's settings as `kit prefs st
 does; asked unless this Mac's own record says capture's on, whatever kit-config declares, as a
 Mac joining as a copy of one saving them has saved nothing), the shell's and tools' files kept (`--link`, as `kit file
 add` moves and links them), and, joining, what kit-config declares that this Mac hasn't:
-installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`). Then,
+installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`); a kind
+whose check couldn't tell is asked about too, saying so and why, never taken for nothing to
+install; kit-config started on this Mac has nothing to install, its step saying so. Then,
 once every URL git pushes the clone to, after any `pushurl` or `pushInsteadOf`, is proven
 private (`gitrepo.ProvePrivate`, as the prefs store proves its), one edit and one commit, `snapshot.Write`
 and the answers, kit.toml and the Mac's folder, pushed; setup's done only once the push lands.
@@ -668,21 +670,26 @@ and that secrets go in a store with `kit secret add`; then `kit apply` runs in t
 process, with its own screen at a terminal. Without a terminal it asks nothing: each question
 its flag doesn't answer fails its step, naming the flag and what it chooses from, the others
 asked on, and kit exits 2. `--json` is one document: setup's steps, as kit status's document
-has a run's, and, when it ran, apply's under `apply`. At a terminal it has a screen of its own,
+has a run's, and, when it ran, apply's under `apply`. At a terminal, its keys read there too, it
+has a screen of its own,
 the boot's counterpart in kit's look (kit-look's round 13), drawn in place and left in the
 scrollback (`render.SetupFace`): the wordmark, with setup, the Mac (its model's name till it's
 named) and when; SETUP, a row a step, `n of 3` while one's asking; once that's done, DECLARED,
 a row a part of the snapshot as `snapshot.Find` tells of it (`Mac.Looks`, emitted as
-`event.Finding`: waiting, being read, its count), the folders' sizing in Your data's row, then a
-row a question; each question asked in its row (a choice, a visible typed field, a checklist of
-boxes for the folders and the files); the commit in kit-config's row, `pushed`, and DECLARED's
+`event.Finding`: waiting, being read, its count, the features and backup tools by name), the
+folders' sizing in Your data's row, then a row a question, To install's only once it asks or
+has something to say; each question asked in its row (a choice, a visible typed field, a
+checklist of boxes for the folders and the files, scrolling round its cursor), what more it says
+on a muted line under it; the commit in kit-config's row, `pushed` kept however narrow, and DECLARED's
 note its total; then the apps installed by hand, a row each, where secrets go, and `kit apply
 carries on now` before apply's own screen. Signing in, the way chosen takes the whole window, the
-QR code or the browser's page, and the code, as the boot's does; esc gives it back, the code
-under GitHub's row. Esc, or q but in a typed field, stops it. Bare `kit` at a terminal on a
-Mac with nothing set up (no kit.toml in the config folder, no setup stopped part-way) offers
-it: enter becomes `kit setup`, any other key leaves; and every command that needs a config and
-finds none names `kit setup` first.
+QR code or the browser's page, and the code, as the boot's does, the head, then the blank lines,
+then the QR code giving way in a short window so the code and its expiry stay whole; esc gives
+it back, the code under GitHub's row. Esc, or q but in a typed field, stops it, what it cut
+short saying it stopped. Bare `kit` at a terminal offers it while setup hasn't finished: a
+setup stopped part-way, enter carries it on; the config folder absent or empty, as setup starts
+on, enter runs `kit setup`; any other key leaves. Every command that needs a config and finds
+none names `kit setup` first.
 
 Every Mac's SSH host key is recorded in its table, `host_key`, its type then the key (a host key
 is public), and its local hostname, `local_hostname`, as macOS's LocalHostName has it (`scutil

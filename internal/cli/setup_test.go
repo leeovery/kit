@@ -192,7 +192,7 @@ func TestSetupWithoutATerminal(t *testing.T) {
 		"restore failed no terminal to ask at: --restore <path> for each folder a new Mac brings back from your backups (~/Code ",
 		"prefs failed no terminal to ask at: --prefs saves apps' settings every night, so a new Mac gets them back (suggested), or --no-prefs",
 		"files ok none to link",
-		"to-install ok nothing more",
+		"to-install ok nothing: kit-config is new",
 		"commit deferred needs Your data, Apps' settings",
 	} {
 		if !slices.ContainsFunc(stood, func(s string) bool { return strings.HasPrefix(s, want) }) {

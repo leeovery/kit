@@ -95,16 +95,29 @@ func TestBareKitOffersSetup(t *testing.T) {
 		t.Errorf("without a terminal, kit printed %q, exit %d, offered %q; want its help", out, code, w.offered)
 	}
 
-	w.terminal = true
+	w.terminal, w.takeOffer = true, true
+	w.write(t, filepath.Join(".config", "kit", "kit.toml"), "format = 1\n")
 	w.write(t, filepath.Join(".local", "state", "kit", "setup.json"), `{"repo": "someone/kit-config"}`)
-	picked := false
-	w.pick = func([]ask.Line) (string, error) {
-		picked = true
-		return "", ask.ErrCancelled
+	if w.run(t); len(w.became) != 1 || !slices.Equal(w.became[0], []string{"setup"}) || len(w.offered) != 1 || !strings.HasSuffix(w.offered[0], "▲ This Mac  setup stopped part-way") {
+		t.Errorf("kit setup stopped part-way: offered %q, became %q; want it offered to carry on", w.offered, w.became)
 	}
-	w.run(t)
-	if !picked || w.offered != nil {
-		t.Errorf("kit setup stopped part-way: offered %q, menu shown %v; want the menu", w.offered, picked)
+}
+
+// Bare kit on a Mac whose config folder holds something kit setup would
+// refuse to start on, a config or anything else, is kit's menu.
+func TestBareKitOffersSetupOnlyOnWhatItStartsOn(t *testing.T) {
+	for _, file := range []string{"kit.toml", "notes.txt"} {
+		w := newWorld(t, map[string]string{})
+		w.terminal = true
+		w.write(t, filepath.Join(".config", "kit", file), "something\n")
+		picked := false
+		w.pick = func([]ask.Line) (string, error) {
+			picked = true
+			return "", ask.ErrCancelled
+		}
+		if w.run(t); !picked || w.offered != nil {
+			t.Errorf("the config folder holding %s: offered %q, menu shown %v; want the menu", file, w.offered, picked)
+		}
 	}
 }
 

@@ -48,14 +48,16 @@ type Asker interface {
 	Wait(ctx context.Context, step, says, todo string, keys []Key) (string, error)
 }
 
-// Answer is one answer to a question: its label, and what it means.
+// Answer is one answer to a question: its label, what it means, and the
+// command it leads to, when it leads to one.
 type Answer struct {
-	Label, Does string
+	Label, Does, Cmd string
 }
 
-// Key is a key a step waits for, and what pressing it does.
+// Key is a key a step waits for, and what pressing it does; About, what
+// that is, for a face that offers the keys as choices.
 type Key struct {
-	Key, Does string
+	Key, Does, About string
 }
 
 // The areas the boot's steps are in: signing in, which fetches the config
@@ -70,7 +72,10 @@ const (
 
 // signInKeys are the ways to sign in to GitHub: with the phone, a QR code
 // to scan; or here, in the browser.
-var signInKeys = []Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in your browser"}}
+var signInKeys = []Key{
+	{Key: "enter", Does: "with your phone", About: "scan a QR code with its camera"},
+	{Key: "s", Does: "here, in your browser", About: "kit opens it"},
+}
 
 // Boot is a new Mac's boot, and what it runs with.
 type Boot struct {

@@ -296,7 +296,8 @@ type DeviceCode struct {
 // Finding is a part of what a step looks at, as it looks, as kit setup's
 // snapshot looks at the Mac a kind at a time: waiting its turn, it says
 // nothing; being looked at, what's being done (Doing); once Found, how many
-// things it found (Count), or why it couldn't look (Err).
+// things it found (Count), by name when they have names of their own
+// (Names), or why it couldn't look (Err).
 type Finding struct {
 	Time  time.Time
 	Step  string
@@ -304,6 +305,7 @@ type Finding struct {
 	Doing string
 	Found bool
 	Count int
+	Names []string
 	Err   string
 }
 

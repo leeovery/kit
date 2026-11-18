@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
@@ -30,6 +31,20 @@ func setupFace(stop func(), events ...event.Event) *render.SetupFace {
 	return f
 }
 
+// setupTill is setup's run up to the start of step, not taking it in.
+func setupTill(step string) []event.Event {
+	done := rendertest.SetupDone(rendertest.At)
+	return done[:slices.IndexFunc(done, func(e event.Event) bool {
+		s, ok := e.(event.StepStarted)
+		return ok && s.Step == step
+	})]
+}
+
+// started is setup's run up to step, started.
+func started(step string) []event.Event {
+	return append(setupTill(step), event.StepStarted{Time: rendertest.At, Step: step})
+}
+
 // asking is f asking, in the background, what ask asks: once f's view
 // shows text, f, and what it was answered once it's ended.
 func asking(t *testing.T, f *render.SetupFace, text string, ask func() error) <-chan error {
@@ -37,7 +52,7 @@ func asking(t *testing.T, f *render.SetupFace, text string, ask func() error) <-
 	answered := make(chan error, 1)
 	go func() { answered <- ask() }()
 	for range 500 {
-		if strings.Contains(ansi.Strip(strings.Join(f.View(80, 60), "\n")), text) {
+		if strings.Contains(viewed(f, 80, 60), text) {
 			return answered
 		}
 		time.Sleep(time.Millisecond)
@@ -46,16 +61,33 @@ func asking(t *testing.T, f *render.SetupFace, text string, ask func() error) <-
 	return nil
 }
 
+// viewed is f's view, width wide and height high, plain.
+func viewed(f *render.SetupFace, width, height int) string {
+	return ansi.Strip(strings.Join(f.View(width, height), "\n"))
+}
+
+// rowEnds are the last words of each row in lines, a row a line its mark
+// starts.
+func rowEnds(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		words := strings.Fields(ansi.Strip(l))
+		if len(words) > 1 && slices.Contains([]string{"●", "▲", "✗", "–", "○"}, words[0]) {
+			out = append(out, words[len(words)-1])
+		}
+	}
+	return out
+}
+
 // Setup's screen fits a phone's 52 columns, the maintainer's panes of 73,
 // 108 and 138, and 80: never wider than the terminal, nor than kit's look
-// at the widest, nothing cut but what's never decided on; the question
+// at the widest; every row's outcome kept, as its last word; the question
 // asked, whole.
 func TestSetupScreenFitsEveryWidth(t *testing.T) {
 	done := rendertest.SetupDone(rendertest.At)
-	commit := slices.IndexFunc(done, func(e event.Event) bool {
-		s, ok := e.(event.StepStarted)
-		return ok && s.Step == setup.DataStep
-	})
+	whole := setupFace(nil, done...)
+	whole.Finish("kit apply", "carries on now")
+	ends := rowEnds(whole.Leaves(look.Width))
 	for _, width := range []int{52, 73, 80, 108, 138} {
 		f := setupFace(nil, done...)
 		f.Finish("kit apply", "carries on now")
@@ -73,8 +105,11 @@ func TestSetupScreenFitsEveryWidth(t *testing.T) {
 			!strings.Contains(strings.Join(strings.Fields(text), " "), "→ kit keeps secrets in a store, never in kit-config: kit secret add") {
 			t.Errorf("at %d columns, left\n%s\nwant what to do whole", width, text)
 		}
+		if got := rowEnds(left); !slices.Equal(got, ends) {
+			t.Errorf("at %d columns, the rows end %q; want %q, as at %d", width, got, ends, look.Width)
+		}
 
-		asked := setupFace(func() {}, done[:commit]...)
+		asked := setupFace(func() {}, setupTill(setup.DataStep)...)
 		ticks := []look.Tick{{Name: "~/Library/Mobile Documents/com~apple~CloudDocs/Projects", More: "over 12.4 GB", Ticked: true}}
 		answered := asking(t, asked, "bring back", func() error {
 			_, err := asked.Tick(context.Background(), setup.DataStep, "which folders should a new Mac bring back from your backups?", ticks)
@@ -96,17 +131,12 @@ func TestSetupScreenFitsEveryWidth(t *testing.T) {
 // waiting, then the wordmark, so the question asked stays whole, its keys
 // under it.
 func TestSetupScreenGivesWay(t *testing.T) {
-	done := rendertest.SetupDone(rendertest.At)
-	at := slices.IndexFunc(done, func(e event.Event) bool {
-		s, ok := e.(event.StepStarted)
-		return ok && s.Step == setup.PrefsStep
-	})
-	f := setupFace(func() {}, done[:at]...)
+	f := setupFace(func() {}, setupTill(setup.PrefsStep)...)
 	answered := asking(t, f, "save them", func() error {
 		_, err := f.Choose(context.Background(), setup.PrefsStep, "save them every night?", []look.Choice{{Label: "Save them every night"}, {Label: "Not now"}})
 		return err
 	})
-	view := ansi.Strip(strings.Join(f.View(80, 12), "\n"))
+	view := viewed(f, 80, 12)
 	if lines := strings.Count(view, "\n") + 1; lines > 12 || !strings.Contains(view, "▲ Apps' settings  save them every night?\n  │ ❯ Save them every night \n  │   Not now") || !strings.HasSuffix(view, "esc stop") || strings.Contains(view, "Homebrew formulae") {
 		t.Errorf("12 lines high, drew\n%s\nwant the question whole, its keys, rows done gone first", view)
 	}
@@ -117,16 +147,36 @@ func TestSetupScreenGivesWay(t *testing.T) {
 	}
 }
 
+// A checklist longer than the screen shows the things around the cursor,
+// the question's row above them, its keys under them.
+func TestSetupScreenChecklistScrolls(t *testing.T) {
+	f := setupFace(func() {}, setupTill(setup.FilesStep)...)
+	var ticks []look.Tick
+	for name := range strings.FieldsSeq("a b c d e f g h i j k l m n o p q r s t u v w x y") {
+		ticks = append(ticks, look.Tick{Name: "~/." + name + "rc", Ticked: true})
+	}
+	answered := asking(t, f, "keep", func() error {
+		_, err := f.Tick(context.Background(), setup.FilesStep, "which should kit-config keep?", ticks)
+		return err
+	})
+	for range 20 {
+		f.Key(ask.Key{Name: "down"})
+	}
+	view := viewed(f, 80, 24)
+	if lines := strings.Count(view, "\n") + 1; lines > 24 || !strings.Contains(view, "▲ Linked files  which should kit-config keep?") || !strings.Contains(view, "❯ ■  ~/.urc") || strings.Contains(view, "~/.arc") || !strings.HasSuffix(view, "esc stop") {
+		t.Errorf("25 things, the cursor on the 21st, 24 lines high, drew\n%s\nwant the row, the things around the cursor, the keys", view)
+	}
+	f.Key(ask.Key{Name: "enter"})
+	if err := <-answered; err != nil {
+		t.Error(err)
+	}
+}
+
 // q stops setup, as esc does, but while a name's typed, when it's typed;
 // space ticks a thing on a checklist, and enter keeps what's ticked.
 func TestSetupScreenKeys(t *testing.T) {
-	done := rendertest.SetupDone(rendertest.At)
-	snapshot := slices.IndexFunc(done, func(e event.Event) bool {
-		s, ok := e.(event.StepStarted)
-		return ok && s.Step == setup.DataStep
-	})
 	stopped := 0
-	f := setupFace(func() { stopped++ }, done[:snapshot]...)
+	f := setupFace(func() { stopped++ }, setupTill(setup.DataStep)...)
 	typed := make(chan string, 1)
 	asking(t, f, "call it", func() error {
 		name, err := f.Text(context.Background(), setup.MacStep, "what will kit-config call it?", "mac")
@@ -163,12 +213,14 @@ func TestSetupScreenKeys(t *testing.T) {
 	}
 }
 
-// Signing in, the way chosen takes the whole window, the code with it, at
-// any width; the other way's key changes it; esc gives the window back,
-// the code under GitHub's row, the ways' keys at the foot.
+// Signing in, the ways are offered as choices, each saying what it is;
+// the way chosen takes the whole window, the code with it, at any width,
+// and at 24 lines the code and when it expires whole; the other way's key
+// changes it; esc gives the window back, the code under GitHub's row, the
+// ways' keys at the foot.
 func TestSetupScreenSignsIn(t *testing.T) {
 	f := setupFace(func() {}, rendertest.SetupDone(rendertest.At)[0], event.StepStarted{Time: rendertest.At, Step: setup.GitHubStep})
-	keys := []look.Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in your browser"}}
+	keys := []boot.Key{{Key: "enter", Does: "with your phone", About: "scan a QR code with its camera"}, {Key: "s", Does: "here, in your browser", About: "kit opens it"}}
 	pick := func(text string) <-chan string {
 		picked := make(chan string, 1)
 		asking(t, f, text, func() error {
@@ -179,6 +231,10 @@ func TestSetupScreenSignsIn(t *testing.T) {
 		return picked
 	}
 	way := pick("how will you sign in?")
+	want := "▲ GitHub  not signed in · how will you sign in?\n  │ ❯ With your phone  scan a QR code with its camera\n  │   Here, in your browser  kit opens it"
+	if view := viewed(f, 80, 30); !strings.Contains(view, want) {
+		t.Errorf("asking how to sign in, drew\n%s\nwant\n%s", view, want)
+	}
 	f.Key(ask.Key{Name: "down"})
 	f.Key(ask.Key{Name: "enter"})
 	if got := <-way; got != "s" {
@@ -197,6 +253,7 @@ func TestSetupScreenSignsIn(t *testing.T) {
 				}
 			}
 		}
+		signsInWithin(t, "setup", f.Full(80, 24))
 	}
 	fits("Your browser is open at github.com/login/device.")
 	way = pick("here, in your browser · esc stop")
@@ -207,46 +264,93 @@ func TestSetupScreenSignsIn(t *testing.T) {
 	fits("Scan it with your phone's camera")
 	pick("here, in your browser · esc stop")
 	f.Key(ask.Key{Name: "esc"})
-	view := ansi.Strip(strings.Join(f.View(80, 30), "\n"))
+	view := viewed(f, 80, 30)
 	if f.Full(80, 30) != nil || !strings.Contains(view, "→ enter WDJB-MJHT at github.com/login/device") || !strings.HasSuffix(view, "enter with your phone · s here, in your browser · esc stop") {
 		t.Errorf("esc: the window given back, drew\n%s", view)
 	}
 }
 
-// The snapshot's parts show as they're found, a row each; the folders
-// being sized show on Your data's row, the question they're for. Setup's
-// commit shows on kit-config's row: at work, then pushed, or, the push
-// failing, why, and what to do, under it.
+// The snapshot's parts show as they're found, a row each, the features and
+// backup tools by name; the folders being sized show on Your data's row,
+// the question they're for. Setup's commit shows on kit-config's row: at
+// work, then pushed, or, the push failing, why, and what to do, under it.
 func TestSetupScreenFindsAndCommits(t *testing.T) {
-	done := rendertest.SetupDone(rendertest.At)
-	started := func(step string) int {
-		return slices.IndexFunc(done, func(e event.Event) bool {
-			s, ok := e.(event.StepStarted)
-			return ok && s.Step == step
-		})
-	}
-	f := setupFace(nil, done[:started(setup.SnapshotStep)+1]...)
+	f := setupFace(nil, started(setup.SnapshotStep)...)
 	for _, e := range []event.Finding{
-		{Step: setup.SnapshotStep, Part: "Homebrew formulae"}, {Step: setup.SnapshotStep, Part: "macOS settings"},
+		{Step: setup.SnapshotStep, Part: "Homebrew formulae"}, {Step: setup.SnapshotStep, Part: "macOS settings"}, {Step: setup.SnapshotStep, Part: "Features"},
 		{Step: setup.SnapshotStep, Part: "Homebrew formulae", Found: true, Count: 12},
 		{Step: setup.SnapshotStep, Part: "macOS settings", Doing: "reading what's here"},
+		{Step: setup.SnapshotStep, Part: "Features", Found: true, Count: 2, Names: []string{"Touch ID for sudo", "Remote Login"}},
 		{Step: setup.SnapshotStep, Part: snapshot.FoldersLabel, Doing: "sizing your folders"},
 	} {
 		f.Emit(e)
 	}
-	want := "● Homebrew formulae  12\n  ◐ macOS settings  reading what's here\n  ◐ Your data  sizing your folders\n  ○ Apps' settings"
-	if view := ansi.Strip(strings.Join(f.View(80, 40), "\n")); !strings.Contains(view, want) {
+	want := "● Homebrew formulae  12\n  ◐ macOS settings  reading what's here\n  ● Features  Touch ID for sudo · Remote Login\n  ◐ Your data  sizing your folders\n  ○ Apps' settings"
+	if view := viewed(f, 80, 40); !strings.Contains(view, want) {
 		t.Errorf("finding, drew\n%s\nwant it to hold\n%s", view, want)
 	}
 
-	f = setupFace(nil, done[:started(setup.CommitStep)+1]...)
-	if view := ansi.Strip(strings.Join(f.View(80, 40), "\n")); !strings.Contains(view, "◐ kit-config  committing and pushing") {
+	f = setupFace(nil, started(setup.CommitStep)...)
+	if view := viewed(f, 80, 40); !strings.Contains(view, "◐ kit-config  committing and pushing") {
 		t.Errorf("committing, drew\n%s", view)
 	}
 	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.CommitStep, Result: check.Result{State: check.Attention,
 		Summary: "370 declared · committed, not pushed: the remote end hung up; kit setup again carries on"}})
 	want = "▲ kit-config  370 declared · committed, not pushed\n  │ → the remote end hung up; kit setup again carries on\n"
-	if view := ansi.Strip(strings.Join(f.View(80, 40), "\n")); !strings.Contains(view, want) {
+	if view := viewed(f, 80, 40); !strings.Contains(view, want) {
 		t.Errorf("the push failing, drew\n%s\nwant it to hold\n%s", view, want)
+	}
+}
+
+// Stopped while the snapshot looks, a part cut short says it stopped, never
+// that it failed, and the snapshot's own row says nothing more.
+func TestSetupScreenStoppedWhileFinding(t *testing.T) {
+	f := setupFace(func() {}, started(setup.SnapshotStep)...)
+	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "Homebrew formulae", Found: true, Count: 12})
+	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "macOS settings", Doing: "reading what's here"})
+	f.Key(ask.Key{Name: "esc"})
+	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "macOS settings", Found: true, Err: "sw_vers: context canceled"})
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.SnapshotStep, Result: check.Result{State: check.Failed, Reason: "snapshot: context canceled"}})
+	left := ansi.Strip(strings.Join(f.Leaves(80), "\n"))
+	if !strings.Contains(left, "– macOS settings  stopped") || strings.Contains(left, "✗") || strings.Contains(left, "– Declared") {
+		t.Errorf("stopped while finding, left\n%s\nwant the part cut short stopped, nothing failed, no row for the snapshot", left)
+	}
+}
+
+// What kit-config declares that this Mac hasn't has a row only once it's
+// asked, or said; a kit-config setup started has nothing to install, and
+// no row. Asked, the question's summary is beside its name, the things
+// under it, muted, then its answers, a command dim after a dot.
+func TestSetupScreenToInstall(t *testing.T) {
+	f := setupFace(func() {}, started(setup.InstallStep)...)
+	if view := viewed(f, 80, 60); strings.Contains(view, "To install") {
+		t.Errorf("before it's asked, drew\n%s\nwant no row to install", view)
+	}
+	answered := asking(t, f, "To install", func() error {
+		_, err := f.Choose(context.Background(), setup.InstallStep, "kit-config declares 3 things this Mac hasn't\nfd, lazygit and ripgrep",
+			[]look.Choice{{Label: "Install them with the rest"}, {Label: "Stop here to look first", Cmd: "kit status"}})
+		return err
+	})
+	want := "▲ To install  kit-config declares 3 things this Mac hasn't\n  │ fd, lazygit and ripgrep\n  │ ❯ Install them with the rest \n  │   Stop here to look first · kit status"
+	if view := viewed(f, 80, 60); !strings.Contains(view, want) {
+		t.Errorf("asked, drew\n%s\nwant\n%s", view, want)
+	}
+	f.Key(ask.Key{Name: "enter"})
+	if err := <-answered; err != nil {
+		t.Fatal(err)
+	}
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.InstallStep, Result: check.Result{State: check.OK, Summary: "with the rest"}})
+	if view := viewed(f, 80, 60); !strings.Contains(view, "● To install  with the rest") {
+		t.Errorf("answered, drew\n%s", view)
+	}
+
+	f = setupFace(nil, setupTill(setup.InstallStep)...)
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.InstallStep, Result: check.Result{State: check.OK, Summary: setup.NothingNew}})
+	if view := viewed(f, 80, 60); strings.Contains(view, "To install") {
+		t.Errorf("kit-config new, drew\n%s\nwant no row to install", view)
+	}
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.InstallStep, Result: check.Result{State: check.OK, Summary: "nothing more"}})
+	if view := viewed(f, 80, 60); !strings.Contains(view, "● To install  nothing more") {
+		t.Errorf("kit-config joined, nothing to install, drew\n%s", view)
 	}
 }

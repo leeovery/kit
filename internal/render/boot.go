@@ -54,6 +54,7 @@ type BootFace struct {
 	frame int
 	// signing is the step a way of signing in was chosen for.
 	signing string
+	qr      qrCode
 
 	changed chan struct{}
 	closed  bool
@@ -391,17 +392,14 @@ func (f *BootFace) View(width, height int) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	width = min(width, look.Width)
-	out := fit(f.blocks(width, true), f.foot(width, true), height)
-	if len(out) > 0 && out[0] == "" {
-		out = out[1:]
-	}
-	return out
+	return fit(f.blocks(width, true), f.foot(width, true), height, false)
 }
 
 // fit is blocks, then foot, never taller than height: rows done give way
 // first, from the top, then those waiting, from the bottom, then headings,
-// so what's at work stays whole.
-func fit(blocks []block, foot []string, height int) []string {
+// so what's at work stays whole; the blank line the blocks start with kept
+// when lead says, else left off, before what's left is cut to height.
+func fit(blocks []block, foot []string, height int, lead bool) []string {
 	size := func() int {
 		n := len(foot)
 		for _, b := range blocks {
@@ -441,6 +439,9 @@ func fit(blocks []block, foot []string, height int) []string {
 	var out []string
 	for _, b := range blocks {
 		out = append(out, b.lines...)
+	}
+	if !lead && len(out) > 0 && out[0] == "" {
+		out = out[1:]
 	}
 	out = append(out, foot...)
 	if len(out) > height {
@@ -613,49 +614,79 @@ func (f *BootFace) Full(width, height int) []string {
 		return nil
 	}
 	b := f.look
-	centre := func(l string) string { return strings.Repeat(" ", max((width-ansi.StringWidth(l))/2, 0)) + l }
-	out := append([]string{""}, b.Head(b.Meta("bootstrap", f.mac, when(f.when))...)...)
-	out = append(out, "")
+	centre := centred(width)
+	head := append(append([]string{""}, b.Head(b.Meta("bootstrap", f.mac, when(f.when))...)...), "")
+	var from int
+	var art, says []string
 	var keys []look.Key
 	switch {
 	case c == nil:
-		for len(out) < height/2 {
-			out = append(out, "")
-		}
-		out = append(out, centre(b.Mid("getting a code from GitHub")))
+		from, says = height/2, []string{centre(b.Mid("getting a code from GitHub"))}
 	case f.mode == "enter":
-		if code, err := b.QR(c.URI); err == nil {
-			for _, l := range code {
-				out = append(out, centre(l))
-			}
+		for _, l := range f.qr.of(c.URI, b.QR) {
+			art = append(art, centre(l))
 		}
-		out = append(out, "",
-			centre(b.Full("Scan it with your phone's camera, then enter this code:")),
-			"",
-			centre(b.Rev(" "+c.Code+" ")),
-			"",
-			centre(b.Mid("expires in "+left(c.Expires.Sub(f.now())))),
-		)
+		says = []string{"", centre(b.Full("Scan it with your phone's camera, then enter this code:"))}
 		keys = []look.Key{{Key: "s", Does: "here, in your browser, instead"}}
 	default:
-		for len(out) < height/2-4 {
-			out = append(out, "")
-		}
-		out = append(out,
-			centre(b.Full("Your browser is open at ")+b.Strong(site(c.URI))+b.Full(".")),
-			centre(b.Full("Enter this code there:")),
-			"",
-			centre(b.Rev(" "+c.Code+" ")),
-			"",
-			centre(b.Mid("expires in "+left(c.Expires.Sub(f.now())))),
-		)
+		from = height/2 - 4
+		says = []string{centre(b.Full("Your browser is open at ") + b.Strong(site(c.URI)) + b.Full(".")), centre(b.Full("Enter this code there:"))}
 		keys = []look.Key{{Key: "enter", Does: "with your phone instead"}}
 	}
-	keys = append(keys, look.Key{Key: "esc", Does: "back"})
-	for len(out) < height-1 {
+	if c != nil {
+		says = append(says, "", centre(b.Rev(" "+c.Code+" ")), "", centre(b.Mid("expires in "+left(c.Expires.Sub(f.now())))))
+	}
+	return signInWindow(head, from, art, says, b.Keys(append(keys, look.Key{Key: "esc", Does: "back"})...), height)
+}
+
+// signInWindow is signing in's whole window, height high, keys on its last
+// line: head, then blank lines down to row from, then art, the QR code,
+// and says. Short of room, the head gives way first, with the blank lines
+// down to from, then the blank lines in says, then art, so says's last
+// lines, the code and when it expires, stay whole.
+func signInWindow(head []string, from int, art, says []string, keys string, height int) []string {
+	room := max(height-1, 0)
+	out := slices.Clone(head)
+	for len(out) < from {
 		out = append(out, "")
 	}
-	return append(out[:min(len(out), height-1)], b.Keys(keys...))
+	out = slices.Concat(out, art, says)
+	unblanked := slices.DeleteFunc(slices.Clone(says), func(l string) bool { return l == "" })
+	for _, fewer := range [][]string{slices.Concat(art, says), slices.Concat(art, unblanked), unblanked} {
+		if len(out) <= room {
+			break
+		}
+		out = fewer
+	}
+	out = out[max(len(out)-room, 0):]
+	for len(out) < room {
+		out = append(out, "")
+	}
+	return append(out, keys)
+}
+
+// centred is a line centred in width.
+func centred(width int) func(string) string {
+	return func(l string) string { return strings.Repeat(" ", max((width-ansi.StringWidth(l))/2, 0)) + l }
+}
+
+// qrCode is the QR code drawn last, and the text it's of: drawn again only
+// for other text, not on every frame.
+type qrCode struct {
+	text  string
+	lines []string
+}
+
+// of is the QR code of text, as draw draws it: none when it can't be.
+func (q *qrCode) of(text string, draw func(string) ([]string, error)) []string {
+	if q.text != text || q.lines == nil {
+		lines, err := draw(text)
+		if err != nil {
+			return nil
+		}
+		q.text, q.lines = text, lines
+	}
+	return q.lines
 }
 
 // asked is what's under the row of the question being asked.

@@ -50,7 +50,7 @@ var docs = []Fixture{
 		})},
 	{Name: "new-mac-boot", About: "the boot's end in Terminal, Ghostty opening", Width: 63, Height: 34, Look: Terminal,
 		Shows: "choose Open", at: docsAt, draw: bootEnds},
-	{Name: "setup-done", About: "kit setup's end on a Mac in use: the Mac declared as it is, kit apply carrying on", Width: 82, Height: 37,
+	{Name: "setup-done", About: "kit setup's end on a Mac in use: the Mac declared as it is, kit apply carrying on", Width: 82, Height: 36,
 		Shows: "carries on now", at: docsAt, draw: setupDone},
 	{Name: "new-mac-record", About: "kit apply's record on a new Mac, two to-dos left", Width: 81, Height: 31,
 		Shows: "brings them back", at: docsAt, draw: onFace(func(time.Time) []event.Event { return backupsLeft() })},

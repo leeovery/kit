@@ -6,13 +6,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/ask"
-	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/setup"
 )
@@ -36,8 +34,8 @@ func (a *app) home(cmd *cobra.Command) error {
 	if !a.pretty(a.Stdout) {
 		return cmd.Help()
 	}
-	if a.nothingSetUp() {
-		return a.offerSetup(cmd.Context())
+	if says, does := a.setupUnfinished(); says != "" {
+		return a.offerSetup(cmd.Context(), says, does)
 	}
 	width := min(max(a.Width(a.Stdout), 40), look.Width)
 	choices := []look.Choice{
@@ -77,23 +75,31 @@ func (a *app) home(cmd *cobra.Command) error {
 	return a.becomeSelf(append([]string{"--" + underHome}, strings.Fields(chosen)...))
 }
 
-// nothingSetUp reports whether kit has nothing set up on this Mac: no
-// config in its folder, and no run of kit setup stopped part-way.
-func (a *app) nothingSetUp() bool {
+// setupUnfinished is what bare kit says of this Mac while kit setup hasn't
+// finished, and what enter does: a run stopped part-way, as its record
+// says, carries on; with the config folder absent or empty, as kit setup
+// starts on, nothing's set up. "" once there's a config, for the menu.
+func (a *app) setupUnfinished() (says, does string) {
 	dirs, err := a.dirs()
 	if err != nil {
-		return false
+		return "", ""
 	}
-	_, err = os.Stat(filepath.Join(dirs.Config, config.File))
-	return errors.Is(err, fs.ErrNotExist) && !setup.PartWay(dirs.State)
+	if setup.PartWay(dirs.State) {
+		return "setup stopped part-way", "carries on"
+	}
+	if entries, err := os.ReadDir(dirs.Config); len(entries) == 0 && (err == nil || errors.Is(err, fs.ErrNotExist)) {
+		return "isn't set up with kit", "runs kit setup"
+	}
+	return "", ""
 }
 
-// offerSetup is bare kit on a Mac with nothing set up: the wordmark, then
-// a line saying so; enter has kit become kit setup, any other key leaves.
-func (a *app) offerSetup(ctx context.Context) error {
+// offerSetup is bare kit on a Mac kit setup hasn't finished: the wordmark,
+// then a line saying how it stands; enter has kit become kit setup, any
+// other key leaves.
+func (a *app) offerSetup(ctx context.Context, says, does string) error {
 	lines := append([]string{""}, look.Head(look.Muted(a.Now().Format("Mon 2 Jan · 15:04")))...)
-	lines = append(lines, "", look.Rows("  ", look.Width, look.Row{State: look.NeedsYou, Name: "This Mac", Says: look.Words(look.NeedsYou, "isn't set up with kit")})[0])
-	taken, err := a.Offer(ctx, lines, []look.Key{{Key: "enter", Does: "runs kit setup"}, {Key: "any other key", Does: "leaves"}})
+	lines = append(lines, "", look.Rows("  ", look.Width, look.Row{State: look.NeedsYou, Name: "This Mac", Says: look.Words(look.NeedsYou, says)})[0])
+	taken, err := a.Offer(ctx, lines, []look.Key{{Key: "enter", Does: does}, {Key: "any other key", Does: "leaves"}})
 	if err != nil || !taken {
 		return err
 	}

@@ -119,8 +119,9 @@ func boolFlag(yes, no bool) *bool {
 }
 
 // setup runs kit setup's steps, then kit apply, as the command would,
-// unless the person stops to look first. At a terminal, setup's own screen
-// asks each question in its row; without one, plain lines. With --json, one
+// unless the person stops to look first. At a terminal, its keys read
+// there too, setup's own screen asks each question in its row; without
+// one, plain lines. With --json, one
 // document: setup's steps, and apply's run.
 func (a *app) setup(ctx context.Context, given setup.Answers) error {
 	dirs, err := a.dirs()
@@ -146,7 +147,7 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 	case a.json:
 		doc = &built{}
 		face = doc
-	case a.pretty(a.Stdout):
+	case a.pretty(a.Stdout) && a.Terminal(a.Stdin):
 		screen = render.NewSetupFace(a.tty(), a.darkBackground(), a.Now, stop, func() string { return cmp.Or(s.Mac(), s.Model) })
 		face = screen
 	}
@@ -166,7 +167,7 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 				Name: mac, Config: cfg, Run: a.commands(path, childEnv(a.Getenv, home, path), sink, noAsks), Home: home,
 				ConfigHome: a.configHome(), Dirs: dirs, AppDirs: a.appFolders(home).Dirs, SudoLocal: a.SudoLocal, Now: a.Now,
 				Looks: func(l snapshot.Look) {
-					found := event.Finding{Time: a.Now(), Step: setup.SnapshotStep, Part: l.Label, Doing: l.Doing, Found: l.Looked, Count: l.Found}
+					found := event.Finding{Time: a.Now(), Step: setup.SnapshotStep, Part: l.Label, Doing: l.Doing, Found: l.Looked, Count: l.Found, Names: l.Names}
 					if l.Err != nil {
 						found.Err = l.Err.Error()
 					}
@@ -417,11 +418,7 @@ func (b *built) write(a *app) error {
 type setupAsker struct{ screen *render.SetupFace }
 
 func (s setupAsker) Choose(ctx context.Context, step, question string, answers []boot.Answer) (int, error) {
-	choices := make([]look.Choice, len(answers))
-	for i, an := range answers {
-		choices[i] = look.Choice{Label: an.Label, Does: an.Does}
-	}
-	return s.screen.Choose(ctx, step, question, choices)
+	return s.screen.Choose(ctx, step, question, choices(answers))
 }
 
 func (s setupAsker) Text(ctx context.Context, step, question, suggested string) (string, error) {
@@ -438,7 +435,7 @@ func (s setupAsker) Tick(ctx context.Context, step, question string, items []set
 }
 
 func (s setupAsker) Pick(ctx context.Context, step string, keys []boot.Key) (string, error) {
-	return s.screen.Pick(ctx, step, lookKeys(keys))
+	return s.screen.Pick(ctx, step, keys)
 }
 
 // tty is kit's terminal, as its dependencies have it, where a screen

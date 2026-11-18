@@ -162,19 +162,20 @@ func SetupDone(at time.Time) []event.Event {
 	for _, p := range []struct {
 		kind, label string
 		n           int
+		names       []string
 	}{
-		{"brew", "Homebrew formulae", 126}, {"cask", "Homebrew casks", 23}, {"mas", "App Store apps", 7}, {"npm", "npm packages", 4},
-		{"login", "macOS login items", 5}, {"mcp", "Claude MCP", 3}, {"git-config", "git config", 12}, {"defaults", "macOS settings", 186},
-		{"features", "Features", 2}, {"backups", "Backups", 2},
+		{"brew", "Homebrew formulae", 126, nil}, {"cask", "Homebrew casks", 23, nil}, {"mas", "App Store apps", 7, nil}, {"npm", "npm packages", 4, nil},
+		{"login", "macOS login items", 5, nil}, {"mcp", "Claude MCP", 3, nil}, {"git-config", "git config", 12, nil}, {"defaults", "macOS settings", 186, nil},
+		{"features", "Features", 2, []string{"Touch ID for sudo", "Remote Login"}}, {"backups", "Backups", 2, []string{"Time Machine", "Arq"}},
 	} {
 		counts[p.kind] = p.n
-		events = append(events, event.Finding{Time: at, Step: setup.SnapshotStep, Part: p.label, Found: true, Count: p.n})
+		events = append(events, event.Finding{Time: at, Step: setup.SnapshotStep, Part: p.label, Found: true, Count: p.n, Names: p.names})
 	}
 	events = append(events, event.StepFinished{Time: at, Step: setup.SnapshotStep, Result: check.Result{State: check.OK, Counts: counts}})
 	ok(setup.DataStep, "3 folders · 56.3 GB")
 	ok(setup.PrefsStep, "every night")
 	ok(setup.FilesStep, "5")
-	ok(setup.InstallStep, "nothing more")
+	ok(setup.InstallStep, setup.NothingNew)
 	events = append(events, event.StepStarted{Time: at, Step: setup.CommitStep},
 		event.StepFinished{Time: at, Step: setup.CommitStep, Result: check.Result{State: check.OK, Summary: "370 declared · committed and pushed kit.toml and laptop/", Counts: counts}})
 	byHand := check.Result{State: check.OK, Summary: "3, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there"}

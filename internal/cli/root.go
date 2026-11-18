@@ -44,9 +44,10 @@ type Deps struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
-	// Terminal reports whether out is a terminal, as IsTerminal does: the
-	// pretty face shows on one, the plain face elsewhere.
-	Terminal func(out io.Writer) bool
+	// Terminal reports whether f, an output or the standard input, is a
+	// terminal, as IsTerminal does: the pretty face shows on one, the plain
+	// face elsewhere.
+	Terminal func(f any) bool
 	// Width is how many columns wide the terminal out is, as TerminalWidth
 	// says.
 	Width func(out io.Writer) int
@@ -421,10 +422,10 @@ func Real(version string) Deps {
 	}
 }
 
-// IsTerminal reports whether out is a terminal.
-func IsTerminal(out io.Writer) bool {
-	f, ok := out.(*os.File)
-	return ok && term.IsTerminal(f.Fd())
+// IsTerminal reports whether f is a terminal.
+func IsTerminal(f any) bool {
+	file, ok := f.(*os.File)
+	return ok && term.IsTerminal(file.Fd())
 }
 
 // terminal is the process's terminal, where kit asks: its standard input,

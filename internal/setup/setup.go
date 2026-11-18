@@ -61,6 +61,8 @@ const (
 type Asker interface {
 	boot.Picker
 	// Choose asks step's question, its answers under it: the answer's place.
+	// A question with more to say says it on a line of its own, after its
+	// first.
 	Choose(ctx context.Context, step, question string, answers []boot.Answer) (int, error)
 	// Text asks for text typed, suggested to start with.
 	Text(ctx context.Context, step, question, suggested string) (string, error)
@@ -135,7 +137,7 @@ type Setup struct {
 	token, login string
 	found        *snapshot.Snapshot
 	mac          snapshot.Mac
-	toInstall    *[]string
+	toInstall    *toInstall
 	declared     *check.Result
 	wanted       []string
 }

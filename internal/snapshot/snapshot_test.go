@@ -217,11 +217,16 @@ func TestAPartThatCantBeLookedAtSaysWhy(t *testing.T) {
 
 // Looks is told of every part waiting its turn before any is looked at,
 // then of each as it's looked at, and once it has been, what it found, or
-// why it couldn't be looked at.
+// why it couldn't be looked at; the features and backup tools by name.
 func TestFindSaysHowEachPartStandsAsItLooks(t *testing.T) {
 	m, fake := newMac(t, "")
 	homebrew(fake, "", "", "ghostty\n")
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Exits(1).PrintsToStderr("Error: something broke\n")
+	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.openssh.sshd\" => enabled\n}\n")
+	write(t, filepath.Dir(m.SudoLocal), map[string]string{"sudo_local": "auth       sufficient     pam_tid.so\n"})
+	fake.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>AutoBackup</key><true/><key>Destinations</key><array><dict/></array></dict></plist>")
+	fake.On("tmutil", "status").Prints("Running = 0;\n")
+	fake.On("tmutil", "destinationinfo").Prints("Mount Point   : /Volumes/Backups\n")
 	var mu sync.Mutex
 	var looks []snapshot.Look
 	m.Looks = func(l snapshot.Look) {
@@ -246,9 +251,11 @@ func TestFindSaysHowEachPartStandsAsItLooks(t *testing.T) {
 	}
 	for _, l := range looks {
 		switch {
-		case l.Label == "Homebrew casks" && l.Looked && l.Found != 1,
-			l.Label == "Homebrew formulae" && l.Looked && l.Err == nil:
-			t.Errorf("told %+v: want casks' one found, formulae's error", l)
+		case l.Label == "Homebrew casks" && l.Looked && (l.Found != 1 || l.Names != nil),
+			l.Label == "Homebrew formulae" && l.Looked && l.Err == nil,
+			l.Label == "Features" && l.Looked && !slices.Equal(l.Names, []string{"Touch ID for sudo", "Remote Login"}),
+			l.Label == "Backups" && l.Looked && !slices.Equal(l.Names, []string{"Time Machine"}):
+			t.Errorf("told %+v: want casks' one found, formulae's error, the features on and backup tools set up by name", l)
 		}
 	}
 }

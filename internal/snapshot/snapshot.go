@@ -60,12 +60,14 @@ type Mac struct {
 
 // Look is how a part of a snapshot stands as Find looks at the Mac: its
 // label; what's being done, while it's looked at; once Looked, how many
-// things it found, or why it couldn't be looked at.
+// things it found, by name when they have names of their own (the features
+// on, the backup tools set up), or why it couldn't be looked at.
 type Look struct {
 	Label  string
 	Doing  string
 	Looked bool
 	Found  int
+	Names  []string
 	Err    error
 }
 
@@ -85,7 +87,7 @@ func (m Mac) look(l Look) {
 func (m Mac) lookAt(label string, find func() Part) Part {
 	m.look(Look{Label: label, Doing: "reading what's here"})
 	p := find()
-	m.look(Look{Label: label, Looked: true, Found: len(p.Lines), Err: p.Err})
+	m.look(Look{Label: label, Looked: true, Found: len(p.Lines), Names: p.names, Err: p.Err})
 	return p
 }
 
@@ -124,6 +126,9 @@ type Part struct {
 	// section is whether it declares its section with nothing in it: a
 	// kind's, whose program is here.
 	section bool
+	// names are its Lines as people call them, when that isn't their
+	// names: the features' titles, the backup tools'.
+	names []string
 }
 
 // Unchecked is a line declared as it is, by its name, as whether it needs a
@@ -324,6 +329,7 @@ func (m Mac) featuresPart(ctx context.Context) Part {
 			errs = append(errs, fmt.Errorf("%s: %s", s.Title, res.Reason))
 		case res.State == check.OK && !slices.Contains(declared.Names(), s.Name):
 			p.Lines = append(p.Lines, config.Entry{Name: s.Name})
+			p.names = append(p.names, s.Title)
 		}
 	}
 	p.Err = errors.Join(errs...)
@@ -348,6 +354,7 @@ func (m Mac) backupsPart(ctx context.Context) Part {
 			errs = append(errs, fmt.Errorf("%s: %w", about.Name, err))
 		case !st.Missing && !st.NotSetUp && !slices.Contains(declared.Names(), about.ID):
 			p.Lines = append(p.Lines, config.Entry{Name: about.ID})
+			p.names = append(p.names, about.Name)
 		}
 	}
 	p.Err = errors.Join(errs...)

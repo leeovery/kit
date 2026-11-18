@@ -14,6 +14,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/leeovery/kit/internal/backup/arq"
+	"github.com/leeovery/kit/internal/backup/timemachine"
 	"github.com/leeovery/kit/internal/boot/boottest"
 	"github.com/leeovery/kit/internal/kind/defaults"
 	"github.com/leeovery/kit/internal/render/rendertest"
@@ -136,7 +138,8 @@ func running(t *testing.T, w *world, args ...string) <-chan int {
 // signedOut is a Mac in use whose GitHub's CLI isn't signed in: setup signs
 // in on the phone, then GitHub's CLI has it, as handing over does. Homebrew
 // is here, two formulae and a cask installed; so are a folder or two of
-// the person's, and their shell's and tools' files.
+// the person's, and their shell's and tools' files; Touch ID for sudo and
+// File Sharing are on, and Time Machine and Arq back it up.
 func signedOut(t *testing.T, repos map[string]bool) *world {
 	w := inUse(t, repos)
 	f := w.fake
@@ -150,6 +153,12 @@ func signedOut(t *testing.T, repos map[string]bool) *world {
 	for _, path := range []string{"Documents/notes.txt", "Pictures/photo.jpg", "Downloads/archive.zip", ".zshrc", ".tmux.conf", ".config/ghostty/config"} {
 		w.write(t, path, "something\n")
 	}
+	w.write(t, filepath.Join("etc", "sudo_local"), "auth       sufficient     pam_tid.so\n")
+	f.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.openssh.sshd\" => disabled\n\t\"com.apple.smbd\" => enabled\n}\n")
+	f.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>AutoBackup</key><true/><key>Destinations</key><array><dict/></array></dict></plist>")
+	f.On("tmutil", "status").Prints("Running = 0;\n")
+	f.On("tmutil", "destinationinfo").Prints("Mount Point   : /Volumes/Backups\n")
+	f.On(arq.Arqc, "stats").Prints(`{"backupPlans": [{"name": "Offsite", "lastBackedUp": "2026-01-02T02:00:00Z", "schedule": {"type": "daily"}}]}`)
 	return w
 }
 
@@ -200,7 +209,7 @@ func TestSetupScreen(t *testing.T) {
 	screen.press(t, "enter")
 
 	matches(t, "setup-snapshot", screen.when(t, "the snapshot, macOS's settings alone being read", func(s string) bool {
-		return strings.Contains(s, "◐ macOS settings") && strings.Count(s, "◐") == 1 && strings.Count(s, "○") == 6
+		return strings.Contains(s, "◐ macOS settings") && strings.Count(s, "◐") == 1 && strings.Count(s, "○") == 5
 	}))
 	read()
 
@@ -277,5 +286,18 @@ func TestSetupScreenJoining(t *testing.T) {
 	}
 	if toml := w.read(t, filepath.Join(".config", "kit", "kit.toml")); !strings.HasSuffix(toml, "[macs.macbook-pro]\ndescription = \"MacBook Pro\"\n") {
 		t.Errorf("kit.toml =\n%s\nwant it to know macbook-pro", toml)
+	}
+}
+
+// Its output at a terminal, but its input not, as when it's redirected,
+// kit setup has no keys to read: it draws no screen, and asks nothing,
+// each question its flags don't answer naming them, as without a terminal.
+func TestSetupWithoutKeys(t *testing.T) {
+	w := inUse(t, map[string]bool{})
+	w.creates(t)
+	w.terminal, w.noKeys = true, true
+	out, errOut, code := w.run(t, "setup", "--create", "kit-config", "--mac", "laptop")
+	if code != 2 || !strings.Contains(errOut, "no terminal to ask at: answer with --restore <path>") || !strings.Contains(out, "mac ok laptop") || strings.Contains(out, "▀█▀") {
+		t.Errorf("without keys, kit setup printed\n%s%s(exit %d)\nwant plain lines, the flags named, exit 2", out, errOut, code)
 	}
 }

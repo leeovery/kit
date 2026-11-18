@@ -119,6 +119,9 @@ type world struct {
 	// stdin and what run returns.
 	input  io.Reader
 	output io.Writer
+	// noKeys is whether kit's standard input isn't a terminal, while its
+	// output is.
+	noKeys bool
 }
 
 // after is how long kit waits in the world, as time.After has it: no time
@@ -246,6 +249,7 @@ func (w *world) read(t *testing.T, path string) string {
 func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status int) {
 	t.Helper()
 	var out, errOut bytes.Buffer
+	stdin := cmp.Or[io.Reader](w.input, strings.NewReader(w.stdin))
 	root := cli.NewRootCommand(cli.Deps{
 		Version:  "0.1.0",
 		Getenv:   func(name string) string { return w.env[name] },
@@ -253,10 +257,10 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		HomeDir:  func() (string, error) { return w.home, nil },
 		Now:      func() time.Time { return w.now },
 		After:    w.after,
-		Stdin:    cmp.Or[io.Reader](w.input, strings.NewReader(w.stdin)),
+		Stdin:    stdin,
 		Stdout:   cmp.Or[io.Writer](w.output, &out),
 		Stderr:   &errOut,
-		Terminal: func(io.Writer) bool { return w.terminal },
+		Terminal: func(f any) bool { return w.terminal && (f != stdin || !w.noKeys) },
 		Width:    func(io.Writer) int { return cmp.Or(w.size[0], 80) },
 		Height:   func(io.Writer) int { return cmp.Or(w.size[1], 40) },
 		Listen:   w.listen,

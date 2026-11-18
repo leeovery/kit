@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -317,9 +318,14 @@ func (s *Setup) linkAnswer(ctx context.Context, found *snapshot.Snapshot) ([]str
 	return s.ticked(ctx, FilesStep, "which should kit-config keep, each moved in and linked back?", items)
 }
 
+// NothingNew is what the install step says on a kit-config setup started:
+// there's nothing in it for this Mac to install, as there is joining one.
+const NothingNew = "nothing: kit-config is new"
+
 // installStep asks, joining a config, whether what it declares for this
 // Mac that the Mac hasn't is installed with the rest, or setup stops to
-// look first: kit apply runs, or doesn't.
+// look first: kit apply runs, or doesn't. What couldn't be told is asked
+// about too, saying so, never taken for nothing.
 func (s *Setup) installStep() engine.Step {
 	return s.questionStep(question{
 		name: InstallStep, title: "To install", flags: "--apply or --no-apply",
@@ -335,10 +341,10 @@ func (s *Setup) installStep() engine.Step {
 		anew: func(rec record) bool { return anew(s.Given.Apply, rec.Apply) },
 		nothing: func(ctx context.Context, _ *snapshot.Snapshot) (string, bool) {
 			if s.record().Empty {
-				return "nothing more", true
+				return NothingNew, true
 			}
 			missing := s.missing(ctx)
-			return "nothing more", missing != nil && len(*missing) == 0
+			return "nothing more", missing != nil && len(missing.names) == 0 && len(missing.unknown) == 0
 		},
 		ask: func(ctx context.Context, _ *snapshot.Snapshot) error {
 			yes, err := s.installAnswer(ctx)
@@ -358,13 +364,50 @@ func (s *Setup) installAnswer(ctx context.Context) (bool, error) {
 	if missing == nil {
 		return false, errors.New("couldn't tell what kit-config declares that this Mac hasn't")
 	}
-	n := len(*missing)
-	what := fmt.Sprintf("kit-config declares %d %s this Mac hasn't", n, look.Plural(n, "thing", "things"))
 	if s.Ask == nil {
-		return false, s.unanswered("--apply installs what " + what + " (" + some(*missing) + ") with the rest, or --no-apply stops to look first")
+		return false, s.unanswered(missing.flags())
 	}
-	i, err := s.Ask.Choose(ctx, InstallStep, what+": "+some(*missing), []boot.Answer{{Label: "Install them with the rest"}, {Label: "Stop here to look first", Does: "kit status"}})
+	i, err := s.Ask.Choose(ctx, InstallStep, missing.says(), []boot.Answer{{Label: "Install them with the rest"}, {Label: "Stop here to look first", Cmd: "kit status"}})
 	return i == 0, err
+}
+
+// toInstall is what the config declares for this Mac that the Mac
+// hasn't, by name; unknown, the kinds it couldn't be told for, each
+// with why.
+type toInstall struct {
+	names, unknown []string
+}
+
+// says is the question: what there is to install, and whether some
+// couldn't be told; then, on a line of its own, which, and why.
+func (t toInstall) says() string {
+	couldnt := "couldn't tell for " + strings.Join(t.unknown, "; ")
+	switch {
+	case len(t.unknown) == 0:
+		return t.declares() + "\n" + some(t.names)
+	case len(t.names) == 0:
+		return "couldn't tell what kit-config declares that this Mac hasn't\n" + couldnt
+	}
+	return t.declares() + ", and couldn't tell for some\n" + some(t.names) + "; " + couldnt
+}
+
+// declares says how many things there are to install.
+func (t toInstall) declares() string {
+	n := len(t.names)
+	return fmt.Sprintf("kit-config declares %d %s this Mac hasn't", n, look.Plural(n, "thing", "things"))
+}
+
+// flags is what the flags answer, and what couldn't be told.
+func (t toInstall) flags() string {
+	what := "kit-config declares that this Mac hasn't"
+	if len(t.names) > 0 {
+		what = t.declares() + " (" + some(t.names) + ")"
+	}
+	flags := "--apply installs what " + what + " with the rest, or --no-apply stops to look first"
+	if len(t.unknown) > 0 {
+		flags += "; couldn't tell what kit-config declares that this Mac hasn't, for " + strings.Join(t.unknown, "; ")
+	}
+	return flags
 }
 
 // some names the first few of names, and how many more.
@@ -376,10 +419,11 @@ func some(names []string) string {
 	return fmt.Sprintf("%s and %d more", strings.Join(names[:shown], ", "), len(names)-shown)
 }
 
-// missing are the things the config declares for this Mac that the Mac
-// hasn't, as each kind's check finds them, everything a kind declares
-// while its program isn't here: found once, nil when they couldn't be.
-func (s *Setup) missing(ctx context.Context) *[]string {
+// missing is what the config declares for this Mac that the Mac hasn't,
+// as each kind's check finds it, everything a kind declares while its
+// program isn't here, and the kinds it couldn't be told for: found once,
+// nil when the config couldn't be read.
+func (s *Setup) missing(ctx context.Context) *toInstall {
 	s.mu.Lock()
 	known := s.toInstall
 	s.mu.Unlock()
@@ -391,28 +435,44 @@ func (s *Setup) missing(ctx context.Context) *[]string {
 		return nil
 	}
 	deps := &kind.Deps{Run: m.Run, Home: m.Home, ConfigHome: m.ConfigHome, StateDir: m.Dirs.State, AppDirs: m.AppDirs}
-	names := []string{}
+	t := &toInstall{names: []string{}}
 	for _, d := range kinds.All {
 		k := d.New(deps)
 		list, unread, err := kind.Declared(m.Config, k, m.Name)
-		if err != nil || unread != nil || len(list.On()) == 0 {
+		if err = cmp.Or(err, unread); err != nil {
+			t.unknown = append(t.unknown, fmt.Sprintf("%s (%s)", d.Label, oneLine(err.Error())))
+			continue
+		}
+		if len(list.On()) == 0 {
 			continue
 		}
 		res := kind.Compare(ctx, k, list)
-		if res.State == check.Deferred {
-			names = append(names, list.On()...)
+		switch res.State {
+		case check.Deferred:
+			t.names = append(t.names, list.On()...)
+			continue
+		case check.Failed:
+			t.unknown = append(t.unknown, fmt.Sprintf("%s (%s)", d.Label, oneLine(res.Reason)))
 			continue
 		}
 		for _, it := range res.Items {
-			if it.Action == kind.Install {
-				names = append(names, it.Name)
+			switch {
+			case it.Action == kind.Install:
+				t.names = append(t.names, it.Name)
+			case it.State == check.NotAllowed:
+				t.unknown = append(t.unknown, fmt.Sprintf("%s (%s: %s)", d.Label, res.Summary, oneLine(it.Detail)))
 			}
 		}
 	}
 	s.mu.Lock()
-	s.toInstall = &names
+	s.toInstall = t
 	s.mu.Unlock()
-	return &names
+	return t
+}
+
+// oneLine is why, its lines run together, to sit in a question's line.
+func oneLine(why string) string {
+	return strings.Join(strings.Fields(why), " ")
 }
 
 // commitStep declares what the snapshot found, then the answers, and
