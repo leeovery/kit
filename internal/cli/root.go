@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/askpass"
+	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
@@ -64,6 +66,9 @@ type Deps struct {
 	// ReadSecret asks, at the terminal, in place, for a value typed without
 	// being shown, for the thing about is, as ask.Secret does.
 	ReadSecret func(ctx context.Context, about look.Row) (string, error)
+	// ReadText asks, at the terminal, in place, for a value typed and shown,
+	// starting as typed, for the thing about is, as ask.Text does.
+	ReadText func(ctx context.Context, about look.Row, typed string) (string, error)
 	// Pick shows a list at the terminal, in place, under head, to pick a line
 	// from, as ask.Pick does: the line's value, or ask.ErrCancelled.
 	Pick func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error)
@@ -79,6 +84,9 @@ type Deps struct {
 	// Shell has kit become the person's login shell, as a terminal starts
 	// it: it replaces this process, and returns only when it can't.
 	Shell func() error
+	// GitHub is GitHub's site and API, as the boot and kit setup sign in and
+	// read repositories through them.
+	GitHub func() boot.GitHub
 	// Self is the path kit runs from, as os.Executable finds it: the kit the
 	// hourly launch runs.
 	Self func() (string, error)
@@ -219,7 +227,7 @@ status is the report, every check.`,
 	// then what kit manages, by group.
 	cobra.EnableCommandSorting = false
 	root.AddGroup(groups...)
-	for _, cmd := range []*cobra.Command{newStatusCommand(a), newApplyCommand(a), newReconcileCommand(a), newNightlyCommand(a), newListCommand(a), newWhyCommand(a), newLogCommand(a), newMachineCommand(a), newTerminalCommand(a), newBootstrapCommand(a), newAgentCommand(a)} {
+	for _, cmd := range []*cobra.Command{newStatusCommand(a), newApplyCommand(a), newReconcileCommand(a), newNightlyCommand(a), newListCommand(a), newWhyCommand(a), newLogCommand(a), newMachineCommand(a), newTerminalCommand(a), newBootstrapCommand(a), newSetupCommand(a), newAgentCommand(a)} {
 		cmd.GroupID = groupMac
 		root.AddCommand(cmd)
 	}
@@ -387,6 +395,9 @@ func Real(version string) Deps {
 		ReadSecret: func(ctx context.Context, about look.Row) (string, error) {
 			return ask.Secret(ctx, terminal(), about)
 		},
+		ReadText: func(ctx context.Context, about look.Row, typed string) (string, error) {
+			return ask.Text(ctx, terminal(), about, typed)
+		},
 		Pick: func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error) {
 			return ask.Pick(ctx, terminal(), head, lines, keys)
 		},
@@ -398,6 +409,9 @@ func Real(version string) Deps {
 		},
 		Shell: func() error {
 			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), askpass.Without(os.Environ()))
+		},
+		GitHub: func() boot.GitHub {
+			return boot.NewGitHub(&http.Client{Timeout: time.Minute})
 		},
 		Self:         os.Executable,
 		WatchDialogs: true,

@@ -11,6 +11,9 @@ is already in place, so a change can work here and fail on a blank Mac. Your
 job is to make each change work on both: think it through against how kit
 applies on a new Mac (the last section) before it's committed.
 
+A Mac in use that kit doesn't look after yet, with no config, is set up
+with `kit setup`: `kit agent in-use` says how.
+
 ## The rules
 
 1. kit makes a Mac match its config, kit-config, a private git repository:

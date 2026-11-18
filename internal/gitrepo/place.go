@@ -45,11 +45,10 @@ const ghSignedOut = 4
 // its URL, so of github.com whatever host GH_HOST names; anything else is
 // unproven. An error is a failure to ask gh.
 func (r Repo) Place(ctx context.Context, url string) (Place, error) {
-	m := onGitHub.FindStringSubmatch(url)
-	if m == nil || !githubName.MatchString(m[1]) || !githubName.MatchString(m[2]) {
+	repo := OnGitHub(url)
+	if repo == "" {
 		return Place{Unproven: notGitHub}, nil
 	}
-	repo := m[1] + "/" + m[2]
 	res, err := r.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "view", "https://github.com/" + repo, "--json", "visibility", "--jq", ".visibility"}})
 	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == ghSignedOut {
 		return Place{}, errors.New("gh isn't signed in to GitHub: run gh auth login")
@@ -58,6 +57,50 @@ func (r Repo) Place(ctx context.Context, url string) (Place, error) {
 		return Place{}, fmt.Errorf("couldn't ask GitHub: %w", err)
 	}
 	return Place{Repo: repo, Visibility: strings.ToLower(strings.TrimSpace(string(res.Stdout)))}, nil
+}
+
+// NotPrivate is a URL Push pushes to that kit can't prove private, and
+// where it takes the repository, as Place has it.
+type NotPrivate struct {
+	URL   string
+	Place Place
+}
+
+func (e NotPrivate) Error() string {
+	if e.Place.Repo != "" {
+		return fmt.Sprintf("%s is %s on GitHub", e.Place.Repo, e.Place.Visibility)
+	}
+	return fmt.Sprintf("can't prove %s private: %s", Shown(e.URL), e.Place.Unproven)
+}
+
+// ProvePrivate proves private every URL Push pushes to (PushURLs, Place),
+// as kit pushes only to a private repository: a NotPrivate for the first
+// it can't; ErrNoRemote without a remote; an error asking gh.
+func (r Repo) ProvePrivate(ctx context.Context) error {
+	urls, err := r.PushURLs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, url := range urls {
+		place, err := r.Place(ctx, url)
+		switch {
+		case err != nil:
+			return err
+		case !place.Private():
+			return NotPrivate{URL: url, Place: place}
+		}
+	}
+	return nil
+}
+
+// OnGitHub is the repository on github.com url names, written exactly as
+// onGitHub has it, as owner/name: "" when it names none.
+func OnGitHub(url string) string {
+	m := onGitHub.FindStringSubmatch(url)
+	if m == nil || !githubName.MatchString(m[1]) || !githubName.MatchString(m[2]) {
+		return ""
+	}
+	return m[1] + "/" + m[2]
 }
 
 // Shown is remote, a URL, as kit names it: without who it signs in as,

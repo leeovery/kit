@@ -13,17 +13,36 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// NewMacName is why name can't name a new Mac, as kit machine add names
+// one: nil when it can.
+func NewMacName(name string) error {
+	if name == "add" {
+		return errors.New("a Mac can't be called add: that's kit machine add")
+	}
+	return macNamed(name)
+}
+
+// macNamed is why name can't be a Mac's: nil when it can.
+func macNamed(name string) error {
+	switch {
+	case !ValidName(name):
+		return fmt.Errorf("%q can't be a Mac's name: use lower-case letters, digits and hyphens", name)
+	case name == Shared:
+		return fmt.Errorf("a Mac can't be called %s: that's the file every Mac reads", Shared)
+	}
+	return nil
+}
+
 // AddMac adds a Mac named name to the repository: its folder, a copy of
 // from's when from isn't "", else a folder with an empty declarations file,
 // and its table in kit.toml, after the last Mac's, with from and
 // description, if any. It refuses a name that can't be a Mac's or that the
 // config knows, a from it doesn't, and a folder there already.
 func (c *Config) AddMac(name, from, description string) error {
+	if err := macNamed(name); err != nil {
+		return err
+	}
 	switch {
-	case !ValidName(name):
-		return fmt.Errorf("%q can't be a Mac's name: use lower-case letters, digits and hyphens", name)
-	case name == Shared:
-		return fmt.Errorf("a Mac can't be called %s: that's the file every Mac reads", Shared)
 	case c.Knows(name):
 		return fmt.Errorf("%s knows a Mac named %s already", File, name)
 	case from != "" && !c.Knows(from):

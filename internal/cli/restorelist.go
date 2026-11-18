@@ -102,10 +102,7 @@ func (a *app) addRestore(ctx context.Context, r *run, name string, opts restoreO
 	c := startChanges(r, []string{line.Path})
 	c.step(ctx, line.Path, func(ctx context.Context) check.Result {
 		e := config.Entry{Name: line.Path, Value: value, Note: opts.note}
-		if err := r.checkDeclare(config.RestoreKind, scope, e); err != nil {
-			return failed(err)
-		}
-		if err := r.restoreFits(ctx, scope, line); err != nil {
+		if err := r.checkRestore(ctx, scope, line, e); err != nil {
 			return failed(err)
 		}
 		said, err := c.declare(config.RestoreKind, scope, e)
@@ -116,6 +113,16 @@ func (a *app) addRestore(ctx context.Context, r *run, name string, opts restoreO
 	})
 	c.sync(ctx, commitMessage("add", config.RestoreKind, []string{line.Path}, r.machine, opts.note))
 	return c.finish()
+}
+
+// checkRestore says why declaring e, line's entry, in scope's [restore]
+// would be refused: a line the config wouldn't read, or one the restore of
+// a Mac it's for would refuse. nil when it would be declared.
+func (r *run) checkRestore(ctx context.Context, scope string, line restore.Line, e config.Entry) error {
+	if err := r.checkDeclare(config.RestoreKind, scope, e); err != nil {
+		return err
+	}
+	return r.restoreFits(ctx, scope, line)
 }
 
 // removeRestore takes each path out of [restore], this Mac's (and the

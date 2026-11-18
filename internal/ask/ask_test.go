@@ -589,6 +589,35 @@ func TestSecretGivesUpAsItsContextEnds(t *testing.T) {
 	}
 }
 
+// A value asked for as Text starts as suggested, edits as it's typed, and
+// shows what's typed; a secret shows a dot a character, never the text.
+func TestTextShowsWhatsTyped(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		shown bool
+		want  string
+	}{
+		{"text", true, "❯ laptop2"},
+		{"secret", false, "❯ •••••••"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &field{about: look.Row{Name: "This Mac"}, typed: []rune("laptops"), shown: tt.shown}
+			for _, k := range []key{{name: "backspace"}, {text: "2"}} {
+				if f.update(k) {
+					t.Fatalf("%+v ended the question", k)
+				}
+			}
+			view := ansi.Strip(strings.Join(f.view(80, 24), "\n"))
+			if !strings.Contains(view, tt.want) || tt.shown == strings.Contains(view, "•") {
+				t.Errorf("view =\n%s\nwant it to show %q", view, tt.want)
+			}
+			if !f.update(key{name: "enter"}) || string(f.typed) != "laptop2" {
+				t.Errorf("enter took %q, want laptop2", string(f.typed))
+			}
+		})
+	}
+}
+
 // syncBuffer is a buffer written by one goroutine as another reads it.
 type syncBuffer struct {
 	mu  sync.Mutex

@@ -528,6 +528,18 @@ func (r Repo) URL(ctx context.Context, remote string) (string, error) {
 	return strings.TrimSpace(string(res.Stdout)), err
 }
 
+// BranchMissing reports whether the branch HEAD is on has an upstream the
+// remote hasn't, as the last fetch or push found it: its remote-tracking
+// ref not there, as a new repository's, till its first push makes it.
+func (r Repo) BranchMissing(ctx context.Context) (bool, error) {
+	t, err := r.upstream(ctx)
+	if err != nil || t.up == "" {
+		return false, err
+	}
+	at, err := r.commitAt(ctx, t.up)
+	return at == "", err
+}
+
 // Unpushed is how many commits are waiting to be pushed (Waiting): none
 // when that can't be told.
 func (r Repo) Unpushed(ctx context.Context) int {

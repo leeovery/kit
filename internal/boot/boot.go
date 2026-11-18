@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -174,16 +173,10 @@ func (b *Boot) gitHubStep() engine.Step {
 		Name: GitHubStep, Title: "GitHub", Area: AreaSignIn,
 		Waiting: "This Mac is set up from your kit-config, a private repository on GitHub. Sign in to GitHub, and kit fetches it.",
 		Check: func(ctx context.Context) check.Result {
-			token := b.known(ctx)
-			if token == "" {
-				return check.Result{State: check.Attention, Summary: "not signed in"}
-			}
-			login, err := b.GitHub.login(ctx, token)
-			switch {
-			case errors.Is(err, errSignedOut):
-				return check.Result{State: check.Attention, Summary: "signed out"}
-			case err != nil:
-				return check.Result{State: check.Failed, Reason: err.Error()}
+			held, _ := b.signedIn()
+			token, login, stands := b.account().Login(ctx, held)
+			if stands.State != check.OK {
+				return stands
 			}
 			b.hold(token, login)
 			cfg := b.config()
@@ -196,20 +189,16 @@ func (b *Boot) gitHubStep() engine.Step {
 			token, login := b.signedIn()
 			if token == "" {
 				var err error
-				if token, err = b.signIn(ctx); err != nil {
+				if token, login, err = b.account().SignInAndKeep(ctx, GitHubStep); err != nil {
 					return err
 				}
-				if login, err = b.GitHub.login(ctx, token); err != nil {
-					return fmt.Errorf("find who signed in: %w", err)
-				}
 				b.hold(token, login)
-				b.keep(ctx, token)
 			}
 			repo := b.repo(login)
 			b.doing(GitHubStep, "reading "+repo)
-			private, err := b.GitHub.private(ctx, token, repo)
+			private, err := b.GitHub.Private(ctx, token, repo)
 			switch {
-			case errors.Is(err, errNotFound):
+			case errors.Is(err, ErrNotFound):
 				return fmt.Errorf("%s isn't on GitHub, or this sign-in can't see it: name yours with --config owner/name", repo)
 			case err != nil:
 				return fmt.Errorf("find %s: %w", repo, err)
@@ -233,79 +222,14 @@ func (b *Boot) isFetched() bool {
 	return b.fetched
 }
 
-// signIn signs in to GitHub through its device flow, the way chosen first:
-// with the phone, scanning a QR code; or here, in the browser, which kit
-// opens. The code comes only then, a new one if it expires before it's
-// entered; either way can be chosen again while it waits.
-func (b *Boot) signIn(ctx context.Context) (string, error) {
-	how, err := b.Ask.Pick(ctx, GitHubStep, signInKeys)
-	if err != nil {
-		return "", err
-	}
-	for {
-		code, err := b.GitHub.code(ctx)
-		if err != nil {
-			return "", err
-		}
-		b.Sink.Emit(event.DeviceCode{Time: b.Now(), Step: GitHubStep, URI: code.URI, Code: code.UserCode, Expires: b.Now().Add(time.Duration(code.ExpiresIn) * time.Second)})
-		b.doing(GitHubStep, "waiting for you to sign in")
-		waiting, stop := context.WithCancel(ctx)
-		asking := make(chan struct{})
-		go func(how string) {
-			defer close(asking)
-			for {
-				if how == "s" {
-					_, _ = b.Run.Run(waiting, runner.Command{Name: "open", Args: []string{code.URI}})
-				}
-				var err error
-				if how, err = b.Ask.Pick(waiting, GitHubStep, signInKeys); err != nil {
-					return
-				}
-			}
-		}(how)
-		token, err := b.GitHub.token(ctx, code)
-		stop()
-		<-asking
-		if errors.Is(err, errExpired) {
-			continue
-		}
-		return token, err
-	}
+// account is the boot's GitHub account, as it signs in.
+func (b *Boot) account() Account {
+	return Account{Run: b.Run, Sink: b.Sink, Ask: b.Ask, GitHub: b.GitHub, Now: b.Now}
 }
 
 // keychainItem is where kit keeps GitHub's sign-in, in the login keychain,
 // till GitHub's CLI has it.
 const keychainItem = "kit-github"
-
-// known is the GitHub sign-in at hand: kit's own, kept in the keychain, or
-// else GitHub's CLI's; "" when there's none.
-func (b *Boot) known(ctx context.Context) string {
-	if token, _ := b.signedIn(); token != "" {
-		return token
-	}
-	res, err := b.Run.Run(ctx, runner.Command{Name: "security", Args: []string{"find-generic-password", "-s", keychainItem, "-w"}, Secret: true})
-	if err == nil {
-		if token := strings.TrimSpace(string(res.Stdout)); token != "" {
-			return token
-		}
-	}
-	if !runner.Has(b.Run, "gh") {
-		return ""
-	}
-	res, err = b.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"auth", "token"}, Secret: true})
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(res.Stdout))
-}
-
-// keep keeps token in the login keychain, given on the security tool's
-// input, never its command line, so a boot started again needn't ask the
-// phone. A keychain that won't take it, locked as over SSH, only means the
-// next boot asks again.
-func (b *Boot) keep(ctx context.Context, token string) {
-	_, _ = b.Run.Run(ctx, runner.Command{Name: "security", Args: []string{"-i"}, Input: fmt.Sprintf("add-generic-password -U -s %s -a kit -w %s\n", keychainItem, token)})
-}
 
 // macStep settles which of the config's Macs this is, or that it's a new
 // one: done when kit has a name for this Mac that the config knows, or that

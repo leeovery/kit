@@ -50,6 +50,12 @@ func (p palette) Field(typed int) string {
 	return p.cursor.Render("❯") + " " + p.key.Render(strings.Repeat("•", typed)) + p.field.Render(" ")
 }
 
+// Typed is a typed answer shown as it's typed: the cursor, the text, and
+// the typing cursor.
+func (p palette) Typed(text string) string {
+	return p.cursor.Render("❯") + " " + White(text) + p.field.Render(" ")
+}
+
 // Answers are a question's choices: the cursor in the marks' column, the
 // chosen one's label a tag, its words where the others' are; what each does
 // two spaces after it, and the command it runs after a dot.

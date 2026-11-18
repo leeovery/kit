@@ -133,8 +133,8 @@ func (g GitHub) post(ctx context.Context, path string, form url.Values, v any) e
 	return g.do(req, v)
 }
 
-// errSignedOut is a sign-in GitHub no longer takes.
-var errSignedOut = errors.New("GitHub doesn't take the sign-in")
+// ErrSignedOut is a sign-in GitHub no longer takes.
+var ErrSignedOut = errors.New("GitHub doesn't take the sign-in")
 
 // get gets path from GitHub's API with token, and reads its JSON answer into
 // v.
@@ -156,9 +156,9 @@ func (g GitHub) do(req *http.Request, v any) error {
 	defer func() { _ = res.Body.Close() }()
 	switch {
 	case res.StatusCode == http.StatusUnauthorized:
-		return errSignedOut
+		return ErrSignedOut
 	case res.StatusCode == http.StatusNotFound:
-		return errNotFound
+		return ErrNotFound
 	case res.StatusCode >= 300:
 		return fmt.Errorf("GitHub answered %s", res.Status)
 	}
@@ -168,11 +168,11 @@ func (g GitHub) do(req *http.Request, v any) error {
 	return nil
 }
 
-// errNotFound is a repository GitHub doesn't have, or won't show.
-var errNotFound = errors.New("not found")
+// ErrNotFound is a repository GitHub doesn't have, or won't show.
+var ErrNotFound = errors.New("not found")
 
-// login is who token signs in as.
-func (g GitHub) login(ctx context.Context, token string) (string, error) {
+// Login is who token signs in as.
+func (g GitHub) Login(ctx context.Context, token string) (string, error) {
 	var user struct {
 		Login string `json:"login"`
 	}
@@ -182,9 +182,9 @@ func (g GitHub) login(ctx context.Context, token string) (string, error) {
 	return user.Login, nil
 }
 
-// private reports whether the repository named repo, as owner/name, is
-// private.
-func (g GitHub) private(ctx context.Context, token, repo string) (bool, error) {
+// Private reports whether the repository named repo, as owner/name, is
+// private: ErrNotFound when GitHub hasn't it, or won't show it.
+func (g GitHub) Private(ctx context.Context, token, repo string) (bool, error) {
 	var r struct {
 		Private bool `json:"private"`
 	}
@@ -192,6 +192,22 @@ func (g GitHub) private(ctx context.Context, token, repo string) (bool, error) {
 		return false, err
 	}
 	return r.Private, nil
+}
+
+// Repos are the private repositories token can see, as owner/name, sorted:
+// one call, the first hundred, never a look inside any.
+func (g GitHub) Repos(ctx context.Context, token string) ([]string, error) {
+	var repos []struct {
+		FullName string `json:"full_name"`
+	}
+	if err := g.get(ctx, token, "/user/repos?visibility=private&sort=full_name&per_page=100", &repos); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(repos))
+	for i, r := range repos {
+		names[i] = r.FullName
+	}
+	return names, nil
 }
 
 // fetch fetches the repository named repo, its default branch as it stands,

@@ -751,7 +751,7 @@ func (r Restoring) room(src *restore.Opened, copies []copying) error {
 		return fmt.Errorf("find the free space: %w", err)
 	}
 	if int64(free) < need {
-		return fmt.Errorf("%s %s needs %s free, with a margin, and the disk has %s", size(copied), says, size(need), size(int64(free)))
+		return fmt.Errorf("%s %s needs %s free, with a margin, and the disk has %s", look.Size(copied), says, look.Size(need), look.Size(int64(free)))
 	}
 	return nil
 }
@@ -824,7 +824,7 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 	if err != nil {
 		return failed(err)
 	}
-	line := fmt.Sprintf("Restored %s: %d %s, %s", c.Path, stats.TotalFiles, look.Plural(stats.TotalFiles, "file", "files"), size(stats.TotalBytes))
+	line := fmt.Sprintf("Restored %s: %d %s, %s", c.Path, stats.TotalFiles, look.Plural(stats.TotalFiles, "file", "files"), look.Size(stats.TotalBytes))
 	if again.Count > 0 {
 		line += fmt.Sprintf("; %d copied again, changed as they were copied", again.Count)
 	}
@@ -949,17 +949,6 @@ func recopied(again restore.Recopied) string {
 		named += fmt.Sprintf(" and %d more", more)
 	}
 	return named
-}
-
-// size is n bytes, as kit says it: in kB, MB or GB, a thousand each.
-func size(n int64) string {
-	switch {
-	case n >= 1e9:
-		return fmt.Sprintf("%.1f GB", float64(n)/1e9)
-	case n >= 1e6:
-		return fmt.Sprintf("%.1f MB", float64(n)/1e6)
-	}
-	return fmt.Sprintf("%d kB", (n+999)/1000)
 }
 
 // progress says how far the restore's copies have got, all of them

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"slices"
@@ -102,7 +101,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 	}
 	if handedOver {
 		b := &boot.Boot{
-			GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now, Ask: &plainAsker{},
+			GitHub: a.GitHub(), Now: a.Now, Ask: &plainAsker{},
 			State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
 			Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Version: a.Version, HandedOver: true,
 		}
@@ -160,7 +159,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 	}
 	observed := a.commands(bootPath, childEnv(a.Getenv, home, bootPath), sink, func() *askpass.Server { return asks })
 	b := &boot.Boot{
-		Run: observed, Sink: sink, Ask: asker, GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now,
+		Run: observed, Sink: sink, Ask: asker, GitHub: a.GitHub(), Now: a.Now,
 		State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
 		Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Self: self, Version: a.Version,
 	}
@@ -415,8 +414,9 @@ func lookKeys(keys []boot.Key) []look.Key {
 var errNoTerminal = errors.New("no terminal to ask at")
 
 // plainAsker is the boot without a terminal: what it would ask fails,
-// naming the flag that answers it, and no key is ever pressed.
-type plainAsker struct{ picked bool }
+// naming the flag that answers it, and signing in takes its first way
+// (boot.FirstKey).
+type plainAsker struct{ boot.FirstKey }
 
 func (*plainAsker) Choose(_ context.Context, step, _ string, _ []boot.Answer) (int, error) {
 	return 0, fmt.Errorf("%w: give this Mac's name with --mac (the %s step)", errNoTerminal, step)
@@ -434,16 +434,4 @@ func (*plainAsker) Secret(_ context.Context, step, _ string) (string, error) {
 // Wait fails, saying what there's to do.
 func (*plainAsker) Wait(_ context.Context, step, _, todo string, _ []boot.Key) (string, error) {
 	return "", fmt.Errorf("%w: %s, then paste the install line into Terminal again (the %s step)", errNoTerminal, strings.TrimSuffix(todo, ", then press enter"), step)
-}
-
-// Pick takes the first of keys, the first time a step asks: without a
-// terminal, signing in shows its code in plain lines, to enter on any
-// device; asked again, it waits, as no key will come.
-func (a *plainAsker) Pick(ctx context.Context, _ string, keys []boot.Key) (string, error) {
-	if !a.picked && len(keys) > 0 {
-		a.picked = true
-		return keys[0].Key, nil
-	}
-	<-ctx.Done()
-	return "", ctx.Err()
 }
