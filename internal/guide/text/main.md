@@ -25,9 +25,11 @@ applies on a new Mac (the last section) before it's committed.
 
 3. Change kit-config with kit's commands: `kit cask add`, `kit brew add` and
    the other kinds' add and remove, `kit step add`, `kit secret add`,
-   `kit file add`, `kit manual add` and `kit reconcile`. Each commits its
-   change and pushes it. An edit by hand, to a declarations file or a step's
-   script, is yours to commit and push, or `kit reconcile`'s.
+   `kit file add`, `kit manual add` and `kit reconcile`; and kit.toml's
+   settings with `kit terminal` (the terminal a new Mac's boot hands over
+   to) and `kit nightly at` (when the nightly run falls due). Each commits
+   its change and pushes it. An edit by hand, to a declarations file or a
+   step's script, is yours to commit and push, or `kit reconcile`'s.
 
 4. Read a command's `--help` before you use it the first time: it says what
    it needs and what it changes. Every command has one, as in

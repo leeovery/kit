@@ -31,7 +31,7 @@ the boot looks like this:
    starts fresh or as a copy of one of your Macs.
 3. **Password.** Typed once, for everything the boot installs.
 4. **Homebrew,** with Apple's command line tools.
-5. **Apps.** The terminal `kit.toml` names, such as Ghostty.
+5. **Apps.** The terminal `kit.toml` names, such as Ghostty: `kit terminal` sets it.
 6. **kit-config.** Cloned to `~/.config/kit`, its files linked into your home folder.
 7. **kit,** installed through Homebrew, so it stays up to date.
 8. **Full Disk Access.** You drag the terminal into the list System Settings shows.

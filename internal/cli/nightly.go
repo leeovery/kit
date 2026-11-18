@@ -43,8 +43,9 @@ kit.app runs kit nightly, so that Full Disk Access is kit.app's. Its runs
 notify no one: what they find is in kit status and the log.
 
 Name jobs to run only those, now. --plan says what's due, and runs nothing.
-kit nightly add and kit nightly remove declare and undeclare nightly jobs (so
-no job is named add or remove).`,
+kit nightly add and kit nightly remove declare and undeclare nightly jobs, and
+kit nightly at shows or sets when the nightly run falls due (so no job is
+named add, remove or at).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			command, logName := "nightly", "nightly"
 			if plan {
@@ -69,8 +70,9 @@ no job is named add or remove).`,
 	// kit.app's: what its run finds of Full Disk Access is the app's.
 	cmd.Flags().BoolVar(&scheduled, "scheduled", false, "run by the hourly launch, through kit.app")
 	_ = cmd.Flags().MarkHidden("scheduled")
-	// Nightly jobs are declared here too: add and remove, never a job's name.
-	cmd.AddCommand(newLineAdd(a, config.NightlyKind, "Declare a nightly job"), newLineRemove(a, config.NightlyKind))
+	// Nightly jobs are declared here too, and when they're due set: add,
+	// remove and at, never a job's name (nightlyVerbs).
+	cmd.AddCommand(newLineAdd(a, config.NightlyKind, "Declare a nightly job"), newLineRemove(a, config.NightlyKind), newNightlyAtCommand(a))
 	return cmd
 }
 

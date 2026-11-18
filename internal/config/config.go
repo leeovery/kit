@@ -56,6 +56,8 @@ type Config struct {
 	// edited are declarations files as an edit would leave them, by scope,
 	// read in place of what's on disk, to judge the edit before it's made.
 	edited map[string]string
+	// nightlyAtSet is whether kit.toml sets nightly_at.
+	nightlyAtSet bool
 }
 
 // DefaultNightlyAt is when the nightly run is due when kit.toml doesn't say.
@@ -113,8 +115,14 @@ func Load(dir string, kinds []Section) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the config: %w", err)
 	}
+	return read(dir, string(data), kinds)
+}
+
+// read is the config repository in dir, its kit.toml's text, checked as
+// Load checks it.
+func read(dir, text string, kinds []Section) (*Config, error) {
 	var f file
-	md, err := toml.Decode(string(data), &f)
+	md, err := toml.Decode(text, &f)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", File, err)
 	}
@@ -150,11 +158,10 @@ func Load(dir string, kinds []Section) (*Config, error) {
 		defs: sectionDefs(kinds),
 	}
 	if f.NightlyAt != "" {
-		at, err := time.Parse("15:04", f.NightlyAt)
-		if err != nil {
-			return nil, fmt.Errorf("%s: nightly_at %q isn't a time of day, as in 03:00", File, f.NightlyAt)
+		if cfg.NightlyAt, err = ParseTimeOfDay(f.NightlyAt); err != nil {
+			return nil, fmt.Errorf("%s: nightly_at %w", File, err)
 		}
-		cfg.NightlyAt = time.Duration(at.Hour())*time.Hour + time.Duration(at.Minute())*time.Minute
+		cfg.nightlyAtSet = true
 	}
 	for name, m := range f.Macs {
 		switch {

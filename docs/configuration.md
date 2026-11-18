@@ -55,16 +55,20 @@ from = "laptop"
 kit refuses a setting it doesn't know, so a typo shows as an error. kit.toml needs at least
 one `[macs.<name>]` table.
 
-| Field | Meaning |
-|---|---|
-| `format` | Required. The config format, `1` today |
-| `minimum_kit` | The oldest kit that reads it, such as `0.1.0` |
-| `primary` | Required. One of the Macs below |
-| `nightly_at` | When nightly jobs fall due, `03:00` unless set |
-| `terminal` | The terminal a new Mac installs, `ghostty` only |
+| Field | Meaning | Set by |
+|---|---|---|
+| `format` | Required. The config format, `1` today | You |
+| `minimum_kit` | The oldest kit that reads it, such as `0.1.0` | You |
+| `primary` | Required. One of the Macs below | You |
+| `nightly_at` | When nightly jobs fall due, `03:00` unless set | `kit nightly at` |
+| `terminal` | The terminal a new Mac installs, `ghostty` only | `kit terminal` |
 
 A kit older than `minimum_kit` stops and tells you to update kit. A format newer than kit
 reads does the same. Without `terminal`, the boot carries on in macOS's own Terminal.
+
+`kit terminal` and `kit nightly at` show their setting, or set it given a value. Each changes
+one line in place, keeps the rest of `kit.toml` as it is, then commits and pushes.
+`kit terminal --none` takes the line out.
 
 ### A table for each Mac
 

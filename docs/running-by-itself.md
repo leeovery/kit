@@ -51,8 +51,8 @@ For example, a nightly job can clear a scratch folder of files untouched for a w
 | Restores apps' settings that wait for their apps | Saves your apps' settings |
 | Every check, as `kit status` | |
 
-- **The nightly run comes at 03:00,** unless `nightly_at` in `kit.toml` names another time. A Mac
-  asleep then runs it at the first hourly run after it wakes.
+- **The nightly run comes at 03:00,** unless you move it: `kit nightly at 04:30` sets
+  `nightly_at` in `kit.toml`. A Mac asleep then runs it at the first hourly run after it wakes.
 - **Jobs run one at a time, in order.** One that fails never stops the others. Each may run for
   an hour.
 - **It installs nothing and removes nothing.** The one thing it puts right is a new folder that
@@ -110,6 +110,7 @@ flags the runs themselves:
 | `kit nightly` | Run the jobs due, then every check |
 | `kit nightly --plan` | Say what's due, and run nothing |
 | `kit nightly <job>...` | Run only those jobs, now |
+| `kit nightly at [<time>]` | Show or set when the nightly run falls due |
 | `kit hourly add <name> -- <cmd>` | Declare an hourly job |
 | `kit nightly add <name> -- <cmd>` | Declare a nightly job |
 | `kit check add <name> -- <cmd>` | Declare a check, and run it once |

@@ -17,10 +17,13 @@ At a terminal, `kit` on its own opens a menu of what to run next.
 | `kit why` | Where a package is declared, and what needs it | [Packages](packages.md) |
 | `kit log` | Past runs, with every check and command | [Running by itself](running-by-itself.md) |
 | `kit machine` | Show this Mac's name, or set it | [A new Mac](new-mac.md) |
+| `kit terminal` | The terminal a new Mac's boot opens | [A new Mac](new-mac.md) |
 | `kit bootstrap` | Set up a new Mac: the install line runs it | [A new Mac](new-mac.md) |
 | `kit agent` | Instructions for an agent working through kit | [Agents](agents.md) |
 
 `kit machine add` adds a Mac to kit-config, empty or as a copy of another (`--from`).
+`kit terminal ghostty` sets the terminal, and `kit terminal --none` takes it out.
+`kit nightly at` shows when the nightly run falls due, and `kit nightly at 04:30` moves it.
 `kit agent <topic>` prints one topic of the guide, and `kit agent --help` lists the topics.
 
 ## Packages
@@ -87,6 +90,7 @@ Most of these have `add` and `remove`. Three differ:
 
 Each has `add` and `remove`. `kit manual done` marks a step by hand done on this Mac.
 `kit nightly add` and `kit nightly remove` declare jobs for the nightly run.
+Because `kit nightly <job>` runs a job by name, no job can be named `add`, `remove` or `at`.
 
 ## Other commands
 
