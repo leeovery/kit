@@ -1,6 +1,6 @@
 # The README's demos
 
-Records the clips and stills in the project's README and docs, `art/*.webp`, by drawing kit's real
+Records the clip and stills in the project's README and docs, `art/`, by drawing kit's real
 screens through the capture tool, `cmd/capturetool`: kit's own faces (`internal/render`,
 `internal/look`), in-process, from fixed data: the clips' steps are the render tests' own
 (`internal/render/rendertest`). kit itself never runs: it changes the Mac it runs on. The capture
@@ -20,12 +20,9 @@ demo/record.sh new-mac       # a clip in parts: each part's tape, then joined
 
 | Tape | Draws | Art |
 |---|---|---|
-| `new-mac-1-terminal`, `new-mac-2-ghostty` | scenarios `boot`, `arrival` | `art/new-mac.webp`: the README's lead, a new Mac from the boot's splash in Terminal to kit apply's record in Ghostty; and `demo/out/new-mac.mp4`, the same, for a page that takes a video |
+| `new-mac-1-terminal`, `new-mac-2-ghostty` | scenarios `boot`, `arrival` | `art/new-mac.png`, an APNG: the README's lead, a new Mac from the boot's splash in Terminal to kit apply's record in Ghostty; and `demo/out/new-mac.mp4`, the same, for a page that takes a video |
 | `status` | fixture `status` | `art/status.webp`, a still: `kit status` on a Mac in daily use, two things waiting on the person: an app declared and not yet installed, a tool installed by hand |
-| `apply-card` | fixture `apply-card` | `art/apply-card.webp`, a still: kit apply's screen on the new Mac, 1Password's sign-in come up as a card |
-| `apply-todos` | fixture `apply-todos` | `art/apply-todos.webp`, a still: the to-dos at kit apply's end, one done, the next one's card up |
-| `boot-sign-in` | fixture `boot-sign-in` | `art/boot-sign-in.webp`, a still: the boot in Terminal signing in to GitHub, its QR code the whole window |
-| `reconcile` | fixture `reconcile` | `art/reconcile.webp`, a still: `kit reconcile` at a terminal, one thing decided, the next asked |
+| made by `record.sh` | each fixture that's a window of its own | `art/<name>.webp`, a still each: the README's Screens (`apply-card`, `apply-todos`, `boot-sign-in`, `reconcile`), and every docs page's, named `<page>-<what>` (`go run ./cmd/capturetool --stills` lists them) |
 
 `look.tape` holds the settings every tape sources; `look-terminal.tape` is the boot's, for what's
 recorded in Terminal. A tape's first line says what it makes: `# art: still` a still, `# art: part
@@ -33,8 +30,15 @@ of <clip>` a part of a clip, and any other line a clip of its own. Each tape end
 `Wait+Screen` for a line only its run's end draws, so a scenario stuck on a key, or the capture
 tool failing, fails the recording rather than leaving art that looks right.
 
+A still that's a window of its own has no tape in `demo/`. `capturetool --stills` says, for each,
+its look, its size in cells and the words it shows once drawn; `record.sh` writes its tape from
+that into `demo/out/tapes/`, the window its size, and waits for those words. Each docs still's
+window is a column or two wider than what it draws, so the still is no bigger than its words; a
+README screen is the clip's window, whole. `go test ./internal/capture` holds both to that, and
+the words to what the screen shows.
+
 The art goes to `art/` at the repository's root, so `git diff` shows what a recording changed, and
-the art is committed with the change it shows: WebP alone, as a README doesn't play a video
+the art is committed with the change it shows: images alone, as a README doesn't play a video
 committed beside it.
 
 ## The capture tool
@@ -112,22 +116,26 @@ vhs, and hands its frames to `finalize.sh`:
 
 - **The frames, not a video.** vhs writes every frame it shows to `demo/out/<name>/`, as the
   terminal drew it. A video's compression shifts every pixel a little from frame to frame, which an
-  animated WebP then stores whole; from the frames themselves it stores only what changed,
-  losslessly.
-- **The art.** For a clip, an animated WebP, which GitHub shows inline, at the frames' 30 a second,
-  and an H.264 MP4 of the same frames in `demo/out/`; for a still, a lossless WebP of the last
-  frame. Each frame is set in a 40 px margin of its own background.
+  animated image then stores whole; from the frames themselves it stores only what changed.
+- **The art.** For a clip, an APNG, which GitHub shows inline, at the frames' 30 a second, and an
+  H.264 MP4 of the same frames in `demo/out/`; for a still, a lossless WebP of the last frame. Each
+  frame is set in a 40 px margin of its own background.
+- **The clip is an APNG, not a WebP.** macOS draws images through ImageIO, which decodes each frame
+  of an animated WebP from the first, keyframes or not, so a frame takes longer the later it comes:
+  Safari, Quick Look and Preview play a WebP clip at about a quarter of its pace, and iOS draws
+  images through ImageIO too. ImageIO plays an APNG at its pace, as Chrome and Firefox play both.
+  Stills stay WebP, as ImageIO draws one frame at once.
+- **256 colours.** The clip's frames share one palette of 256 colours, made from them all, with no
+  dither. A PNG of 256 colours stores a pixel in a byte, not three, which halves the APNG. A screen
+  of kit's text holds far fewer colours, so it comes through all but unchanged: at 55 dB or more
+  against the frame drawn. The fade and the arrival's noise lose most, at 46 to 48 dB.
 - **Noise at 10 frames a second.** The splash's decode and the arrival's change the whole window
-  every frame, and no WebP squeezes them: lossy and near-lossless come out larger than lossless,
-  and so does the clip drawn at a smaller font. A frame changing more from the one before than
-  `noisy` says is noise, and in a run of it one frame in `noise_every`, 3, is kept, held for the
-  ones dropped. kit's text, changing a row at a time, and a screen redrawn, a lone frame, keep
-  every frame. Each frame's time is rounded from where the frames before it end, so the WebP is as
-  long as the MP4.
-- **Safari plays it slower.** macOS draws WebP through ImageIO, which decodes each frame of an
-  animated WebP from the first, keyframes or not, so a frame takes longer the later it comes:
-  Safari, Quick Look and Preview play the clip at about a quarter of its pace. Chrome and Firefox
-  play it at the MP4's pace.
+  every frame, and no image format squeezes them: a lossy or near-lossless WebP comes out larger
+  than a lossless one, and so does the clip drawn at a smaller font. A frame changing more from the
+  one before than `noisy` says is noise, and in a run of it one frame in `noise_every`, 3, is kept,
+  held for the ones dropped. kit's text, changing a row at a time, and a screen redrawn, a lone
+  frame, keep every frame. Each frame's time is rounded from where the frames before it end, so the
+  APNG is as long as the MP4.
 - **A clip in parts.** vhs records one terminal, in one theme, so the boot's move from Terminal to
   Ghostty is two tapes, and `finalize.sh --join` joins their frames, the last 0.4 s of the
   Terminal's fading into the first of Ghostty's, its blank window before "hello again": the window
@@ -142,7 +150,7 @@ vhs, and hands its frames to `finalize.sh`:
 ## Setting up
 
 ```bash
-brew install vhs ffmpeg webp go
+brew install vhs ffmpeg webp apngasm go
 brew install --cask font-jetbrains-mono
 ```
 

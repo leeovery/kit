@@ -31,7 +31,7 @@ func TestList(t *testing.T) {
 	if err := run(context.Background(), []string{"--list"}, strings.NewReader(""), &out, size); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--fixture status", "--fixture reconcile", "100×24", "--scenario boot", "--scenario arrival", "120×34"} {
+	for _, want := range []string{"--fixture status", "--fixture reconcile", "82×24", "--scenario boot", "--scenario arrival", "120×34"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("listed\n%s\nwant %q", out.String(), want)
 		}
@@ -54,6 +54,24 @@ func TestScenarioWaitsForItsStart(t *testing.T) {
 	}
 	if !strings.HasPrefix(out.String(), "\x1b[2J\x1b[H") {
 		t.Errorf("drew %q; want the screen cleared first", out.String())
+	}
+}
+
+// --stills lists each window of its own, tab-separated, for record.sh to
+// make its tape: name, look, size, and the words it shows.
+func TestStills(t *testing.T) {
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"--stills"}, strings.NewReader(""), &out, size); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"reconcile\tghostty\t82\t24\tRECONCILE  2 of 3\n", "boot-sign-in\tterminal\t120\t34\tWDJB\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("listed\n%s\nwant %q", got, want)
+		}
+	}
+	if strings.Contains("\n"+got, "\nstatus\t") {
+		t.Errorf("listed\n%s\nwant no printed still, as status is", got)
 	}
 }
 

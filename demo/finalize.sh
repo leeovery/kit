@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 # Make the README's art from the frames a tape in demo/ recorded: for a clip,
-# an animated WebP, which GitHub shows inline, and an MP4 of it in demo/out
-# for pages that take a video (a README doesn't play one committed); for a
-# still, a lossless WebP of its last frame, cropped to what it drew; for a
-# clip in parts, its parts' frames joined, each fading into the next, as the
-# boot in Terminal hands over to Ghostty.
+# an APNG, which GitHub shows inline, and an MP4 of it in demo/out for pages
+# that take a video (a README doesn't play one committed); for a still, a
+# lossless WebP of its last frame, cropped to what it drew; for a clip in
+# parts, its parts' frames joined, each fading into the next, as the boot in
+# Terminal hands over to Ghostty.
+#
+# A clip is an APNG, not an animated WebP: Safari, and every app that draws
+# through macOS's ImageIO, decodes an animated WebP's frame from the first
+# frame on, keyframes or not, so the clip plays at a quarter of its pace
+# there. ImageIO plays an APNG at its pace, as Chrome and Firefox do both.
 #
 # vhs writes each frame it shows, a layer of text and one of the cursor,
 # exactly as the terminal drew them. The art is made from those, not from a
 # video vhs encodes: a video's compression shifts every pixel a little from
-# frame to frame, which an animated WebP then has to store whole, where from
-# the frames themselves it stores only what changed, losslessly.
+# frame to frame, which an animated image then has to store whole, where
+# from the frames themselves it stores only what changed.
 #
 # Usage:  demo/finalize.sh <name>...                    a clip each
 #         demo/finalize.sh --still <name>...            a still each
 #         demo/finalize.sh --join <clip> <part>...      a clip of its parts
 # Input:  demo/out/<name>/   the frames vhs demo/<name>.tape wrote
-# Output: art/<name>.webp, and for a clip, demo/out/<name>.mp4
+# Output: a still's art/<name>.webp; a clip's art/<name>.png and
+#         demo/out/<name>.mp4
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -30,8 +36,8 @@ fade=12 # the frames one part takes to fade into the next, 0.4s
 # less.
 noisy=2
 # Noise keeps one frame in this many. It's the weight of a clip, as no
-# WebP, lossless or lossy, can squeeze it, and it still reads as noise at
-# a fraction of the rate.
+# image format, lossless or lossy, can squeeze it, and it still reads as
+# noise at a fraction of the rate.
 noise_every=3
 
 mode=clip
@@ -119,15 +125,15 @@ changes() {
 		sed -n 's/.*YAVG=//p'
 }
 
-# timed <dir> prints img2webp's arguments for dir's frames, each its time
-# and its file: in a run of noisy frames, one in noise_every kept, its time
-# lengthened by the ones dropped after it. A frame the same as the one
+# timed <dir> prints the frames of dir the clip keeps, a line each: its time
+# in ms and its number, tab-separated. In a run of noisy frames, one in
+# noise_every is kept, its time lengthened by the ones dropped after it. A frame the same as the one
 # before, as vhs takes when the screen's drawn no faster, carries a run on;
 # a noisy frame alone, a screen redrawn, is kept. Each time is in whole ms,
 # rounded from where the frames before it end, so the clip is as long as
 # its frames at fps, the MP4's length, not a third of a ms short a frame.
 timed() {
-	changes "$1" | awk -v fps="$fps" -v noisy="$noisy" -v every="$noise_every" -v dir="$1" '
+	changes "$1" | awk -v fps="$fps" -v noisy="$noisy" -v every="$noise_every" '
 		{
 			run = $1 > noisy || (run && $1 == 0) ? run + 1 : 0
 			if (run > 1 && (run - 1) % every) count[kept]++
@@ -137,21 +143,29 @@ timed() {
 			for (i = 1; i <= NR; i++) if (count[i]) {
 				ms = int((shown + count[i]) * 1000 / fps + 0.5) - int(shown * 1000 / fps + 0.5)
 				shown += count[i]
-				printf "-d\n%d\n%s/f%05d.png\n", ms, dir, i
+				printf "%d\t%05d\n", ms, i
 			}
 		}'
 }
 
-# clip <name> <dir> makes the clip from dir's frames.
+# clip <name> <dir> makes the clip from dir's frames: the APNG from the
+# frames timed keeps, each in one palette of 256 colours made from them
+# all, unblended, as a PNG of up to 256 colours stores each pixel in a byte,
+# not three. That halves the APNG, and leaves kit's text as it was drawn:
+# a screen of it holds far fewer colours, and only the fade and the noise
+# lose any.
 clip() {
-	local args=() line
-	while IFS= read -r line; do
-		args+=("$line")
+	local apng=() ms n
+	ffmpeg -v error -y -framerate "$fps" -i "$2/f%05d.png" -vf palettegen=stats_mode=full "$2.palette.png"
+	mkdir -p "$2.256"
+	ffmpeg -v error -y -framerate "$fps" -i "$2/f%05d.png" -i "$2.palette.png" -lavfi paletteuse=dither=none "$2.256/f%05d.png"
+	while IFS=$'\t' read -r ms n; do
+		apng+=("$2.256/f$n.png" "$ms")
 	done < <(timed "$2")
-	img2webp -loop 0 -lossless -q 80 -m 6 "${args[@]}" -o "$art/$1.webp" >/dev/null
+	apngasm -F -o "$art/$1.png" "${apng[@]}" >/dev/null
 	ffmpeg -v error -y -framerate "$fps" -i "$2/f%05d.png" \
 		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart "$here/out/$1.mp4"
-	made "art/$1.webp" "demo/out/$1.mp4"
+	made "art/$1.png" "demo/out/$1.mp4"
 }
 
 # joined <dir> <part>... writes the parts' frames into dir, one after

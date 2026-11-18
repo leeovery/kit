@@ -10,6 +10,7 @@
 //	capturetool --fixture status     a still, printed at the terminal's width
 //	capturetool --fixture reconcile  a still, a window of its own, held
 //	capturetool --scenario boot      a clip, played full size in real time
+//	capturetool --stills             the windows of their own, for record.sh
 //
 // A still that's a window of its own is drawn on a cleared screen, then
 // held, live, till a line on stdin, or its end, stops it. A scenario waits
@@ -20,12 +21,14 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"text/tabwriter"
 
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/term"
@@ -59,6 +62,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer, size f
 	fixture := flags.String("fixture", "", "print the fixture `name`d, a still")
 	scenario := flags.String("scenario", "", "play the scenario `name`d, a clip")
 	list := flags.Bool("list", false, "list the fixtures and scenarios")
+	stills := flags.Bool("stills", false, "list the stills that are windows of their own, a line each: name, look, columns, lines and the words each shows once drawn, tab-separated")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -68,6 +72,8 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer, size f
 		return fmt.Errorf("unexpected %q: name a fixture or a scenario by its flag", flags.Arg(0))
 	case *list:
 		return listAll(out)
+	case *stills:
+		return listStills(out)
 	case *fixture != "" && *scenario != "":
 		return errors.New("--fixture and --scenario: one at a time")
 	case *fixture != "":
@@ -125,17 +131,30 @@ func untilALine(ctx context.Context, lines *bufio.Scanner) (context.Context, con
 	return ctx, stop
 }
 
-func listAll(out io.Writer) error {
+// listStills lists the stills that are windows of their own, as record.sh
+// makes their tapes from: each its name, the look it's recorded in, its
+// size and the words it shows once drawn, tab-separated.
+func listStills(out io.Writer) error {
 	w := bufio.NewWriter(out)
+	for _, f := range capture.Fixtures() {
+		if f.Held() {
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\n", f.Name, cmp.Or(string(f.Look), "ghostty"), f.Width, f.Height, f.Shows)
+		}
+	}
+	return w.Flush()
+}
+
+func listAll(out io.Writer) error {
+	w := tabwriter.NewWriter(out, 0, 0, 1, ' ', 0)
 	for _, f := range capture.Fixtures() {
 		size := ""
 		if f.Held() {
 			size = fmt.Sprintf(", %d×%d", f.Width, f.Height)
 		}
-		_, _ = fmt.Fprintf(w, "--fixture %-14s %s%s\n", f.Name, f.About, size)
+		_, _ = fmt.Fprintf(w, "--fixture %s\t%s%s\n", f.Name, f.About, size)
 	}
 	for _, s := range capture.Scenarios() {
-		_, _ = fmt.Fprintf(w, "--scenario %-13s %s, %d×%d\n", s.Name, s.About, s.Width, s.Height)
+		_, _ = fmt.Fprintf(w, "--scenario %s\t%s, %d×%d\n", s.Name, s.About, s.Width, s.Height)
 	}
 	return w.Flush()
 }

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -22,7 +23,9 @@ var update = flag.Bool("update", false, "rewrite the golden files with what the 
 // Each still draws its screen as kit's faces draw it, held by its golden
 // file, testdata/<name>.golden, the screen's words without their colours:
 // a report printed at 80 columns, the same at 120, as kit draws no wider
-// than its look allows; a window of its own at its size, once it holds.
+// than its look allows; a window of its own at its size, once it holds,
+// a column or two wider than what it draws, unless it's the clip's window,
+// and in it without scrolling, showing the words its tape waits for.
 // -update writes them again.
 func TestFixtures(t *testing.T) {
 	for _, f := range capture.Fixtures() {
@@ -45,9 +48,34 @@ func TestFixtures(t *testing.T) {
 			if wide := drawn(t, f, 120); !f.Held() && wide != got {
 				t.Errorf("at 120 columns, drew\n%s\nwant it as at 80", wide)
 			}
+			if widest := widestLine(got); f.Held() && !whole(f) && (widest > f.Width-2 || widest < f.Width-6) {
+				t.Errorf("drew %d columns in a window %d wide: want it a column or two wider than what it draws", widest, f.Width)
+			}
+			if lines := strings.Count(got, "\n") + 1; f.Held() && lines > f.Height {
+				t.Errorf("drew %d lines in a window %d high: its head scrolls away", lines, f.Height)
+			}
+			if f.Held() && (!plainWords.MatchString(f.Shows) || !strings.Contains(got, f.Shows)) {
+				t.Errorf("shows %q: want words its screen shows, with nothing a tape's Wait+Screen reads as a pattern", f.Shows)
+			}
 		})
 	}
 }
+
+// whole is whether f is shown as the clip's window, whole, whatever it
+// draws in it.
+func whole(f capture.Fixture) bool { return f.Width == 120 && f.Height == 34 }
+
+// widestLine is how many columns screen's widest line takes.
+func widestLine(screen string) int {
+	widest := 0
+	for l := range strings.SplitSeq(screen, "\n") {
+		widest = max(widest, ansi.StringWidth(strings.TrimRight(l, " ")))
+	}
+	return widest
+}
+
+// plainWords are words a tape's Wait+Screen finds as they are.
+var plainWords = regexp.MustCompile(`^[A-Za-z0-9 ,'-]+$`)
 
 // drawn is the screen f draws: printed at a terminal width wide; a window
 // of its own at its size, as it holds; its running marks as they start,

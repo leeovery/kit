@@ -8,7 +8,7 @@
 # done by hand, to Ghostty opening and "this window can be closed".
 # new-mac-2-ghostty.tape carries on in Ghostty.
 #
-# Record both, and make art/new-mac.webp, and demo/out/new-mac.mp4:
+# Record both, and make art/new-mac.png, and demo/out/new-mac.mp4:
 #   demo/record.sh new-mac
 
 Output "demo/out/new-mac-1-terminal/"

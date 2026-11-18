@@ -7,7 +7,7 @@ import (
 
 // Screen is what's left on a terminal once raw is written to it: text
 // written over what's there, a carriage return, a new line, the cursor
-// moved up or put in place, a line cleared to its end, the screen cleared
+// moved up or down or put in place, a line cleared to its end or whole, the screen cleared
 // below; other controls change nothing on it. The alternate screen is a
 // screen of its own, the main one kept beneath it: what's left is the one
 // showing.
@@ -46,6 +46,11 @@ func Screen(raw string) string {
 				t = main
 			case final == 'A':
 				t.row = max(t.row-n, 0)
+			case final == 'B':
+				t.row += n
+				for t.row >= len(t.lines) {
+					t.lines = append(t.lines, "")
+				}
 			case final == 'H':
 				row, col := 1, 1
 				_, _ = fmt.Sscanf(params, "%d;%d", &row, &col)
@@ -53,6 +58,8 @@ func Screen(raw string) string {
 				for t.row >= len(t.lines) {
 					t.lines = append(t.lines, "")
 				}
+			case final == 'K' && params == "2":
+				t.lines[t.row] = ""
 			case final == 'K':
 				t.lines[t.row] = cells(t.lines[t.row], t.col)
 			case final == 'J' && params == "2":
