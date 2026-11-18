@@ -59,6 +59,40 @@ func (r Repo) Place(ctx context.Context, url string) (Place, error) {
 	return Place{Repo: repo, Visibility: strings.ToLower(strings.TrimSpace(string(res.Stdout)))}, nil
 }
 
+// NotPrivate is a URL Push pushes to that kit can't prove private, and
+// where it takes the repository, as Place has it.
+type NotPrivate struct {
+	URL   string
+	Place Place
+}
+
+func (e NotPrivate) Error() string {
+	if e.Place.Repo != "" {
+		return fmt.Sprintf("%s is %s on GitHub", e.Place.Repo, e.Place.Visibility)
+	}
+	return fmt.Sprintf("can't prove %s private: %s", Shown(e.URL), e.Place.Unproven)
+}
+
+// ProvePrivate proves private every URL Push pushes to (PushURLs, Place),
+// as kit pushes only to a private repository: a NotPrivate for the first
+// it can't; ErrNoRemote without a remote; an error asking gh.
+func (r Repo) ProvePrivate(ctx context.Context) error {
+	urls, err := r.PushURLs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, url := range urls {
+		place, err := r.Place(ctx, url)
+		switch {
+		case err != nil:
+			return err
+		case !place.Private():
+			return NotPrivate{URL: url, Place: place}
+		}
+	}
+	return nil
+}
+
 // OnGitHub is the repository on github.com url names, written exactly as
 // onGitHub has it, as owner/name: "" when it names none.
 func OnGitHub(url string) string {

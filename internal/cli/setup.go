@@ -63,9 +63,10 @@ runs kit apply.
 It refuses when the config folder holds a config already. Without a
 terminal it asks nothing: a question its flag doesn't answer stops it,
 naming the flag, and running it again with the flag carries on. Run
-again, a question's flag replaces the answer given before, and a --create,
---join or --mac naming another than the run part-way chose is refused.
-It's done once its commit is pushed: if the push fails, running it again
+again, till the commit's edits are made, a question's flag replaces the
+answer given before, and a --create or --join naming another repository
+starts afresh; after, they're refused, as is a --mac or --from other than
+the run part-way chose. It's done once its commit is pushed: if the push fails, running it again
 pushes it. Never delete the config folder part-way: files are moved into
 it and linked back.`,
 		Args: cobra.NoArgs,

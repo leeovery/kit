@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -94,10 +95,63 @@ func (sink) Emit(event.Event) {}
 const helper = "credential.https://github.com.helper"
 
 // gitIn is git in the config folder's clone, as a test has it: its origin,
-// HEAD, and the settings git config keeps, as git sets and reads them.
+// HEAD, its branch, and the settings git config keeps, as git sets and
+// reads them; and, on GitHub, the branches each repository has, and
+// whether it's private.
 type gitIn struct {
-	mu  sync.Mutex
-	has map[string]string
+	mu      sync.Mutex
+	has     map[string]string
+	heads   map[string]string
+	private map[string]bool
+}
+
+// printed is git printing key's value, or nothing when it's not set.
+func (g *gitIn) printed(key string) func(string) (string, error) {
+	return func(string) (string, error) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if value, ok := g.has[key]; ok {
+			return value + "\n", nil
+		}
+		return "", nil
+	}
+}
+
+// remotes is git listing the clone's remotes: origin, once it's cloned,
+// else failing, as outside a repository.
+func (g *gitIn) remotes(string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, ok := g.has["origin"]; ok {
+		return "origin\n", nil
+	}
+	return "", errors.New("fatal: not a git repository")
+}
+
+// lsRemote is git listing the branches GitHub has of the repository the
+// clone's origin names.
+func (g *gitIn) lsRemote(string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.heads[g.has["origin"]], nil
+}
+
+// visibility is gh saying whether the repository the clone pushes to is
+// private.
+func (g *gitIn) visibility(string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.private[g.has["origin"]] {
+		return "PRIVATE\n", nil
+	}
+	return "PUBLIC\n", nil
+}
+
+// pushURL is where git pushes the clone: its pushurl, else its origin.
+func (g *gitIn) pushURL(string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return cmp.Or(g.has["pushurl"], g.has["origin"]) + "\n", nil
 }
 
 func (g *gitIn) put(key, value string) func() {
@@ -153,7 +207,8 @@ func newMac(t *testing.T, repos map[string]bool) *mac {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &mac{home: home, dirs: dirs, run: runnertest.New(t), git: &gitIn{has: map[string]string{}}, cloning: map[string]func(){}}
+	m := &mac{home: home, dirs: dirs, run: runnertest.New(t), cloning: map[string]func(){}}
+	m.git = &gitIn{has: map[string]string{}, heads: map[string]string{}, private: map[string]bool{}}
 	m.gitHub, m.repos = boottest.ServeRepos(t, repos)
 	run := m.run
 	run.On("security", "find-generic-password", "-s", "kit-github", "-w").Exits(44)
@@ -171,7 +226,11 @@ func newMac(t *testing.T, repos map[string]bool) *mac {
 	}
 	run.On("git", m.inClone("symbolic-ref", "HEAD")...).Filters(m.git.get("HEAD"))
 	run.On("git", m.inClone("symbolic-ref", "HEAD", "refs/heads/main")...).Does(m.git.put("HEAD", "refs/heads/main"))
-	run.On("git", m.inClone("remote", "get-url", "origin")...).Filters(m.git.get("origin"))
+	run.On("git", m.inClone("remote")...).Filters(m.git.remotes)
+	run.On("git", m.inClone("config", "--get", "remote.origin.url")...).Filters(m.git.get("origin"))
+	run.On("git", m.inClone("remote", "get-url", "--push", "--all", "origin")...).Filters(m.git.pushURL)
+	run.On("git", m.inClone("for-each-ref", "--count=1", "--format=%(refname)", "refs/heads")...).Filters(m.git.printed("branch"))
+	run.On("git", m.inClone("ls-remote", "--heads", "origin")...).Filters(m.git.lsRemote)
 	for _, args := range [][]string{{"list", "--formula", "--full-name", "-1"}, {"leaves"}, {"leaves", "--installed-on-request"}} {
 		run.On("brew", args...).Fails(runner.ErrNotFound)
 	}
@@ -193,12 +252,30 @@ func (m *mac) cloneArgs(repo string) []string {
 // git's own first branch, tracking nothing, as an empty one is.
 func (m *mac) holds(t *testing.T, repo string, private bool, files map[string]string) {
 	m.repos.Add(repo, private)
+	m.onGitHub(repo, private, len(files) > 0)
 	m.clones(t, repo, files)
 }
 
-// clones has gh repo clone clone repo, holding files, as holds says.
+// onGitHub has GitHub hold repo, private or not, with main or no branch,
+// as gh and git ask it.
+func (m *mac) onGitHub(repo string, private, branch bool) {
+	url := "https://github.com/" + repo + ".git"
+	m.git.mu.Lock()
+	m.git.private[url] = private
+	if branch {
+		m.git.heads[url] = "0e0bf17a399109574ffb00e33300280a33f81ab7\trefs/heads/main\n"
+	}
+	m.git.mu.Unlock()
+	m.run.On("gh", "repo", "view", "https://github.com/"+repo, "--json", "visibility", "--jq", ".visibility").Filters(m.git.visibility)
+}
+
+// clones has gh repo clone clone repo, holding files, as holds says: a
+// clone of its own, git's settings in it new.
 func (m *mac) clones(t *testing.T, repo string, files map[string]string) {
 	m.cloning[repo] = func() {
+		m.git.mu.Lock()
+		clear(m.git.has)
+		m.git.mu.Unlock()
 		m.write(t, ".git/HEAD", "")
 		for name, content := range files {
 			m.write(t, name, content)
@@ -208,16 +285,29 @@ func (m *mac) clones(t *testing.T, repo string, files map[string]string) {
 			m.git.put("HEAD", "refs/heads/master")()
 			return
 		}
-		for key, value := range map[string]string{"HEAD": "refs/heads/main", "remote.origin.fetch": "+refs/heads/main:refs/remotes/origin/main", "branch.main.remote": "origin", "branch.main.merge": "refs/heads/main"} {
+		for key, value := range map[string]string{"HEAD": "refs/heads/main", "branch": "refs/heads/main", "remote.origin.fetch": "+refs/heads/main:refs/remotes/origin/main", "branch.main.remote": "origin", "branch.main.merge": "refs/heads/main"} {
 			m.git.put(key, value)()
 		}
 	}
 	m.run.On("gh", m.cloneArgs(repo)...).Does(m.cloning[repo])
 }
 
+// cutShort is a clone of repo killed before git fetched it: its git folder
+// and origin, nothing else.
+func (m *mac) cutShort(t *testing.T, repo string) func() {
+	return func() {
+		m.git.mu.Lock()
+		clear(m.git.has)
+		m.git.mu.Unlock()
+		m.write(t, ".git/HEAD", "")
+		m.git.put("origin", "https://github.com/"+repo+".git")()
+	}
+}
+
 // creates has GitHub's CLI create repo, private and empty, on GitHub.
 func (m *mac) creates(t *testing.T, repo string) {
 	m.clones(t, repo, nil)
+	m.onGitHub(repo, true, false)
 	m.run.On("gh", "repo", "create", repo, "--private").Does(func() { m.repos.Add(repo, true) })
 }
 
@@ -413,7 +503,7 @@ func TestSetupJoinsAConfig(t *testing.T) {
 		{"one that's no config", true, notes, Answers{Join: "someone/kit-config", Mac: "studio"},
 			[]string{"kit-config failed someone/kit-config holds no kit.toml, so it's no config repository: join yours, or create a new one", "mac deferred needs kit-config"}, "", "", true},
 		{"an empty one", true, nil, Answers{Join: "someone/kit-config", Mac: "laptop"},
-			[]string{"kit-config ok someone/kit-config · new, private", "mac ok laptop"},
+			[]string{"kit-config ok someone/kit-config · private, empty", "mac ok laptop"},
 			"format = 1\nminimum_kit = \"0.1.2\"\nprimary = \"laptop\"\n\n[macs.laptop]\ndescription = \"MacBook Pro\"\n", "", false},
 		{"one to create, there and empty", true, nil, Answers{Create: "kit-config", Mac: "laptop"},
 			[]string{"kit-config ok someone/kit-config · new, private", "mac ok laptop"},
@@ -466,6 +556,38 @@ func TestSetupJoinsOneOfTheirRepositories(t *testing.T) {
 			}
 			if want := "kit-config: which of your private repositories?: someone/dots, someone/notes, Another"; len(ask.asked) < 2 || ask.asked[1] != want {
 				t.Errorf("asked %q, want %q", ask.asked, want)
+			}
+		})
+	}
+}
+
+// A clone cut short, git holding no branch while GitHub has some, is no
+// empty repository: it's cloned again, once, and said so should that be
+// cut short too, nothing recorded of what it holds.
+func TestSetupClonesAgainAClonesCutShort(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		twice bool
+		says  string
+	}{
+		{"cut short once", false, "kit-config ok someone/kit-config · joined · has laptop and studio"},
+		{"cut short twice", true, "kit-config failed someone/kit-config's clone, cloned again, hasn't the branches GitHub has: run kit setup again"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newMac(t, nil)
+			m.holds(t, "someone/kit-config", true, joinedConfig)
+			script := m.run.On("gh", m.cloneArgs("someone/kit-config")...).Does(m.cutShort(t, "someone/kit-config")).Then()
+			if tt.twice {
+				script.Does(m.cutShort(t, "someone/kit-config"))
+			} else {
+				script.Does(m.cloning["someone/kit-config"])
+			}
+			_, report := m.runSetup(t, Answers{Join: "someone/kit-config"}, ConfigStep)
+			if got := said(report, ConfigStep)[0]; got != tt.says {
+				t.Errorf("stood %q, want %q", got, tt.says)
+			}
+			if rec := m.ended(t).Record; tt.twice && (rec.Cloned || rec.Empty) {
+				t.Errorf("cut short twice, recorded %+v", rec)
 			}
 		})
 	}
@@ -560,6 +682,9 @@ func TestSetupStoppedAnywhereEndsAsOneNeverStopped(t *testing.T) {
 			{"cloning", nil, func(_ *testing.T, m *mac) {
 				m.run.On("gh", m.cloneArgs(repo)...).Exits(128).PrintsToStderr("fatal: the remote end hung up unexpectedly\n").Then().Does(m.cloning[repo])
 			}, false},
+			{"cloning, killed before the fetch", nil, func(t *testing.T, m *mac) {
+				m.run.On("gh", m.cloneArgs(repo)...).Does(m.cutShort(t, repo)).Exits(137).Then().Does(m.cloning[repo])
+			}, false},
 			{"cloned, git not set", nil, func(_ *testing.T, m *mac) {
 				m.run.On("git", m.inClone("config", helper, boot.GitCredentials)...).Exits(255).Then().Does(m.git.put(helper, boot.GitCredentials))
 			}, false},
@@ -608,9 +733,8 @@ func TestSetupStoppedAnywhereEndsAsOneNeverStopped(t *testing.T) {
 // Setup refuses a Mac whose config folder holds anything, a config above
 // all, unless its own run part-way left it there: the folder empty, or a
 // clone of the repository it chose, and kit's name for the Mac none, or
-// the one it chose. A run part-way refuses a flag naming kit-config or the
-// Mac otherwise, saying what it recorded. Else setup starts afresh,
-// forgetting a run that finished.
+// the one it chose: its origin read as set, before an insteadOf rewrites
+// it. Else setup starts afresh, forgetting a run that finished.
 func TestBegin(t *testing.T) {
 	partWay := record{Repo: "someone/kit-config", Cloned: true, Mac: "laptop"}
 	for _, tt := range []struct {
@@ -632,9 +756,7 @@ func TestBegin(t *testing.T) {
 		{"setup's own, done", []string{config.File}, "https://github.com/someone/kit-config.git", "laptop", record{Repo: "someone/kit-config", Mac: "laptop", Done: true}, Answers{}, "holds a config already"},
 		{"part-way, another repository's clone", []string{config.File}, "https://github.com/someone/dots.git", "", partWay, Answers{}, "holds a config already"},
 		{"part-way, the Mac kit looks after another", []string{config.File}, "https://github.com/someone/kit-config.git", "studio", partWay, Answers{}, "holds a config already"},
-		{"part-way, joining another", nil, "", "", partWay, Answers{Join: "someone/dots"}, "kit setup, part-way, has someone/kit-config as kit-config: run kit setup again without it, or with --join someone/kit-config"},
-		{"part-way, creating another", nil, "", "", partWay, Answers{Create: "dots"}, "kit setup, part-way, has someone/kit-config as kit-config"},
-		{"part-way, naming another Mac", nil, "", "", partWay, Answers{Mac: "studio"}, "kit setup, part-way, named this Mac laptop: run kit setup again without it, or with --mac laptop"},
+		{"part-way, joining another", nil, "", "", partWay, Answers{Join: "someone/dots"}, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newMac(t, nil)
@@ -665,6 +787,66 @@ func TestBegin(t *testing.T) {
 			rec, _ := kitstate.Load[record](m.dirs.State, recordName)
 			if kept := rec.Repo != ""; err == nil && kept != tt.record.partWay() {
 				t.Errorf("the record is %+v: want it kept only part-way", rec)
+			}
+		})
+	}
+}
+
+// Run again with a flag naming kit-config or this Mac otherwise than the
+// run part-way chose: till the commit's edits are made, another repository
+// starts setup afresh, setup's own clone deleted, and the name it gave the
+// Mac with it; --create names one on the account signed in to. Once
+// they're made, it's refused, naming the one chosen, the clone kept. This
+// Mac's name, and the Mac it's a copy of, are refused, as they're written
+// in kit-config and kit's state.
+func TestSetupRunAgainNamingAnother(t *testing.T) {
+	first := Answers{Join: "someone/kit-config", Mac: "studio"}
+	for _, tt := range []struct {
+		name       string
+		first      Answers
+		declared   bool
+		again      Answers
+		want       []string
+		repo, mac  string
+		machineSet string
+	}{
+		{"joining another", first, false, Answers{Join: "someone/dots", Mac: "laptop"},
+			[]string{"kit-config ok someone/dots · joined · has laptop and studio", "mac ok laptop"}, "someone/dots", "laptop", "laptop"},
+		{"creating one", first, false, Answers{Create: "kit-config-2", Mac: "laptop"},
+			[]string{"kit-config ok someone/kit-config-2 · new, private", "mac ok laptop"}, "someone/kit-config-2", "laptop", "laptop"},
+		{"creating the one joined", first, false, Answers{Create: "kit-config"},
+			[]string{"kit-config ok someone/kit-config · joined · has laptop and studio", "mac ok studio"}, "someone/kit-config", "studio", "studio"},
+		{"joining another, its edits made", first, true, Answers{Join: "someone/dots"},
+			[]string{"kit-config failed kit setup, part-way, has someone/kit-config as kit-config, its edits made there, files moved into it and linked back: run kit setup again without --create or --join, or with --join someone/kit-config", "mac deferred needs kit-config"},
+			"someone/kit-config", "studio", "studio"},
+		{"naming another Mac", first, false, Answers{Mac: "laptop"},
+			[]string{"kit-config ok someone/kit-config · joined · has laptop and studio", "mac failed kit setup, part-way, named this Mac studio: run kit setup again without --mac, or with --mac studio"},
+			"someone/kit-config", "studio", "studio"},
+		{"a copy of another Mac", Answers{Join: "someone/kit-config", Mac: "mini", From: "laptop"}, false, Answers{From: "studio"},
+			[]string{"kit-config ok someone/kit-config · joined · has laptop, mini and studio", "mac failed kit setup, part-way, named this Mac mini, a copy of laptop: run kit setup again without --from, or with --from laptop"},
+			"someone/kit-config", "mini", "mini"},
+		{"a copy of a Mac, named as one of kit-config's", first, false, Answers{From: "laptop"},
+			[]string{"kit-config ok someone/kit-config · joined · has laptop and studio", "mac failed kit setup, part-way, named this Mac studio, a copy of none of your Macs: run kit setup again without --from"},
+			"someone/kit-config", "studio", "studio"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newMac(t, nil)
+			m.holds(t, "someone/kit-config", true, joinedConfig)
+			m.holds(t, "someone/dots", true, joinedConfig)
+			m.creates(t, "someone/kit-config-2")
+			m.runSetup(t, tt.first, MacStep)
+			if tt.declared {
+				if err := kitstate.Update(m.dirs.State, recordName, func(r *record) { r.Declared = true }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, report := m.runSetup(t, tt.again, MacStep)
+			if got := said(report, ConfigStep, MacStep); !slices.Equal(got, tt.want) {
+				t.Errorf("run again, stood\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tt.want, "\n"))
+			}
+			e := m.ended(t)
+			if e.Record.Repo != tt.repo || e.Record.Mac != tt.mac || e.Machine != tt.machineSet || e.Git["origin"] != "https://github.com/"+tt.repo+".git" {
+				t.Errorf("run again, ended %+v; want %s's clone, the Mac named %s", e, tt.repo, tt.mac)
 			}
 		})
 	}
@@ -727,6 +909,8 @@ func snapshotted(t *testing.T, ask Asker) (*Setup, *mac) {
 	if err := kitstate.Update(m.dirs.State, recordName, func(r *record) { r.Repo = "someone/kit-config" }); err != nil {
 		t.Fatal(err)
 	}
+	m.git.put("origin", "https://github.com/someone/kit-config.git")()
+	m.onGitHub("someone/kit-config", true, true)
 	s := m.setup(Answers{})
 	cfg, err := config.Load(m.dirs.Config, s.Kinds)
 	if err != nil {
@@ -781,6 +965,13 @@ func TestTheSnapshotsQuestions(t *testing.T) {
 		{"to install, no terminal", InstallStep, nil, false, Answers{}, false, nil,
 			"failed no terminal to ask at: --apply installs what kit-config declares 1 thing this Mac hasn't (jq) with the rest, or --no-apply stops to look first", ""},
 		{"to install, given anew", InstallStep, func(r *record) { r.Apply = &no }, false, Answers{Apply: &yes}, false, nil, "ok with the rest", ""},
+		{"data, given anew once the edits are made", DataStep, func(r *record) { r.Restore, r.Declared = &[]string{}, true }, false, Answers{Restore: &code}, false, nil,
+			"failed kit setup, part-way, has made its edits in kit-config, your data none: run kit setup again without --restore or --no-restore", ""},
+		{"files, given anew once the edits are made", FilesStep, func(r *record) { r.Link, r.Declared = &[]string{"~/.zshrc"}, true }, false, Answers{Link: &[]string{}}, false, nil,
+			"failed kit setup, part-way, has made its edits in kit-config, linked files 1: run kit setup again without --link or --no-link", ""},
+		{"prefs, given anew once the edits are made", PrefsStep, func(r *record) { r.Prefs, r.Declared = &yes, true }, false, Answers{Prefs: &no}, false, nil,
+			"failed kit setup, part-way, has made its edits in kit-config, apps' settings every night: run kit setup again without --prefs or --no-prefs", ""},
+		{"prefs, given again as made", PrefsStep, func(r *record) { r.Prefs, r.Declared = &yes, true }, false, Answers{Prefs: &yes}, false, nil, "ok every night", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var ask *asker
@@ -867,18 +1058,26 @@ func TestSetupCommitsTheAnswersThenSays(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		private bool
+		pushURL string
 		state   check.State
 		says    string
 		done    bool
 	}{
-		{"pushed", true, check.OK, "ok committed and pushed", true},
-		{"not pushed", true, check.Attention, "attention committed, not pushed; " + carryOn, false},
-		{"not committed", true, check.Failed, "failed couldn't commit; " + carryOn, false},
-		{"public", false, check.OK, "failed someone/kit-config is public on GitHub, and a config repository is always private: make it private, then run kit setup again", false},
+		{"pushed", true, "", check.OK, "ok committed and pushed", true},
+		{"not pushed", true, "", check.Attention, "attention committed, not pushed; " + carryOn, false},
+		{"not committed", true, "", check.Failed, "failed couldn't commit; " + carryOn, false},
+		{"public", false, "", check.OK, "failed someone/kit-config is public on GitHub, and kit-config is pushed only to a private repository: make it private, then run kit setup again", false},
+		{"pushed elsewhere, public", true, "git@github.com:someone/dots.git", check.OK, "failed someone/dots is public on GitHub, and kit-config is pushed only to a private repository: make it private, then run kit setup again", false},
+		{"pushed elsewhere, off GitHub", true, "https://gitlab.com/someone/kit-config.git", check.OK,
+			"failed can't prove https://gitlab.com/someone/kit-config.git private: kit proves private only a repository on github.com, at https://github.com/<owner>/<name>, git@github.com:<owner>/<name> or ssh://git@github.com/<owner>/<name>: kit-config is pushed only to a repository kit can prove private", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			s, m := snapshotted(t, nil)
-			m.repos.Add("someone/kit-config", tt.private)
+			m.onGitHub("someone/kit-config", tt.private, true)
+			if tt.pushURL != "" {
+				m.git.put("pushurl", tt.pushURL)()
+				m.run.On("gh", "repo", "view", "https://github.com/someone/dots", "--json", "visibility", "--jq", ".visibility").Prints("PUBLIC\n")
+			}
 			m.pushes = []check.State{tt.state}
 			yes := true
 			if err := s.update(func(r *record) { r.Restore, r.Link, r.Prefs = &[]string{"~/Code"}, &[]string{}, &yes }); err != nil {
@@ -890,9 +1089,11 @@ func TestSetupCommitsTheAnswersThenSays(t *testing.T) {
 				t.Errorf("stood %q, want %q", got, tt.says)
 			}
 			switch {
-			case !tt.private && len(m.declared) > 0:
-				t.Errorf("declared %+v in a public repository", m.declared)
-			case tt.private && (len(m.declared) != 1 || !slices.Equal(m.declared[0].Restore, []string{"~/Code"}) || len(m.declared[0].Link) != 0 || !m.declared[0].Prefs || m.declared[0].Found != s.found):
+			case tt.state == check.OK && !tt.done:
+				if len(m.declared) > 0 {
+					t.Errorf("declared %+v, pushed where it isn't proven private", m.declared)
+				}
+			case len(m.declared) != 1 || !slices.Equal(m.declared[0].Restore, []string{"~/Code"}) || len(m.declared[0].Link) != 0 || !m.declared[0].Prefs || m.declared[0].Found != s.found:
 				t.Errorf("declared %+v, want the snapshot and the answers recorded", m.declared)
 			}
 			if s.Done() != tt.done {

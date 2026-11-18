@@ -431,24 +431,25 @@ func (p *Prefs) repo() gitrepo.Repo {
 // pushes to is proven private (gitrepo.Place): why it didn't push, or ""
 // once pushed.
 func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
-	urls, err := repo.PushURLs(ctx)
+	missing, err := gitrepo.Repo{Dir: p.Config, Run: p.Run}.BranchMissing(ctx)
+	switch {
+	case err != nil:
+		return err.Error()
+	case missing:
+		return "kit-config's own branch isn't on its remote yet, and a new repository's first branch pushed is the one a new Mac clones: apps' settings are pushed once kit-config's is"
+	}
+	err = repo.ProvePrivate(ctx)
+	notPrivate, isNot := errors.AsType[gitrepo.NotPrivate](err)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return "no remote to push to"
+	case isNot && notPrivate.Place.Repo != "":
+		place := notPrivate.Place
+		return fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", place.Repo, place.Visibility, place.Repo)
+	case isNot:
+		return fmt.Sprintf("kit pushes apps' settings only to a repository it can prove private, and can't for %s: %s", gitrepo.Shown(notPrivate.URL), notPrivate.Place.Unproven)
 	case err != nil:
 		return err.Error()
-	}
-	for _, url := range urls {
-		place, err := repo.Place(ctx, url)
-		switch {
-		case err != nil:
-			return err.Error()
-		case place.Private():
-		case place.Repo != "":
-			return fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", place.Repo, place.Visibility, place.Repo)
-		default:
-			return fmt.Sprintf("kit pushes apps' settings only to a repository it can prove private, and can't for %s: %s", gitrepo.Shown(url), place.Unproven)
-		}
 	}
 	if err := repo.Push(ctx); err != nil {
 		return err.Error()

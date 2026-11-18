@@ -66,12 +66,16 @@ func Suggest(model string, taken func(string) bool) string {
 // in a config starting on this Mac, its one Mac, written in its first
 // files; in one joined, one of its Macs, or a new one, added as kit machine
 // add adds it. Done when kit has this Mac's name, as setup recorded it, and
-// the config knows it.
+// the config knows it. A --mac or --from other than recorded is refused
+// (sameMac).
 func (s *Setup) macStep() engine.Step {
 	return engine.Step{
 		Name: MacStep, Title: "This Mac",
 		Check: func(context.Context) check.Result {
 			rec := s.record()
+			if err := s.sameMac(rec); err != nil {
+				return check.Result{State: check.Failed, Reason: err.Error()}
+			}
 			name, err := config.ReadMachine(s.Dirs.State)
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
@@ -92,6 +96,9 @@ func (s *Setup) macStep() engine.Step {
 			return check.Result{State: check.OK, Summary: name}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
+			if err := s.sameMac(s.record()); err != nil {
+				return err
+			}
 			if s.record().Mac == "" {
 				if err := s.name(ctx); err != nil {
 					return err
@@ -109,7 +116,7 @@ func (s *Setup) macStep() engine.Step {
 // name names this Mac, recording its name, whether it's new to a config
 // joined, and the Mac it starts as a copy of, if any.
 func (s *Setup) name(ctx context.Context) error {
-	if s.record().Created {
+	if s.record().Empty {
 		name, err := s.newName(ctx, func(string) bool { return false })
 		if err != nil {
 			return err
@@ -131,7 +138,7 @@ func (s *Setup) name(ctx context.Context) error {
 // config starting on this Mac, unless they're there; added to one joined,
 // unless it's there. The terminal is Ghostty when setup runs in it.
 func (s *Setup) known(rec record) error {
-	if !rec.Created {
+	if !rec.Empty {
 		cfg, err := s.config()
 		if err != nil || cfg.Knows(rec.Mac) {
 			return err

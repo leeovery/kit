@@ -89,6 +89,23 @@ func (w *world) clones(t *testing.T, repo string, files map[string]string) {
 	w.fake.On("git", git("symbolic-ref", "HEAD")...).Filters(get("HEAD"))
 	w.fake.On("git", git("symbolic-ref", "HEAD", "refs/heads/main")...).Does(put("HEAD", "refs/heads/main"))
 	w.fake.On("git", git("remote", "get-url", "origin")...).Filters(get("origin"))
+	w.fake.On("git", git("remote")...).Prints("origin\n")
+	w.fake.On("git", git("config", "--get", "remote.origin.url")...).Filters(get("origin"))
+	w.fake.On("git", git("remote", "get-url", "--push", "--all", "origin")...).Filters(get("origin"))
+	w.fake.On("gh", "repo", "view", "https://github.com/"+repo, "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	w.fake.On("git", git("for-each-ref", "--count=1", "--format=%(refname)", "refs/heads")...).Filters(func(string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if branch, ok := has["branch"]; ok {
+			return branch + "\n", nil
+		}
+		return "", nil
+	})
+	heads := ""
+	if len(files) > 0 {
+		heads = head + "\trefs/heads/main\n"
+	}
+	w.fake.On("git", git("ls-remote", "--heads", "origin")...).Prints(heads)
 	w.fake.On("gh", "repo", "clone", repo, dir, "--", "--quiet", "--single-branch").Does(func() {
 		w.write(t, filepath.Join(".config", "kit", ".git", "HEAD"), "")
 		for name, content := range files {
@@ -100,6 +117,7 @@ func (w *world) clones(t *testing.T, repo string, files map[string]string) {
 			return
 		}
 		put("HEAD", "refs/heads/main")()
+		put("branch", "refs/heads/main")()
 		for key, value := range tracking {
 			put(key, value)()
 		}
@@ -297,7 +315,8 @@ func TestSetupAsksAtATerminal(t *testing.T) {
 // A push that fails leaves setup part-way, saying a run again carries on
 // and never to delete kit-config's folder: a run again declares nothing
 // twice, commits nothing new, and pushes what's waiting, to GitHub's new,
-// empty, repository, its branch made by the push. Then it's done.
+// empty, repository, its branch made by the push. Then it's done. What's
+// waiting, if git can't tell, is never taken for nothing to push.
 func TestSetupCarriesOnFromAPushThatFailed(t *testing.T) {
 	w := inUse(t, map[string]bool{})
 	w.creates(t)
@@ -330,7 +349,13 @@ func TestSetupCarriesOnFromAPushThatFailed(t *testing.T) {
 	capturing := `{"on": "started fresh 2026-11-01 09:00", "captured": "2026-11-02T01:00:00Z"}`
 	w.write(t, prefsRecord, capturing)
 	w.fake.On("git", w.committing([]string{"status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"}, paths...)...)
-	w.fake.On("git", git("log", "--format=%ct", "HEAD", "--not", "--remotes=origin")...).Prints("1763460000\n")
+	w.fake.On("git", git("log", "--format=%ct", "HEAD", "--not", "--remotes=origin")...).Exits(128).PrintsToStderr("fatal: bad object HEAD\n").
+		Then().Prints("1763460000\n")
+	out, _, code = w.run(t, flags...)
+	stood = readSetup(t, out).stood()
+	if want := "commit attention 0 declared · nothing changed; couldn't tell what's waiting to be pushed: "; !slices.ContainsFunc(stood, func(s string) bool { return strings.HasPrefix(s, want) }) || code != 1 {
+		t.Errorf("what's waiting not told, kit setup stood\n%s\nexit %d; want it to hold %q, setup not done", strings.Join(stood, "\n"), code, want)
+	}
 	out, errOut, code := w.run(t, flags...)
 	doc := readSetup(t, out)
 	stood = doc.stood()
@@ -351,5 +376,64 @@ func TestSetupCarriesOnFromAPushThatFailed(t *testing.T) {
 	}
 	if _, _, code := w.run(t, "setup"); code != 2 {
 		t.Errorf("once pushed, kit setup exits %d; want it refused, kit looking after this Mac", code)
+	}
+}
+
+// A commit that fails once a file's moved into kit-config and linked back
+// leaves setup part-way: a run again links nothing twice, commits what the
+// first run made, and ends as a setup whose commit never failed.
+func TestSetupCarriesOnFromACommitThatFailed(t *testing.T) {
+	flags := []string{"setup", "--json", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--link", "~/.zshrc", "--no-apply"}
+	made := commit{
+		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+		files:  []string{"kit.toml", "laptop/declarations", "laptop/home/.zshrc"},
+		status: "?? kit.toml\x00?? laptop/declarations\x00?? laptop/home/.zshrc\x00",
+	}
+	mac := func(t *testing.T) *world {
+		w := inUse(t, map[string]bool{})
+		w.creates(t)
+		w.write(t, ".zshrc", "zsh\n")
+		w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "check-ignore", "--verbose", "--stdin", "-z").Exits(1)
+		return w
+	}
+
+	unbroken := mac(t)
+	unbroken.expectCommit(t, made)
+	if _, errOut, code := unbroken.run(t, flags...); code != 0 {
+		t.Fatalf("unbroken, kit setup said %q, exit %d", errOut, code)
+	}
+
+	w := mac(t)
+	failing := made
+	failing.fails = "fatal: unable to write new index file\n"
+	w.expectCommit(t, failing)
+	out, _, code := w.run(t, flags...)
+	stood := readSetup(t, out).stood()
+	if want := "commit failed couldn't commit kit.toml and laptop/: "; !slices.ContainsFunc(stood, func(s string) bool { return strings.HasPrefix(s, want) }) || code != 1 {
+		t.Fatalf("the commit failing, kit setup stood\n%s\nexit %d; want it to hold %q", strings.Join(stood, "\n"), code, want)
+	}
+	w.keeps("laptop/home/.zshrc")
+	w.expectCommit(t, made)
+	out, errOut, code := w.run(t, flags...)
+	doc := readSetup(t, out)
+	if code != 0 {
+		t.Errorf("run again, kit setup stood\n%s\nsaid %q, exit %d", strings.Join(doc.stood(), "\n"), errOut, code)
+	}
+	for _, s := range doc.Steps {
+		if s.ID == "commit" && len(s.Items) > 0 {
+			t.Errorf("run again, the commit's items are %+v: want what's linked already left as it is", s.Items)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(".config", "kit", "kit.toml"), filepath.Join(".config", "kit", "laptop", "declarations"),
+		filepath.Join(".config", "kit", "laptop", "home", ".zshrc"), filepath.Join(".local", "state", "kit", "setup.json"),
+		filepath.Join(".local", "state", "kit", "machine"),
+	} {
+		if got, want := w.read(t, path), unbroken.read(t, path); got != want {
+			t.Errorf("run again, %s =\n%s\nwant, as unbroken,\n%s", path, got, want)
+		}
+	}
+	if got, want := w.linksTo(".zshrc"), filepath.Join(w.home, ".config", "kit", "laptop", "home", ".zshrc"); got != want {
+		t.Errorf("~/.zshrc links to %q, want %q", got, want)
 	}
 }

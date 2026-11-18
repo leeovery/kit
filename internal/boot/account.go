@@ -37,10 +37,10 @@ func (a Account) doing(step, says string) {
 	a.Sink.Emit(event.Doing{Time: a.Now(), Step: step, Says: says})
 }
 
-// Known is the GitHub sign-in at hand: kit's own, kept in the keychain,
+// known is the GitHub sign-in at hand: kit's own, kept in the keychain,
 // else GitHub's CLI's, or the other way round with CLIFirst; "" when
 // there's none.
-func (a Account) Known(ctx context.Context) string {
+func (a Account) known(ctx context.Context) string {
 	ways := []func(context.Context) string{a.kept, a.cli}
 	if a.CLIFirst {
 		slices.Reverse(ways)
@@ -74,13 +74,13 @@ func (a Account) cli(ctx context.Context) string {
 	return strings.TrimSpace(string(res.Stdout))
 }
 
-// Login is the sign-in held, else the one Known finds, and whose it is, as
+// Login is the sign-in held, else the one known finds, and whose it is, as
 // GitHub says: OK when GitHub takes it; Attention, saying so, when there's
 // none, or GitHub's signed it out; Failed when GitHub can't say.
 func (a Account) Login(ctx context.Context, held string) (token, login string, stands check.Result) {
 	token = held
 	if token == "" {
-		token = a.Known(ctx)
+		token = a.known(ctx)
 	}
 	if token == "" {
 		return "", "", check.Result{State: check.Attention, Summary: "not signed in"}

@@ -48,10 +48,16 @@ Every question has its flag; without a terminal kit setup asks nothing.
 3. Run `kit setup --json` again with the new flags. It carries on where it
    stopped: what's done stays done, and nothing is created twice.
 
-Run again, a question's flag replaces the answer given before. A
-`--create`, `--join` or `--mac` naming another repository or Mac than the
-run part-way chose is refused, naming the one it chose: give that, or
-leave the flag out.
+Run again with a flag other than the one given before:
+
+| When | Flag | What happens |
+|---|---|---|
+| Before the commit's edits | a question's | It replaces the answer |
+| Before the commit's edits | `--create`, `--join` | Setup starts afresh |
+| After the commit's edits | any of those | Refused, naming the answer |
+| Any time | `--mac`, `--from` | Refused, naming the answer |
+
+Refused, give the answer it names, or leave the flag out.
 
 Setup is done once its commit is pushed. If the commit or the push fails,
 the `commit` step says so, and running kit setup again pushes it. Never

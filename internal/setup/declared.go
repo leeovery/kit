@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
@@ -88,14 +89,15 @@ func counted(ps []snapshot.Part) check.Result {
 // answered, as its row says it, done when it's answered, unless its flag
 // answers it anew; else whether there's anything to ask, the row saying so
 // when there isn't. ask asks it, its flag answering first, recording the
-// answer. Nothing acts on an answer till setup commits, so a flag given
-// again replaces what's recorded.
+// answer. Nothing acts on an answer till the commit's edits, so a flag,
+// one of flags, given again replaces what's recorded till then, and is
+// refused after.
 type question struct {
-	name, title string
-	answered    func(rec record) (string, bool)
-	anew        func(rec record) bool
-	nothing     func(ctx context.Context, found *snapshot.Snapshot) (string, bool)
-	ask         func(ctx context.Context, found *snapshot.Snapshot) error
+	name, title, flags string
+	answered           func(rec record) (string, bool)
+	anew               func(rec record) bool
+	nothing            func(ctx context.Context, found *snapshot.Snapshot) (string, bool)
+	ask                func(ctx context.Context, found *snapshot.Snapshot) error
 }
 
 // anew reports whether a flag gives an answer, given, other than the one
@@ -126,6 +128,13 @@ func (s *Setup) questionStep(q question) engine.Step {
 			return check.Result{State: check.Attention, Summary: "not asked yet"}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
+			if rec := s.record(); rec.Declared && q.anew(rec) {
+				said, ok := q.answered(rec)
+				if !ok {
+					said = "unasked"
+				}
+				return fmt.Errorf("kit setup, part-way, has made its edits in kit-config, %s %s: run kit setup again without %s", strings.ToLower(q.title), said, q.flags)
+			}
 			found, _ := s.snapshot()
 			return q.ask(ctx, found)
 		},
@@ -153,7 +162,7 @@ func (s *Setup) dataStep() engine.Step {
 		return says(parts...)
 	}
 	return s.questionStep(question{
-		name: DataStep, title: "Your data",
+		name: DataStep, title: "Your data", flags: "--restore or --no-restore",
 		answered: func(rec record) (string, bool) {
 			if rec.Restore == nil {
 				return "", false
@@ -224,7 +233,7 @@ func (s *Setup) ticked(ctx context.Context, step, question string, items []Item)
 // one saving them declares the feature, but has saved nothing.
 func (s *Setup) prefsStep() engine.Step {
 	return s.questionStep(question{
-		name: PrefsStep, title: "Apps' settings",
+		name: PrefsStep, title: "Apps' settings", flags: "--prefs or --no-prefs",
 		answered: func(rec record) (string, bool) {
 			switch {
 			case rec.Prefs == nil:
@@ -270,7 +279,7 @@ func (s *Setup) prefsAnswer(ctx context.Context) (bool, error) {
 // each moved in and linked back, as kit file add does: all suggested.
 func (s *Setup) filesStep() engine.Step {
 	return s.questionStep(question{
-		name: FilesStep, title: "Linked files",
+		name: FilesStep, title: "Linked files", flags: "--link or --no-link",
 		answered: func(rec record) (string, bool) {
 			if rec.Link == nil {
 				return "", false
@@ -313,7 +322,7 @@ func (s *Setup) linkAnswer(ctx context.Context, found *snapshot.Snapshot) ([]str
 // look first: kit apply runs, or doesn't.
 func (s *Setup) installStep() engine.Step {
 	return s.questionStep(question{
-		name: InstallStep, title: "To install",
+		name: InstallStep, title: "To install", flags: "--apply or --no-apply",
 		answered: func(rec record) (string, bool) {
 			switch {
 			case rec.Apply == nil:
@@ -325,7 +334,7 @@ func (s *Setup) installStep() engine.Step {
 		},
 		anew: func(rec record) bool { return anew(s.Given.Apply, rec.Apply) },
 		nothing: func(ctx context.Context, _ *snapshot.Snapshot) (string, bool) {
-			if s.record().Created {
+			if s.record().Empty {
 				return "nothing more", true
 			}
 			missing := s.missing(ctx)
@@ -407,10 +416,11 @@ func (s *Setup) missing(ctx context.Context) *[]string {
 }
 
 // commitStep declares what the snapshot found, then the answers, and
-// commits and pushes them as one (Declare), once GitHub says kit-config's
-// repository is private, whichever way it was chosen: done once it's
+// commits and pushes them as one (Declare), once every URL git pushes the
+// clone to is proven private (gitrepo.ProvePrivate): done once it's
 // pushed, which ends setup's part. Till then, a run again declares only
-// what isn't, and pushes what's committed.
+// what isn't, and pushes what's committed. Its edits begun are recorded,
+// as the clone can't tell them from the first files the Mac's step wrote.
 func (s *Setup) commitStep() engine.Step {
 	return engine.Step{
 		Name: CommitStep, Title: "Committed",
@@ -425,13 +435,14 @@ func (s *Setup) commitStep() engine.Step {
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
 			rec := s.record()
-			token, _ := s.signedIn()
-			private, err := s.GitHub.Private(ctx, token, rec.Repo)
-			if err := refusal(rec.Repo, private, err); err != nil {
+			if err := s.provenPrivate(ctx); err != nil {
+				return err
+			}
+			if err := s.update(func(r *record) { r.Declared = true }); err != nil {
 				return err
 			}
 			found, _ := s.snapshot()
-			d := Declaring{Found: found, Empty: rec.Created, Prefs: s.capturing()}
+			d := Declaring{Found: found, Empty: rec.Empty, Prefs: s.capturing()}
 			if rec.Prefs != nil {
 				d.Prefs = *rec.Prefs
 			}
@@ -454,6 +465,23 @@ func (s *Setup) commitStep() engine.Step {
 			return s.update(func(r *record) { r.Done = true })
 		},
 	}
+}
+
+// provenPrivate is why the clone isn't pushed to a repository proven
+// private, each URL git pushes it to, after any pushurl or pushInsteadOf:
+// nil when every one is.
+func (s *Setup) provenPrivate(ctx context.Context) error {
+	err := gitrepo.Repo{Dir: s.Dirs.Config, Run: s.Run}.ProvePrivate(ctx)
+	notPrivate, isNot := errors.AsType[gitrepo.NotPrivate](err)
+	switch {
+	case isNot && notPrivate.Place.Repo != "":
+		return fmt.Errorf("%s, and kit-config is pushed only to a private repository: make it private, then run kit setup again", notPrivate)
+	case isNot:
+		return fmt.Errorf("%s: kit-config is pushed only to a repository kit can prove private", notPrivate)
+	case err != nil:
+		return fmt.Errorf("find where kit-config is pushed: %w", err)
+	}
+	return nil
 }
 
 // stopped is res, setup's commit or push that didn't go, saying a run

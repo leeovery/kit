@@ -227,11 +227,6 @@ func (b *Boot) account() Account {
 	return Account{Run: b.Run, Sink: b.Sink, Ask: b.Ask, GitHub: b.GitHub, Now: b.Now}
 }
 
-// signIn signs in to GitHub through its device flow, in the GitHub row.
-func (b *Boot) signIn(ctx context.Context) (string, error) {
-	return b.account().SignIn(ctx, GitHubStep)
-}
-
 // keychainItem is where kit keeps GitHub's sign-in, in the login keychain,
 // till GitHub's CLI has it.
 const keychainItem = "kit-github"

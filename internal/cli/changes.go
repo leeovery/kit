@@ -162,15 +162,20 @@ func (s syncing) push(ctx context.Context) check.Result {
 }
 
 // pushWaiting is how syncing stands with nothing committed: the commits
-// waiting for the upstream pushed, if there are any.
+// waiting for the upstream pushed, if there are any, and needing attention
+// when what's waiting can't be told, never "nothing changed".
 func (s syncing) pushWaiting(ctx context.Context) check.Result {
 	nothing := check.Result{State: check.OK, Summary: "nothing changed"}
-	n := s.repo.Unpushed(ctx)
-	if n == 0 {
+	made, err := s.repo.Waiting(ctx)
+	switch {
+	case errors.Is(err, gitrepo.ErrNoRemote), err == nil && len(made) == 0:
 		return nothing
+	case err != nil:
+		return check.Result{State: check.Attention, Summary: "nothing changed; couldn't tell what's waiting to be pushed: " + err.Error()}
 	}
+	n := len(made)
 	waiting := fmt.Sprintf("%d %s waiting", n, look.Plural(n, "commit", "commits"))
-	err := s.repo.Push(ctx)
+	err = s.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return nothing

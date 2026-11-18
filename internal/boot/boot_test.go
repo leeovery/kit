@@ -349,12 +349,12 @@ func TestGitHubCodeExpiresOrIsDeclined(t *testing.T) {
 	gh := &gitHub{answers: []string{"expired_token", "token"}, token: "gho_secret", repo: "someone/kit-config", archive: archive(t, map[string]string{config.File: kitToml})}
 	b, _ := newBoot(t, nil, gh.serve(t), &asker{picks: []string{"enter", "", "enter"}})
 	b.Run = runnertest.New(t)
-	if _, err := b.signIn(context.Background()); err != nil || gh.codes != 2 {
+	if _, err := b.account().SignIn(context.Background(), GitHubStep); err != nil || gh.codes != 2 {
 		t.Errorf("signIn = %v after %d codes; want a sign-in from the second", err, gh.codes)
 	}
 	gh.answers = []string{"access_denied"}
 	b.Ask = &asker{picks: []string{"enter"}}
-	if _, err := b.signIn(context.Background()); !errors.Is(err, errDenied) {
+	if _, err := b.account().SignIn(context.Background(), GitHubStep); !errors.Is(err, errDenied) {
 		t.Errorf("signIn = %v; want it declined", err)
 	}
 }
@@ -382,7 +382,7 @@ func TestGitHubSignInIsDoneAskingOnceSignedIn(t *testing.T) {
 	gh := &gitHub{answers: []string{"token"}, token: "gho_secret"}
 	ask := &slowPick{picks: []string{"enter"}}
 	b, _ := newBoot(t, runnertest.New(t), gh.serve(t), ask)
-	if _, err := b.signIn(context.Background()); err != nil {
+	if _, err := b.account().SignIn(context.Background(), GitHubStep); err != nil {
 		t.Fatal(err)
 	}
 	if !ask.ended.Load() {
@@ -408,7 +408,7 @@ func TestGitHubSignInHere(t *testing.T) {
 		}
 	}
 	b.GitHub = api
-	if _, err := b.signIn(context.Background()); err != nil {
+	if _, err := b.account().SignIn(context.Background(), GitHubStep); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(run.Calls(), "open https://github.com/login/device") {

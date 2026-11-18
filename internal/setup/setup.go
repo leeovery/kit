@@ -144,22 +144,25 @@ type Setup struct {
 const recordName = "setup.json"
 
 // record is what setup keeps between its runs: the config repository;
-// whether kit-config starts on this Mac, created by setup or joined empty,
-// and whether its clone was looked at for that; this Mac's name, and
-// whether it's new to kit-config, and the Mac it starts as a copy of; the
-// answers given; and whether it's done, pushed.
+// whether it was to be created, whether it was empty, created or joined
+// so, kit-config starting on this Mac, and whether its clone was looked at
+// for that; this Mac's name, whether it's new to kit-config, and the Mac
+// it starts as a copy of; the answers given; whether the commit's edits
+// were begun; and whether it's done, pushed.
 type record struct {
-	Repo    string    `json:"repo,omitempty"`
-	Created bool      `json:"created,omitempty"`
-	Cloned  bool      `json:"cloned,omitempty"`
-	Mac     string    `json:"mac,omitempty"`
-	NewMac  bool      `json:"new_mac,omitempty"`
-	From    string    `json:"from,omitempty"`
-	Restore *[]string `json:"restore,omitempty"`
-	Link    *[]string `json:"link,omitempty"`
-	Prefs   *bool     `json:"prefs,omitempty"`
-	Apply   *bool     `json:"apply,omitempty"`
-	Done    bool      `json:"done,omitempty"`
+	Repo     string    `json:"repo,omitempty"`
+	Created  bool      `json:"created,omitempty"`
+	Empty    bool      `json:"empty,omitempty"`
+	Cloned   bool      `json:"cloned,omitempty"`
+	Mac      string    `json:"mac,omitempty"`
+	NewMac   bool      `json:"new_mac,omitempty"`
+	From     string    `json:"from,omitempty"`
+	Restore  *[]string `json:"restore,omitempty"`
+	Link     *[]string `json:"link,omitempty"`
+	Prefs    *bool     `json:"prefs,omitempty"`
+	Apply    *bool     `json:"apply,omitempty"`
+	Declared bool      `json:"declared,omitempty"`
+	Done     bool      `json:"done,omitempty"`
 }
 
 // partWay reports whether setup was stopped part-way: a config repository
@@ -168,8 +171,7 @@ func (r record) partWay() bool { return r.Repo != "" && !r.Done }
 
 // Begin readies a run of setup: refused while the config folder holds
 // anything, unless setup's own run part-way left it there (carriesOn),
-// which carries on, but not with a flag naming kit-config or this Mac
-// otherwise than it recorded; else started afresh.
+// which carries on; else started afresh.
 func (s *Setup) Begin(ctx context.Context) error {
 	rec, err := kitstate.Load[record](s.Dirs.State, recordName)
 	if err != nil {
@@ -185,7 +187,7 @@ func (s *Setup) Begin(ctx context.Context) error {
 	case err != nil:
 		return err
 	case carries:
-		return s.asRecorded(rec)
+		return nil
 	case empty:
 		return s.update(func(r *record) { *r = record{} })
 	}
@@ -196,8 +198,8 @@ func (s *Setup) Begin(ctx context.Context) error {
 }
 
 // carriesOn reports whether rec is setup's run part-way, for this one to
-// carry on: the config folder empty, or a clone of the repository rec
-// names; kit's name for this Mac none yet, or the one rec names.
+// carry on: the config folder empty, or setup's own clone (ownClone); kit's
+// name for this Mac none yet, or the one rec names.
 func (s *Setup) carriesOn(ctx context.Context, rec record, empty bool) (bool, error) {
 	if !rec.partWay() {
 		return false, nil
@@ -206,30 +208,31 @@ func (s *Setup) carriesOn(ctx context.Context, rec record, empty bool) (bool, er
 	if err != nil || name != "" && name != rec.Mac {
 		return false, err
 	}
-	return empty || strings.EqualFold(s.origin(ctx), rec.Repo), nil
+	return empty || s.ownClone(ctx, rec), nil
 }
 
-// origin is the repository on GitHub the config folder's clone is of, as
-// owner/name: "" when it's no clone of one.
-func (s *Setup) origin(ctx context.Context) string {
-	res, err := s.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", s.Dirs.Config, "remote", "get-url", "origin"}})
-	if err != nil {
-		return ""
-	}
-	return gitrepo.OnGitHub(strings.TrimSpace(string(res.Stdout)))
+// ownClone reports whether the config folder holds setup's own clone, of
+// the repository rec names, by the URL its origin has set, as cloned,
+// before any insteadOf of the person's rewrites it.
+func (s *Setup) ownClone(ctx context.Context, rec record) bool {
+	url, err := gitrepo.Repo{Dir: s.Dirs.Config, Run: s.Run}.SetURL(ctx)
+	return err == nil && strings.EqualFold(gitrepo.OnGitHub(url), rec.Repo)
 }
 
-// asRecorded refuses a flag naming kit-config or this Mac otherwise than
-// rec, a run part-way, records them.
-func (s *Setup) asRecorded(rec record) error {
+// sameMac refuses a --mac or --from other than rec, a run part-way,
+// records: this Mac's name is written in kit-config and kit's state.
+func (s *Setup) sameMac(rec record) error {
 	g := s.Given
-	_, name, _ := strings.Cut(rec.Repo, "/")
-	again := "run kit setup again without it"
+	if rec.Mac == "" {
+		return nil
+	}
 	switch {
-	case g.Join != "" && !strings.EqualFold(g.Join, rec.Repo), g.Create != "" && !strings.EqualFold(g.Create, name):
-		return fmt.Errorf("kit setup, part-way, has %s as kit-config: %s, or with --join %s", rec.Repo, again, rec.Repo)
-	case g.Mac != "" && rec.Mac != "" && g.Mac != rec.Mac:
-		return fmt.Errorf("kit setup, part-way, named this Mac %s: %s, or with --mac %s", rec.Mac, again, rec.Mac)
+	case g.Mac != "" && g.Mac != rec.Mac:
+		return fmt.Errorf("kit setup, part-way, named this Mac %s: run kit setup again without --mac, or with --mac %s", rec.Mac, rec.Mac)
+	case g.From != "" && g.From != rec.From && rec.From == "":
+		return fmt.Errorf("kit setup, part-way, named this Mac %s, a copy of none of your Macs: run kit setup again without --from", rec.Mac)
+	case g.From != "" && g.From != rec.From:
+		return fmt.Errorf("kit setup, part-way, named this Mac %s, a copy of %s: run kit setup again without --from, or with --from %s", rec.Mac, rec.From, rec.From)
 	}
 	return nil
 }

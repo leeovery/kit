@@ -77,13 +77,16 @@ func (s *Setup) gitHubStep() engine.Step {
 // configStep creates the config repository, private, on the person's
 // account, or joins one of theirs, private, then clones it, as the boot
 // does, and sets git in the clone (settings): done when it's cloned, looked
-// at (lookAtClone), and git's set so.
+// at (lookAtClone), and git's set so. A --create or --join naming another
+// repository than a run part-way chose starts afresh (renamed).
 func (s *Setup) configStep() engine.Step {
 	return engine.Step{
 		Name: ConfigStep, Title: "kit-config",
 		Check: func(ctx context.Context) check.Result {
 			rec := s.record()
 			switch {
+			case s.renamed(rec):
+				return check.Result{State: check.Attention, Summary: says(rec.Repo, "named anew")}
 			case rec.Repo == "":
 				return check.Result{State: check.Attention, Summary: "not chosen yet"}
 			case !s.cloned():
@@ -94,6 +97,8 @@ func (s *Setup) configStep() engine.Step {
 				return check.Result{State: check.Attention, Summary: says(rec.Repo, "git not set to fetch and push it yet")}
 			case rec.Created:
 				return check.Result{State: check.OK, Summary: says(rec.Repo, "new, private")}
+			case rec.Empty:
+				return check.Result{State: check.OK, Summary: says(rec.Repo, "private, empty")}
 			}
 			parts := []string{rec.Repo, "joined"}
 			if cfg, err := s.config(); err == nil {
@@ -102,25 +107,84 @@ func (s *Setup) configStep() engine.Step {
 			return check.Result{State: check.OK, Summary: says(parts...)}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
+			if rec := s.record(); s.renamed(rec) {
+				if err := s.startAfresh(rec); err != nil {
+					return err
+				}
+			}
 			if s.record().Repo == "" {
 				if err := s.chooseAndReady(ctx); err != nil {
 					return err
 				}
 			}
-			rec := s.record()
-			if !s.cloned() {
-				if err := s.account().Clone(ctx, ConfigStep, rec.Repo, s.Dirs.Config); err != nil {
-					return err
-				}
-			}
-			if !rec.Cloned {
-				if err := s.lookAtClone(rec); err != nil {
-					return err
-				}
+			if err := s.clone(ctx, false); err != nil {
+				return err
 			}
 			return s.set(ctx, s.unset(ctx, s.record()))
 		},
 	}
+}
+
+// renamed reports whether --create or --join names another repository than
+// rec records: --create's on the account signed in to.
+func (s *Setup) renamed(rec record) bool {
+	_, login := s.signedIn()
+	g := s.Given
+	return rec.Repo != "" && (g.Join != "" && !strings.EqualFold(g.Join, rec.Repo) || g.Create != "" && !strings.EqualFold(login+"/"+g.Create, rec.Repo))
+}
+
+// startAfresh forgets rec, a run part-way, for another repository: its
+// clone, setup's own, deleted, and this Mac's name, as setup gave it. Once
+// the commit's edits are begun, files moved into the clone from the home
+// folder and linked back, it's refused.
+func (s *Setup) startAfresh(rec record) error {
+	if rec.Declared {
+		return fmt.Errorf("kit setup, part-way, has %s as kit-config, its edits made there, files moved into it and linked back: run kit setup again without --create or --join, or with --join %s", rec.Repo, rec.Repo)
+	}
+	if err := os.RemoveAll(s.Dirs.Config); err != nil {
+		return err
+	}
+	if name, err := config.ReadMachine(s.Dirs.State); err != nil || name != "" && name == rec.Mac {
+		if err != nil {
+			return err
+		}
+		if err := config.WriteMachine(s.Dirs.State, ""); err != nil {
+			return err
+		}
+	}
+	return s.update(func(r *record) { *r = record{} })
+}
+
+// clone clones the recorded repository, unless it's cloned, has git sign
+// in through GitHub's CLI there, and looks at it (lookAtClone), unless it
+// was. A clone cut short, GitHub holding branches it hasn't, is cloned
+// again, once: again says it's been.
+func (s *Setup) clone(ctx context.Context, again bool) error {
+	rec := s.record()
+	if !s.cloned() {
+		if err := s.account().Clone(ctx, ConfigStep, rec.Repo, s.Dirs.Config); err != nil {
+			return err
+		}
+	}
+	if rec.Cloned {
+		return nil
+	}
+	if err := s.set(ctx, s.unset(ctx, record{})); err != nil {
+		return err
+	}
+	cut, err := s.lookAtClone(ctx, rec)
+	switch {
+	case err != nil:
+		return err
+	case !cut:
+		return nil
+	case again:
+		return fmt.Errorf("%s's clone, cloned again, hasn't the branches GitHub has: run kit setup again", rec.Repo)
+	}
+	if err := os.RemoveAll(s.Dirs.Config); err != nil {
+		return err
+	}
+	return s.clone(ctx, true)
 }
 
 // chooseAndReady chooses the config repository (chooseRepo), readies it
@@ -172,29 +236,37 @@ func refusal(repo string, private bool, err error) error {
 }
 
 // lookAtClone looks at what rec's repository's clone holds, before
-// anything's written in it: empty, kit-config starts on this Mac, as one
-// created does; a config, it's joined. Else, or holding anything when it
-// was to be created, the clone's deleted, and the choice with it.
-func (s *Setup) lookAtClone(rec record) error {
-	entries, err := os.ReadDir(s.Dirs.Config)
+// anything's written in it, as git has it: no branch, and GitHub none, it's
+// empty, and kit-config starts on this Mac, as one created does; no branch,
+// and GitHub some, the clone was cut short, which it reports; a config,
+// it's joined. Else, or holding anything when it was to be created, the
+// clone's deleted, and the choice with it.
+func (s *Setup) lookAtClone(ctx context.Context, rec record) (cut bool, err error) {
+	branches, err := s.git(ctx, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads")
 	if err != nil {
-		return err
+		return false, fmt.Errorf("read %s's clone: %w", rec.Repo, err)
 	}
-	_, noConfig := os.Stat(filepath.Join(s.Dirs.Config, config.File))
-	switch {
-	case len(entries) == 1 && entries[0].Name() == ".git":
-		return s.update(func(r *record) { r.Created, r.Cloned = true, true })
-	case noConfig == nil && !rec.Created:
-		return s.update(func(r *record) { r.Cloned = true })
+	if strings.TrimSpace(string(branches.Stdout)) == "" {
+		heads, err := s.git(ctx, "ls-remote", "--heads", "origin")
+		if err != nil {
+			return false, fmt.Errorf("ask GitHub what %s holds: %w", rec.Repo, err)
+		}
+		if strings.TrimSpace(string(heads.Stdout)) != "" {
+			return true, nil
+		}
+		return false, s.update(func(r *record) { r.Empty, r.Cloned = true, true })
+	}
+	if _, err := os.Stat(filepath.Join(s.Dirs.Config, config.File)); err == nil && !rec.Created {
+		return false, s.update(func(r *record) { r.Cloned = true })
 	}
 	refused := fmt.Errorf("%s holds no %s, so it's no config repository: join yours, or create a new one", rec.Repo, config.File)
 	if rec.Created {
 		refused = fmt.Errorf("%s is on GitHub already, holding files: join it with --join %s, or create one named otherwise", rec.Repo, rec.Repo)
 	}
 	if err := os.RemoveAll(s.Dirs.Config); err != nil {
-		return errors.Join(refused, err)
+		return false, errors.Join(refused, err)
 	}
-	return errors.Join(refused, s.update(func(r *record) { *r = record{} }))
+	return false, errors.Join(refused, s.update(func(r *record) { *r = record{} }))
 }
 
 // setting is one of git's settings in the config repository's clone: how
@@ -216,7 +288,7 @@ func gitConfig(key, want string) setting {
 // the first push.
 func settings(rec record) []setting {
 	out := []setting{gitConfig("credential.https://github.com.helper", boot.GitCredentials)}
-	if !rec.Created {
+	if !rec.Empty {
 		return out
 	}
 	return append(out,

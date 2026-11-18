@@ -48,10 +48,14 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 }
 
 // onTheBranch scripts, on fake, kit-config's clone, at config, fetching
-// from remote alone, and the store's clone, at clone, a clone of its prefs
-// branch, with the clone's own git settings.
+// from remote alone, its branch, main, on the remote, and the store's
+// clone, at clone, a clone of its prefs branch, with the clone's own git
+// settings.
 func onTheBranch(fake *runnertest.Fake, config, clone string) {
 	fake.On("git", "-C", config, "remote").Prints("origin\n")
+	fake.On("git", "-C", config, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/main\n")
+	fake.On("git", "-C", config, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main").Prints("refs/remotes/origin/main refs/heads/main\n")
+	fake.On("git", "-C", config, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Prints(head + "\n")
 	fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", config, "config", "--get", "remote.origin.url").Prints(remote + "\n")
 	fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
@@ -375,6 +379,30 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 		if rec, _ := w.p.Load(); rec.Unpushed.IsZero() || !strings.HasPrefix(rec.PushError, c.want) {
 			t.Errorf("%s: record = %+v, want the push held back, and why", c.name, rec)
 		}
+	}
+}
+
+// The store waits for kit-config's own branch on the remote, as when kit
+// setup's first push to a new repository didn't go: GitHub makes the first
+// branch pushed the one a new Mac's boot clones. The commit waits, and the
+// record says since when.
+func TestCaptureWaitsForKitConfigsBranch(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "started fresh"}`)
+	w.fake.On("defaults", "domains").Prints("com.example.app\n")
+	w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
+	w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
+		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
+	w.fake.On("git", "-C", w.config, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Exits(1)
+	report, err := w.p.Capture(t.Context())
+	if says := "kit-config's own branch isn't on its remote yet"; err != nil || !strings.HasPrefix(report.PushError, says) {
+		t.Errorf("Capture() = %+v, %v; want the push held, saying %q", report, err, says)
+	}
+	if slices.ContainsFunc(w.fake.Calls(), func(call string) bool { return strings.Contains(call, " push ") }) {
+		t.Error("pushed apps' settings before kit-config's branch")
+	}
+	if rec, _ := w.p.Load(); rec.Unpushed.IsZero() {
+		t.Errorf("record = %+v, want the push waiting", rec)
 	}
 }
 
