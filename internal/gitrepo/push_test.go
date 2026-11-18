@@ -447,6 +447,28 @@ func TestPushToANewBranch(t *testing.T) {
 		t.Errorf("Push(), the upstream not there yet = %v", err)
 	}
 	s.check(t, "the upstream not there yet")
+
+	fake = runnertest.New(t)
+	s = &sequence{fake: fake}
+	s.expect(remoteOf...).Prints("origin\n")
+	s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
+	s.expect(statusOf()...)
+	s.expect(branchOf...).Prints("refs/heads/main\n")
+	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.expect(fetchIt...).Exits(128).PrintsToStderr(missingRef("refs/heads/main"))
+	s.expect(upstreamAt...).Exits(1)
+	s.expect(pushIt...)
+	if err := push(fake); err != nil {
+		t.Errorf("Push(), one branch cloned, not on the remote yet = %v", err)
+	}
+	s.check(t, "one branch cloned, not on the remote yet")
+}
+
+// missingRef is what real git prints when a clone of one branch, ref,
+// fetches it from a remote that hasn't it, as on another branch of the
+// remote's.
+func missingRef(ref string) string {
+	return "fatal: couldn't find remote ref " + ref + "\n"
 }
 
 // Push refuses, pushing nothing, without one remote to push to: none is
@@ -502,11 +524,19 @@ func TestPushFails(t *testing.T) {
 
 	fake = runnertest.New(t)
 	s = fetching(fake)
-	s.expect(fetchIt...).Exits(128).PrintsToStderr("fatal: couldn't find remote ref refs/heads/main\n")
+	s.expect(fetchIt...).Exits(128).PrintsToStderr("fatal: Authentication failed for 'https://github.com/someone/kit-config.git/'\n")
 	if err := push(fake); err == nil || !strings.HasPrefix(err.Error(), "couldn't bring in the remote's changes, so nothing was pushed: ") {
 		t.Errorf("Push(), the fetch failing = %v", err)
 	}
 	s.check(t, "the fetch failing")
+
+	fake = runnertest.New(t)
+	s = fetching(fake)
+	s.expect(fetchIt...).Exits(128).PrintsToStderr(missingRef("refs/heads/trunk"))
+	if err := push(fake); err == nil || !strings.HasPrefix(err.Error(), "couldn't bring in the remote's changes, so nothing was pushed: ") {
+		t.Errorf("Push(), a branch not the upstream's not on the remote = %v", err)
+	}
+	s.check(t, "a branch not the upstream's not on the remote")
 
 	fake = runnertest.New(t)
 	s = fetching(fake)
@@ -699,6 +729,27 @@ func TestPushURLs(t *testing.T) {
 	fake.On("git", remoteOf...).Prints("origin\nbackup\n")
 	if _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); !errors.Is(err, gitrepo.ErrNowhere) {
 		t.Errorf("PushURLs() with two remotes = %v", err)
+	}
+}
+
+// RemoteURL is the one remote's fetch URL, as git takes it: without a
+// remote it's ErrNoRemote; with several, ErrNowhere.
+func TestRemoteURL(t *testing.T) {
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.expect(remoteOf...).Prints("upstream\n")
+	s.expect(git("remote", "get-url", "upstream")...).Prints("https://github.com/someone/kit-config.git\n")
+	if got, err := (gitrepo.Repo{Dir: dir, Run: fake}).RemoteURL(context.Background()); got != "https://github.com/someone/kit-config.git" || err != nil {
+		t.Errorf("RemoteURL() = %q, %v", got, err)
+	}
+	s.check(t, "the one remote")
+
+	for remotes, want := range map[string]error{"": gitrepo.ErrNoRemote, "origin\nbackup\n": gitrepo.ErrNowhere} {
+		fake := runnertest.New(t)
+		fake.On("git", remoteOf...).Prints(remotes)
+		if got, err := (gitrepo.Repo{Dir: dir, Run: fake}).RemoteURL(context.Background()); got != "" || !errors.Is(err, want) {
+			t.Errorf("RemoteURL(), remotes %q = %q, %v; want %v", remotes, got, err, want)
+		}
 	}
 }
 

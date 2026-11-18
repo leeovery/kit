@@ -372,8 +372,9 @@ func TestAppsAfterAFailedCheck(t *testing.T) {
 }
 
 // kit-config cloned through GitHub's CLI, installed and handed the
-// sign-in, which kit's keychain item gives up; git signing in through it
-// for that repository alone; then its files linked.
+// sign-in, which kit's keychain item gives up, its own branch alone, never
+// the prefs branch beside it; git signing in through it for that repository
+// alone; then its files linked.
 func TestKitConfig(t *testing.T) {
 	run := runnertest.New(t)
 	b, _ := newBoot(t, run, GitHub{}, &asker{})
@@ -382,7 +383,7 @@ func TestKitConfig(t *testing.T) {
 	run.On("brew", "install", "--formula", "gh").Does(func() {
 		run.On("gh", "auth", "status", "--hostname", "github.com").Exits(1)
 		run.On("gh", "auth", "login", "--hostname", "github.com", "--with-token")
-		run.On("gh", "repo", "clone", "someone/kit-config", b.Config, "--", "--quiet").Does(func() {
+		run.On("gh", "repo", "clone", "someone/kit-config", b.Config, "--", "--quiet", "--single-branch").Does(func() {
 			writeFiles(t, b.Config, map[string]string{".git/HEAD": "ref: refs/heads/main\n", config.File: kitToml, "shared/home/.zshrc": "# zsh\n"})
 		})
 	})

@@ -226,11 +226,11 @@ func (lo leftover) title() string {
 func (lo leftover) removes() string {
 	switch {
 	case len(lo.files) > 0 && lo.settings():
-		return "its files from this Mac, and its saved settings from kit-prefs"
+		return "its files from this Mac, and its saved settings from kit prefs' store"
 	case len(lo.files) > 0:
 		return "its files from this Mac"
 	}
-	return "its saved settings from kit-prefs"
+	return "its saved settings from kit prefs' store"
 }
 
 // removed is what an uninstall that removed them did.

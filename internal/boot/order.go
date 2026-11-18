@@ -490,7 +490,9 @@ func (b *Boot) cloned() bool {
 
 // clone clones the config repository through GitHub's CLI, installed if
 // it's not there and handed the sign-in, which kit's keychain item then
-// gives up: from then on it's GitHub's CLI's.
+// gives up: from then on it's GitHub's CLI's. It clones the repository's
+// own branch alone, which is all it fetches from then on, so apps'
+// settings, on its prefs branch, never come with it.
 func (b *Boot) clone(ctx context.Context) error {
 	if _, err := os.Stat(b.Config); err == nil {
 		return fmt.Errorf("%s is there, and isn't a clone of kit-config: move it aside, then boot again", b.Config)
@@ -517,7 +519,7 @@ func (b *Boot) clone(ctx context.Context) error {
 	}
 	_, _ = b.Run.Run(ctx, runner.Command{Name: "security", Args: []string{"delete-generic-password", "-s", keychainItem}})
 	b.doing(ConfigStep, "cloning "+repo)
-	if _, err := b.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "clone", repo, b.Config, "--", "--quiet"}, Timeout: 10 * time.Minute}); err != nil {
+	if _, err := b.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "clone", repo, b.Config, "--", "--quiet", "--single-branch"}, Timeout: 10 * time.Minute}); err != nil {
 		return fmt.Errorf("clone %s: %w", repo, err)
 	}
 	if _, err := b.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", b.Config, "config", "credential.https://github.com.helper", gitCredentials}}); err != nil {

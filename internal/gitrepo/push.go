@@ -106,7 +106,7 @@ func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
 	if t, err = r.upstream(ctx); err != nil {
 		return "", tracking{}, err
 	}
-	if err := r.fetch(ctx, remote); err != nil {
+	if err := r.fetch(ctx, remote, t.merge); err != nil {
 		return "", tracking{}, err
 	}
 	n, err := r.behind(ctx, t.up)
@@ -179,15 +179,26 @@ func (r Repo) settled(ctx context.Context, gitDir string) ([]entry, error) {
 	return dirty, nil
 }
 
-// fetch brings in remote's commits, pruning its branches gone from it.
-func (r Repo) fetch(ctx context.Context, remote string) error {
-	if _, err := r.git(ctx, "fetch", "--prune", "--quiet", remote); err != nil {
-		if unreachable(err) {
-			return errors.New("couldn't reach the remote, so nothing was pushed")
-		}
-		return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+// fetch brings in remote's commits, pruning its branches gone from it. A
+// clone of one branch fetches that branch alone, and git fails the fetch
+// while the remote hasn't it: merge, the upstream's branch on the remote,
+// not there yet has nothing to bring in, as on a new, empty remote.
+func (r Repo) fetch(ctx context.Context, remote, merge string) error {
+	_, err := r.git(ctx, "fetch", "--prune", "--quiet", remote)
+	switch {
+	case err == nil, merge != "" && notThere(err, merge):
+		return nil
+	case unreachable(err):
+		return errors.New("couldn't reach the remote, so nothing was pushed")
 	}
-	return nil
+	return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+}
+
+// notThere reports whether git failed a fetch for want of ref on the
+// remote, as its fatal: line says.
+func notThere(err error, ref string) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && slices.Contains(exit.Lines("fatal:"), "fatal: couldn't find remote ref "+ref)
 }
 
 // behind is how many of up's commits HEAD hasn't, up the branch's
@@ -437,6 +448,17 @@ func (r Repo) PushURLs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return slices.DeleteFunc(strings.Split(string(res.Stdout), "\n"), func(url string) bool { return url == "" }), nil
+}
+
+// RemoteURL is the URL the repository's one remote is fetched from, as URL
+// has it: ErrNoRemote without a remote; an error that's ErrNowhere with
+// several.
+func (r Repo) RemoteURL(ctx context.Context) (string, error) {
+	remote, err := r.remote(ctx)
+	if err != nil {
+		return "", err
+	}
+	return r.URL(ctx, remote)
 }
 
 // URL is the URL the remote called remote is fetched from, as git takes it:

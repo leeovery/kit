@@ -444,9 +444,13 @@ from it (a remote out of reach said plainly). The push names that remote and the
 branch on it (`git push <remote> HEAD:<branch>`), so nothing in git's config, as `pushRemote` or
 `pushDefault`, sends it anywhere but where its URLs were proven private. A branch with no
 upstream is pushed to the remote's branch of its name, which becomes its upstream; an upstream
-not there yet, as on a new, empty remote, has nothing to bring in. Commits waiting to be pushed
+not there yet, as on a new, empty remote, has nothing to bring in. A clone of one branch, as
+kit-config's and the store's are, fetches that branch alone, and git fails that fetch while the
+remote hasn't the branch, as before the store's first push: failing for want of the upstream's
+own branch, the fetch is an upstream not there yet. Commits waiting to be pushed
 are those the upstream hasn't, or, with none or it not there, those on none of the remote's
-branches, so a failed first push, or commits made offline, show as waiting. When the upstream
+branches as the clone fetches them, so a failed first push, or commits made offline, show as
+waiting. When the upstream
 has commits this Mac hasn't, kit rebases onto them by the commits since the two parted (never
 git's fork-point, which can leave out a commit, so the rebase changes no more than the remote's
 commits do), so two Macs don't fight. What's not committed in the files git tracks is set aside
@@ -647,12 +651,12 @@ it comes back, and kit prefs goes on saving its settings: at a terminal, before 
 uninstalled, kit asks once for each app that leaves any and that removing would uninstall (not
 one refused, as declared for every Mac without `--shared`), by its name ("<app>'s settings and
 files": `Keep them`, in case you come back, or `Remove them`, its files from this Mac and its saved
-settings from kit-prefs), listing under it, wrapped, exactly what removing takes. A cask's files
+settings from kit prefs' store), listing under it, wrapped, exactly what removing takes. A cask's files
 are those its zap list (brew info's) names that are on the Mac, a shared vendor folder or another
 app's settings included when its globs say so, which is why they're listed; removing them
 uninstalls with Homebrew's zap, then `defaults delete`s each preferences domain it removed
 (`~/Library/Preferences/<domain>.plist`) that no installed app uses (kit prefs' owner lookup), as
-cfprefsd keeps a domain whose file has gone: the next capture drops it from kit-prefs, whose
+cfprefsd keeps a domain whose file has gone: the next capture drops it from kit prefs' store, whose
 history keeps it. An App Store app has no zap list: it's asked about only when kit prefs holds a
 domain that's its alone (never one it shares with another app, as a vendor's or its group's), and
 removing them deletes those domains, while the app's still there, then uninstalls it; should the
@@ -798,7 +802,9 @@ output is one versioned document whose items carry stable ids (`brew:jq`).
 ## Files
 
 - **The config repository:** `$KIT_CONFIG`, else `$XDG_CONFIG_HOME/kit`, else
-  `~/.config/kit`. Never under a folder a data restore fills on a new Mac.
+  `~/.config/kit`. Never under a folder a data restore fills on a new Mac. Its clone tracks its
+  own branch alone; apps' settings, on its `prefs` branch, have a clone of their own in kit's
+  data folder, `~/.local/share/kit/prefs`.
 - **State:** `$XDG_STATE_HOME/kit/`, else `~/.local/state/kit/`: the Mac's name now; later
   drift first-seen times, snoozes and decisions.
 - **Logs:** `~/Library/Logs/kit/`, one JSON-lines file per run, kept 30 days.
@@ -1139,8 +1145,8 @@ config repository's own edits settled by `kit reconcile`; the shell and PATH, gi
 settings and backup exclusions as kinds, secrets, what a person must do by hand; commands
 adding lines to `[checks]`, `[hourly]` and `[nightly]`; commands naming the kind first.
 
-**10. Apps' settings — built.** `kit prefs`, the dotfiles' prefsync in Go: its store in a
-repository of its own, below.
+**10. Apps' settings — built.** `kit prefs`, the dotfiles' prefsync in Go: its store on
+kit-config's `prefs` branch (a repository of its own till slice 22), below.
 
 **11. The bootstrap — built.** `install.sh` and `kit bootstrap`: GitHub's sign-in on the
 phone, which Mac it is, Homebrew, the terminal the config names, kit-config, then kit itself
@@ -1172,13 +1178,26 @@ Every preferences domain that isn't Apple's or the system's (no dot in its name,
 and `import` (cfprefsd's view; a plist copied behind its back half-sticks), and the settings files
 `[prefs files]` names (folders taken whole, dot-files and all but Finder's `.DS_Store`; globs
 matching each part as rsync's wildmatch does, as a data restore reads them: a wildcard matches a
-hidden name too). Each Mac saves into its own folder of one git repository, `kit.toml`'s
-`prefs_repo`, cloned in kit's data folder (`~/.local/share/kit/prefs`), in prefsync's format byte
-for byte: `<mac>/domains/<domain>.plist`, sorted XML as Python's plistlib writes it, the keys that
-change by themselves stripped (window frames, list views, file dialogs, Sparkle's check times);
-`<mac>/files/` mirroring each file's path under the home folder (`_root/` outside it); `<mac>/owner`,
-the hardware UUID, model and name (`scutil --get ComputerName`) of the Mac the folder belongs
-to.
+hidden name too). Each Mac saves into its own folder of one git branch, kit-config's `prefs`, in
+prefsync's format byte for byte: `<mac>/domains/<domain>.plist`, sorted XML as Python's plistlib
+writes it, the keys that change by themselves stripped (window frames, list views, file dialogs,
+Sparkle's check times); `<mac>/files/` mirroring each file's path under the home folder (`_root/`
+outside it); `<mac>/owner`, the hardware UUID, model and name (`scutil --get ComputerName`) of the
+Mac the folder belongs to.
+
+The branch lives on kit-config's own remote, the URL kit-config's clone fetches from (its one
+remote, as git takes it), so whatever reaches kit-config reaches the store, and the `prefs`
+feature alone turns it on: nothing in `kit.toml` (a `prefs_repo` left there from when the store
+was a repository of its own is refused, saying to take the line out). kit clones the branch alone
+into its data folder (`~/.local/share/kit/prefs`), aside then moved into place under a lock, a
+clone of one branch that fetches only it; kit-config's own clone, cloned the same way by the boot,
+fetches only its own branch, so the store's history never lands in `~/.config/kit`. A remote with
+no `prefs` branch yet, before any Mac's first capture, gets a clone that's empty, on the branch and
+tracking it, and that capture's push makes the branch. A clone in the store's place that points
+anywhere but kit-config's remote, or is on another branch, as one of the repository the store was
+in before, is refused, naming the clone, where it points and where it should; nothing's captured
+into it or restored from it, and kit moves nothing: the person moves it aside, for kit to clone
+the branch there.
 
 - **`kit prefs capture`** (nightly, as the `prefs` feature's job): needs capture switched on (a
   full restore, or `kit prefs start-fresh`: a rebuilt Mac never captures defaults over a good

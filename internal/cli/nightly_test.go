@@ -171,15 +171,12 @@ func TestNightlyExcludesNewMatchesByItself(t *testing.T) {
 func TestTheHourlyPassOpensNoApp(t *testing.T) {
 	w := jobsWorld(t)
 	w.writeSection(t, "laptop", "features", "prefs\n")
-	clone := filepath.Join(w.home, ".local", "share", "kit", "prefs")
+	clone := w.storeCloned()
 	w.write(t, ".local/share/kit/prefs/.git/HEAD", "")
 	w.write(t, ".local/share/kit/prefs/laptop/domains/com.example.boxed.plist", `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>A</key><true/></dict></plist>`)
 	w.write(t, ".local/state/kit/prefs.json", `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.boxed"]}}`)
 	app := filepath.Join(w.home, "Applications", "Boxed App.app")
 	w.write(t, "Applications/Boxed App.app/Contents/Info.plist", `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.boxed</string></dict></plist>`)
-	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
-		w.fake.On("git", "-C", clone, "config", kv[0], kv[1])
-	}
 	w.fake.On("git", "-C", clone, "remote")
 	w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	w.fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("false\n")

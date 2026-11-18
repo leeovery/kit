@@ -43,9 +43,6 @@ type Config struct {
 	// NightlyAt is when each day the nightly run is due, as hours and
 	// minutes since midnight: 03:00 unless kit.toml says.
 	NightlyAt time.Duration
-	// PrefsRepo is the git repository kit prefs saves apps' settings to, a
-	// folder each Mac, as git clones it: none unless kit.toml says.
-	PrefsRepo string
 	// Terminal is the terminal a new Mac's boot installs and hands over to,
 	// by its name in apps.Terminals: none when "", and the boot carries on
 	// in Terminal.
@@ -81,7 +78,6 @@ type file struct {
 	MinimumKit string             `toml:"minimum_kit"`
 	Primary    string             `toml:"primary"`
 	NightlyAt  string             `toml:"nightly_at"`
-	PrefsRepo  string             `toml:"prefs_repo"`
 	Terminal   string             `toml:"terminal"`
 	Macs       map[string]macFile `toml:"macs"`
 }
@@ -91,6 +87,12 @@ type macFile struct {
 	From          string `toml:"from,omitempty"`
 	HostKey       string `toml:"host_key,omitempty"`
 	LocalHostName string `toml:"local_hostname,omitempty"`
+}
+
+// retired are the settings kit.toml had once and has no longer, each with
+// what to do instead.
+var retired = map[string]string{
+	"prefs_repo": "apps' settings are saved on kit-config's prefs branch now: take the line out",
 }
 
 // macName is what a Mac's name may be: it names the Mac's own declarations
@@ -122,6 +124,9 @@ func Load(dir string, kinds []Section) (*Config, error) {
 		keys := make([]string, len(undecoded))
 		for i, key := range undecoded {
 			keys[i] = key.String()
+			if instead, ok := retired[keys[i]]; ok {
+				return nil, fmt.Errorf("%s: %s: %s", File, keys[i], instead)
+			}
 		}
 		return nil, fmt.Errorf("%s: unknown setting %s", File, strings.Join(keys, ", "))
 	}
@@ -146,7 +151,7 @@ func Load(dir string, kinds []Section) (*Config, error) {
 	}
 	cfg := &Config{
 		Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)),
-		NightlyAt: DefaultNightlyAt, PrefsRepo: strings.TrimSpace(f.PrefsRepo), Terminal: f.Terminal,
+		NightlyAt: DefaultNightlyAt, Terminal: f.Terminal,
 		defs: sectionDefs(kinds),
 	}
 	if f.NightlyAt != "" {
