@@ -223,7 +223,7 @@ agreement not yet accepted, or no plan made, is not set up.
 what's wrong and what to do: the Mac's (`disk`, `memory`, `load`), always;
 the backup tools' a Mac lists in `[backups]` (`time-machine`, `arq`: each runs on its own
 schedule, and kit checks it did, only the plans Arq is scheduled to run; Backups above); the config repository's
-(`config-sync`: commits that won't push; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
+(`config-sync`: commits that won't push, and the remote's not brought in for a day; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
 hours, or the hourly launch loaded within them, its first run to come; the nightly one finished within 26 and none
 stuck over six, each job's last outcome; never run on a schedule, its launch never loaded, is a problem, `kit apply`
 installing it); with its feature, `prefs` (apps' settings saved: capture switched on, this Mac owning its folder, a capture
@@ -481,6 +481,52 @@ tells, while it holds commits back. A rebase that stops on a conflict, judged un
 own record of it, is aborted and what was set aside put back, so nothing's lost; one that stops
 as git, set to sign, can't sign a commit it rebases is aborted the same, and said as a commit
 unable to sign is; one that never started leaves nothing to undo; either way nothing is pushed.
+
+kit-config's remote commits also come in as a run starts (`gitrepo`'s `BringIn`): `kit apply`,
+`kit status`, `kit reconcile` and `kit nightly`, the hourly run, bring them in before they read
+the config, so a change one Mac pushes reaches the other within the hour, and drift is judged
+against it. `--plan` runs nothing, so brings nothing in. `kit list`, `kit why`, `kit log`, bare
+`kit` and the commands that change kit-config don't, staying quick and offline (those pull as
+they push); the boot and `kit setup` clone it. What isn't committed is left exactly as it is,
+or nothing's brought in: with no commit here the upstream hasn't, the branch moves on to it
+(`git merge --ff-only --no-overwrite-ignore`), which writes only the files the remote's commits
+change, an edit elsewhere, staged or not, and a new file untouched (proven on real git: the
+same inode and time), and refuses to overwrite a file git ignores; with commits waiting to be
+pushed, they're rebased onto the remote's as a push's pull rebases them, only while no file git
+tracks is changed and not committed, as the rebase would set it aside and put it back, writing
+it twice, and while git doesn't sign its commits, as the rebase would ask for a signature,
+perhaps by Touch ID, with nobody there; else they're kept as they are, for the next push by
+hand to rebase and sign. As a push's pull does, it refuses, touching nothing, while git is part
+way through one of its operations or a conflict waits, and when the remote's commits change a
+file not committed here, or add one git ignores that's on disk here (which a push's rebase also
+refuses, as git overwrites such a file without a word), naming it. Both refuse, too, while HEAD
+holds a commit the remote's history had and dropped, as when another Mac forced a push taking
+out a commit this Mac had pulled: rebasing onto it, or pushing, would put the commit back.
+`git merge-base --fork-point` finds it in the upstream's reflog, which outlives every fetch, a
+run's or one by hand, as a fork point past where HEAD and the upstream meet now (`git
+merge-base`); the two agree with nothing rewritten (proven on real git: behind, ahead, both, a
+fresh clone, an emptied reflog), and again once the commit's gone from HEAD, as after `git
+reset --keep @{u}` by hand, when runs carry on. No fork point (exit 1), as once the reflog's
+record of the commit expires, is no refusal; nor is no history in common (`git merge-base`
+exiting 1, as the prefs store's branch deleted and pushed anew, unrelated, by another Mac,
+the reflog still forking from it), which the pull handles as an unrelated history. `Holding`
+checks it too, so `config-sync` says why a dropped commit isn't pushed. A rebase that stops is
+aborted. The wait for another kit and the fetch have 20 seconds, the prefs store's look's time,
+then the run carries on with the copy it has; once fetched, the rest is git's on the Mac, and finishes. Committing,
+pulling and pushing all hold one lock in the git folder (`kit.lock`, kit's own: git has none
+but its index lock), Push through the push itself, so the hourly run and a command by hand take
+turns, never committing, rebasing, fetching or pushing over each other; each takes it once, at
+its outset, and a command by hand waits as long as it takes. It never fails the run: what came
+in is read as the run's config, one this kit can't read failing the run as any config it can't
+read does. A config this kit can't read before, as a newer kit's setting or a bad edit from
+another Mac, is brought in on kit's base PATH (the system's folders and Homebrew's), as the fix
+may have been pushed, then read again; still unreadable, the run fails as it would have, saying
+why nothing came in if nothing could. A Mac with no name brings nothing in, nothing running
+before its name. `config-sync` says how it went, once: the commits brought in after its summary
+and counted (`brought_in`), a row of their own under kit-config's in `kit status`; or an item
+(`config-sync:pull`) saying why none came in and what to do, quiet on its first day as drift
+is, its first sighting in the drift record, then a problem, kept with the step even when its
+own check fails.
 What a program says, kit looks for on the line that carries its error (git's `fatal:`, or ssh's
 own lines above it, some with no prefix of ssh's; mas's `Error:` or `[ERROR]`; brew's `Error:`;
 osascript's `execution error:`; sudo's own), as the reason is often above the last line, and a

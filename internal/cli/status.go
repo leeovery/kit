@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -47,6 +48,7 @@ func newStatusCommand(a *app) *cobra.Command {
 		Annotations: map[string]string{brief: "how this Mac stands against its config"},
 		Long: `Show how this Mac stands against its config: each step's check, and what needs
 attention, such as packages declared but missing, or installed but not declared.
+It brings in kit-config's remote commits first, leaving your edits as they are.
 
 Name steps, as kit status shows them (homebrew, brew, cask, config-private),
 to check only those, with what they need. A kind is checked only while the
@@ -55,7 +57,8 @@ empty one. Exits 0 when kit checked, even when something needs attention, 1
 when a check failed, and 2 when kit couldn't check. Each run is logged: see
 kit log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("status", "status")
+			a.pull, a.pullQuietly = true, len(args) > 0
+			r, err := a.prepare(cmd.Context(), "status", "status")
 			if err != nil {
 				return err
 			}
@@ -151,14 +154,18 @@ type run struct {
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
-// what's new, and what's gone; and it forgets the kinds the run doesn't
-// look after.
+// what's new, and what's gone; and, as drift is, kit-config's remote
+// commits not brought in (pullOf); and it forgets the kinds the run
+// doesn't look after.
 func (r *run) remember(report engine.Report) error {
 	results := make(map[string]check.Result)
 	for _, name := range r.drift {
 		if res, ok := report.Results[name]; ok {
 			results[name] = res
 		}
+	}
+	if res, ok := report.Results[steps.ConfigSyncName]; ok {
+		results[steps.ConfigSyncName] = pullOf(res)
 	}
 	unmanaged := slices.DeleteFunc(slices.Clone(r.allKinds), func(k string) bool { return slices.Contains(r.kinds, k) })
 	return drift.Update(r.stateDir, func(rec *drift.Record) {
@@ -269,9 +276,9 @@ func (n *askingNotice) end(ctx context.Context) {
 // prepare readies a run of command, logged as logName: the config, this
 // Mac's name, settled before anything reads a Mac's own files, kit's own
 // PATH, the runner, the faces and the log, and the pipeline.
-func (a *app) prepare(command, logName string) (*run, error) {
+func (a *app) prepare(ctx context.Context, command, logName string) (*run, error) {
 	face := a.face()
-	r, err := a.build(command, logName, face, a.pretty(a.Stdout))
+	r, err := a.build(ctx, command, logName, face, a.pretty(a.Stdout))
 	if err != nil {
 		return nil, err
 	}
@@ -282,8 +289,10 @@ func (a *app) prepare(command, logName string) (*run, error) {
 // build readies a run as prepare does, shown on face, its steps those of a
 // run at a terminal when atTerminal says so, as kit apply's steps by hand
 // raised as cards are, but starting nothing a run at one starts (start).
-// Without a logName, it keeps no log. Failing, it closes face.
-func (a *app) build(command, logName string, face render.Face, atTerminal bool) (_ *run, err error) {
+// Without a logName, it keeps no log. A run that pulls (a.pull) brings in
+// kit-config's remote commits first, so it reads what came in. Failing, it
+// closes face.
+func (a *app) build(ctx context.Context, command, logName string, face render.Face, atTerminal bool) (_ *run, err error) {
 	log := render.Tee()
 	defer func() {
 		if err != nil {
@@ -295,31 +304,11 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := a.loadConfig(dirs)
+	at, err := a.basis(dirs)
 	if err != nil {
-		return nil, err
-	}
-	machine, err := config.ReadMachine(dirs.State)
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case machine == "":
-		return nil, fmt.Errorf("this Mac has no name yet: run kit machine <name>, one of %s", strings.Join(cfg.MacNames(), ", "))
-	case !cfg.Knows(machine):
-		return nil, fmt.Errorf("this Mac is named %s, which %s doesn't know: run kit machine <name>, one of %s", machine, config.File, strings.Join(cfg.MacNames(), ", "))
-	}
-	home, err := a.HomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("find the home directory: %w", err)
-	}
-	path, err := cfg.SearchPath(home, machine)
-	if err != nil {
-		return nil, err
-	}
-	record, err := drift.Load(dirs.State)
-	if err != nil {
-		return nil, err
+		if at, err = a.healing(dirs, err); err != nil {
+			return nil, err
+		}
 	}
 	now := a.Now()
 	if logName != "" {
@@ -330,6 +319,20 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		log = file
 	}
 	sink := event.NewFanout(face, log)
+	var pulled steps.Pulled
+	if a.pull {
+		pulled = a.pullConfig(ctx, dirs.Config, at, command, now, sink)
+	}
+	if at.cfg == nil || pulled.Brought > 0 {
+		if at, err = a.basis(dirs); err != nil {
+			return nil, unhealed(err, pulled)
+		}
+	}
+	cfg, machine, home, path := at.cfg, at.machine, at.home, at.path
+	record, err := drift.Load(dirs.State)
+	if err != nil {
+		return nil, err
+	}
 	// What the run starts whose sudo asks can ask it for an administrator's
 	// password, at a terminal, once the run is ready (askpass).
 	var r *run
@@ -512,7 +515,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	checks = append(checks,
 		r.hostKeyStep(a.SSHDir, a.SSHAddress, dirs.State, features.on(steps.FeatureRemoteLogin)), quietened(edits, record, now),
 		steps.Disk(observed), steps.Memory(observed), steps.Load(observed, a.Now),
-		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(r.repo),
+		steps.ConfigSync(r.repo, a.Now, quietPull(pulled, record, now)), steps.ConfigPrivate(r.repo),
 	)
 	newMac, err := boot.NewMac(dirs.State)
 	if err != nil {
@@ -577,6 +580,82 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		return nil, err
 	}
 	return r, nil
+}
+
+// basis is what a run stands on: the config, as this kit reads it; this
+// Mac's name, settled before anything reads a Mac's own files; its home;
+// and kit's own PATH, from the config's paths.
+type basis struct {
+	cfg     *config.Config
+	machine string
+	home    string
+	path    []string
+}
+
+// basis reads what a run stands on, in dirs, refusing a Mac with no name,
+// or one the config doesn't know. A config there that this kit can't read
+// is unread.
+func (a *app) basis(dirs config.Dirs) (basis, error) {
+	cfg, err := a.loadConfig(dirs)
+	switch {
+	case errors.Is(err, config.ErrNoConfig):
+		return basis{}, err
+	case err != nil:
+		return basis{}, unread{err}
+	}
+	machine, err := config.ReadMachine(dirs.State)
+	if err != nil {
+		return basis{}, err
+	}
+	switch {
+	case machine == "":
+		return basis{}, fmt.Errorf("this Mac has no name yet: run kit machine <name>, one of %s", strings.Join(cfg.MacNames(), ", "))
+	case !cfg.Knows(machine):
+		return basis{}, fmt.Errorf("this Mac is named %s, which %s doesn't know: run kit machine <name>, one of %s", machine, config.File, strings.Join(cfg.MacNames(), ", "))
+	}
+	home, err := a.HomeDir()
+	if err != nil {
+		return basis{}, fmt.Errorf("find the home directory: %w", err)
+	}
+	path, err := cfg.SearchPath(home, machine)
+	if err != nil {
+		return basis{}, err
+	}
+	return basis{cfg: cfg, machine: machine, home: home, path: path}, nil
+}
+
+// unread is basis's error for a config there that this kit can't read: a
+// newer kit's setting, or a bad edit from another Mac.
+type unread struct{ error }
+
+func (u unread) Unwrap() error { return u.error }
+
+// healing is what a run that pulls stands on when basis failed, as err,
+// for a config this kit can't read, which another Mac may have pushed the
+// fix for: this Mac's name and home, kit's base PATH (the system's folders
+// and Homebrew's), and no config, to bring in kit-config's remote commits
+// with, then read it again. Any other failure, a run that doesn't pull, or
+// a Mac with no name yet, is err.
+func (a *app) healing(dirs config.Dirs, err error) (basis, error) {
+	if _, ok := errors.AsType[unread](err); !ok || !a.pull {
+		return basis{}, err
+	}
+	machine, nameErr := config.ReadMachine(dirs.State)
+	home, homeErr := a.HomeDir()
+	if nameErr != nil || homeErr != nil || machine == "" {
+		return basis{}, err
+	}
+	return basis{machine: machine, home: home, path: config.SearchPathOf(a.Homebrew)}, nil
+}
+
+// unhealed is err, the config still unread once kit-config's remote
+// commits were to be brought in, saying why none were, as pulled has it,
+// should none have been: the fix may be waiting on the remote.
+func unhealed(err error, pulled steps.Pulled) error {
+	if pulled.Missed == nil {
+		return err
+	}
+	return fmt.Errorf("%w; kit-config's remote commits weren't brought in: %v", err, pulled.Missed)
 }
 
 // schedulingSteps are the steps that have kit run by itself, on every Mac:

@@ -39,7 +39,7 @@ by hand that's raised with the rest at the end is placed as they are.`,
 			// The steps of kit apply at a terminal, as a new Mac's is, with
 			// nothing a run at one starts started, nothing shown and no log.
 			a.newMacRun = true
-			r, err := a.build("apply", "", render.Tee(), true)
+			r, err := a.build(cmd.Context(), "apply", "", render.Tee(), true)
 			if err != nil {
 				return err
 			}

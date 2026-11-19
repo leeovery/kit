@@ -26,11 +26,21 @@ import (
 // revert or am, or a conflict in paths waits to be resolved. It reports
 // whether it committed: with nothing to commit it doesn't, which is no
 // error. Committing nothing, it takes the new files back out of git's
-// index.
+// index. It waits while another kit is at the repository (lockRepo), as
+// the hourly run's rebase, till ctx is done.
 func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
 	if len(paths) == 0 {
 		return false, nil
 	}
+	gitDir, err := r.gitDir(ctx)
+	if err != nil {
+		return false, err
+	}
+	unlock, err := r.lockRepo(ctx, gitDir, "committed")
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 	changed, err := r.status(ctx, paths...)
 	if err != nil {
 		return false, err
@@ -41,10 +51,6 @@ func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool
 	files, added := toCommit(changed)
 	if len(files) == 0 {
 		return false, nil
-	}
-	gitDir, err := r.gitDir(ctx)
-	if err != nil {
-		return false, err
 	}
 	if err := underWay(gitDir); err != nil {
 		return false, err

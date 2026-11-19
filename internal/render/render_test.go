@@ -864,6 +864,45 @@ func TestPrettyStatusShowsEditsGitKeepsApart(t *testing.T) {
 	}
 }
 
+// How bringing in kit-config's remote commits went is one row at most:
+// those brought in, counted, under kit-config's own, which a long glance
+// can't cut off; none brought in, quiet, a grey row there saying why,
+// whole, as what didn't happen;
+// none for a day, a row needing you, saying what to do, naming no kit
+// command, and kit-config's row marked so.
+func TestPrettyConfigPull(t *testing.T) {
+	const why = "the remote's commits change what's not committed here, so nothing was touched or brought in: commit or undo the change to shared/home/.zshrc first"
+	missed := check.Item{ID: "config-sync:pull", Name: "the remote's commits not brought in", State: check.Problem, Detail: why}
+	for _, tt := range []struct {
+		name   string
+		result check.Result
+		want   string
+	}{
+		{"brought in", check.Result{State: check.OK, Summary: "pushed; 2 commits brought in", Glance: "pushed", Counts: map[string]int{"brought_in": 2}},
+			"  CONFIG\n  ● kit-config  pushed · private\n  ● the remote's commits brought in  2 commits\n\n"},
+		{"missed, quiet", check.Result{State: check.OK, Summary: "pushed", Glance: "pushed", Items: []check.Item{func() check.Item { it := missed; it.Quiet = "new"; return it }()}},
+			"  CONFIG\n  ● kit-config  pushed · private\n  – the remote's commits not brought in\n    the remote's commits change what's not committed here, so nothing was\n    touched or brought in: commit or undo the change to shared/home/.zshrc first\n\n"},
+		{"missed for days", check.Result{State: check.Attention, Summary: "pushed", Glance: "pushed", Items: []check.Item{func() check.Item { it := missed; it.Since = at.Add(-50 * time.Hour); return it }()}},
+			"  CONFIG\n  ▲ the remote's commits not brought in\n    the remote's commits change what's not committed here, so nothing was\n    touched or brought in: commit or undo the change to shared/home/.zshrc\n    first · 2 days\n  ▲ kit-config  pushed · private\n\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
+				event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{
+					{Name: "config-sync", Title: "Sync", Area: "Config", Part: render.PartConfig},
+					{Name: "config-private", Title: "Privacy", Area: "Config", Part: render.PartConfig},
+				}},
+				event.StepFinished{Step: "config-sync", Result: tt.result},
+				event.StepFinished{Step: "config-private", Result: check.Result{State: check.OK, Summary: "private on GitHub (owner/kit-config)", Glance: "private"}},
+				event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 2}},
+			})
+			if got := ansi.Strip(out.String()); !strings.Contains(got, tt.want) || strings.Contains(got, "kit reconcile") {
+				t.Errorf("printed\n%s\nwant\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
 // A kit-config that isn't private needs you, and no kit command makes it
 // private: its row says what does, naming none, and kit-config's own row is
 // marked as needing you, whatever else of it is well.

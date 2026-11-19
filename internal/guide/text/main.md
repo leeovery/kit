@@ -33,6 +33,9 @@ with `kit setup`: `kit agent in-use` says how.
    to) and `kit nightly at` (when the nightly run falls due). Each commits
    its change and pushes it. An edit by hand, to a declarations file or a
    step's script, is yours to commit and push, or `kit reconcile`'s.
+   `kit apply`, `kit status`, `kit reconcile` and the hourly run first
+   bring in what other Macs pushed, so a change reaches each within the
+   hour; what isn't committed here is left as it is.
 
 4. Read a command's `--help` before you use it the first time: it says what
    it needs and what it changes. Every command has one, as in

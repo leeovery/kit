@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 // The parts of Config a step counts towards, as its Part says: Packages,
@@ -553,9 +554,11 @@ func todo(detail string) string {
 // configRows are Config's rows: what needs attention, a row a thing, saying
 // what's wrong, for how long and what to run; then a row a part counting
 // what's well, and the config repository's row, marked as needing you
-// while a part of it does.
+// while a part of it does; then a row each for the remote's commits
+// brought in as the run began, and what isn't drift and doesn't need you
+// yet, as those not brought in, greyed as what didn't happen.
 func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
-	var rows []look.Row
+	var rows, aside []look.Row
 	counts := map[string]int{}
 	quiet := map[string]map[string]int{}
 	present := map[string]bool{}
@@ -573,8 +576,12 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 			rows = append(rows, p.row(f))
 		}
 		for _, it := range r.Items {
-			if it.Quiet == "" {
+			switch {
+			case it.Quiet == "":
 				rows = append(rows, p.thing(p.step(f.Step), it))
+				continue
+			case !IsDrift(it):
+				aside = append(aside, look.Row{State: look.Skipped, Name: it.Name, Says: look.Muted(it.Detail), Whole: true})
 				continue
 			}
 			if quiet[part] == nil {
@@ -588,6 +595,9 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 		switch part {
 		case PartConfig:
 			repo = append(repo, look.Muted(cmp.Or(r.Glance, strings.TrimPrefix(r.Summary, "all "))))
+			if n := r.Counts[steps.BroughtIn]; n > 0 {
+				aside = append(aside, look.Row{State: look.Done, Name: "the remote's commits brought in", Says: look.Muted(fmt.Sprintf("%d %s", n, look.Plural(n, "commit", "commits")))})
+			}
 			if r.State == check.Attention {
 				repoState = look.NeedsYou
 			}
@@ -619,7 +629,7 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 	if len(repo) > 0 {
 		rows = append(rows, look.Row{State: repoState, Name: PartConfig, Says: look.Says(repo...)})
 	}
-	return rows
+	return append(rows, aside...)
 }
 
 // quietWords say why things don't need attention yet, after their count.
@@ -653,8 +663,9 @@ func (p *Pretty) thing(s event.Step, it check.Item) look.Row {
 
 // ownFix are the states of things no kit command puts right, so a row
 // for one names none: what's wrong says what does, as a config repository
-// not proven private says how to make it so.
-var ownFix = map[string]bool{"not-private": true, "unproven": true}
+// not proven private says how to make it so, and a problem, as commits
+// kit holds back, what to do about it.
+var ownFix = map[string]bool{"not-private": true, "unproven": true, check.Problem: true}
 
 // wrong says what's wrong with a thing of step s, in its kind's words:
 // installed, not declared; of a backup exclusion, excluded, not declared;

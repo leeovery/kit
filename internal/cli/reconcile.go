@@ -64,7 +64,8 @@ func newReconcileCommand(a *app) *cobra.Command {
 or left by something since removed. At a terminal, kit goes through each item
 that needs attention (--all: every item, new and snoozed too), asking what to
 do with it, then does it all, committing and pushing the config's changes.
-Name kinds (kit reconcile brew cask) to go through only theirs.
+Name kinds (kit reconcile brew cask) to go through only theirs. It brings in
+kit-config's remote commits first, leaving your edits as they are.
 
 Without a terminal, or with --json, it lists the items with their ids and
 choices. Name items' ids, with what to do with them, to settle those, in one
@@ -79,7 +80,8 @@ run and one commit:
   kit reconcile go:example.com/a go:example.com/b --remove`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("reconcile", "reconcile")
+			a.pull = true
+			r, err := a.prepare(cmd.Context(), "reconcile", "reconcile")
 			if err != nil {
 				return err
 			}

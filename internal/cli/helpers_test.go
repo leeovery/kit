@@ -148,6 +148,7 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	// Every commit of kit-config's pushed: a sync committing nothing finds
 	// none waiting.
 	w.waiting("")
+	w.pulls(t, "")
 	w.write(t, filepath.Join("etc", "ssh", "ssh_host_ed25519_key.pub"), hostKey+" root@laptop\n")
 	w.scheduled(t)
 	for name, content := range files {
@@ -460,6 +461,42 @@ func (w *world) waiting(times string) {
 	w.fake.On("git", git("remote")...).Prints("origin\n")
 	w.tracks()
 	w.fake.On("git", git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")...).Prints(times)
+}
+
+// pulls scripts git's answers as a run brings in kit-config's remote
+// commits, as real git gives them, with nothing new on the remote: its git
+// folder, a folder of the test's own; nothing changed and not committed,
+// unless status (-z) says what is; the fetch, with no commit here the
+// remote's history dropped.
+func (w *world) pulls(t *testing.T, status string) {
+	git := func(args ...string) []string {
+		return append([]string{"-C", filepath.Join(w.home, ".config", "kit")}, args...)
+	}
+	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(t.TempDir() + "\n")
+	w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
+	w.fake.On("git", git("fetch", "--prune", "--quiet", "origin")...)
+	w.fake.On("git", git("merge-base", "--fork-point", "refs/remotes/origin/main", "HEAD")...).Prints(head + "\n")
+	w.fake.On("git", git("merge-base", "refs/remotes/origin/main", "HEAD")...).Prints(head + "\n")
+	w.fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints("0\n")
+}
+
+// pulled reports whether call, as the fake has it, is one of the commands
+// a run brings in kit-config's remote commits with, as pulls scripts them.
+func (w *world) pulled(call string) bool {
+	dir := filepath.Join(w.home, ".config", "kit")
+	for _, args := range [][]string{
+		{"remote"}, {"rev-parse", "--absolute-git-dir"},
+		{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"},
+		{"symbolic-ref", "-q", "HEAD"}, {"for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main"},
+		{"fetch", "--prune", "--quiet", "origin"}, {"rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"},
+		{"rev-list", "--count", "HEAD..refs/remotes/origin/main"},
+		{"merge-base", "--fork-point", "refs/remotes/origin/main", "HEAD"}, {"merge-base", "refs/remotes/origin/main", "HEAD"},
+	} {
+		if call == (runner.Command{Name: "git", Args: append([]string{"-C", dir}, args...)}).String() {
+			return true
+		}
+	}
+	return false
 }
 
 // tracks scripts git's answers as kit asks how kit-config's branch stands

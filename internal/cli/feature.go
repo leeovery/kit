@@ -34,7 +34,7 @@ The change is committed and pushed to the config repository.`,
 			Short: short,
 			Args:  cobra.MinimumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				r, err := a.prepare("feature "+verb, "feature-"+verb)
+				r, err := a.prepare(cmd.Context(), "feature "+verb, "feature-"+verb)
 				if err != nil {
 					return err
 				}

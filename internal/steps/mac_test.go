@@ -1,6 +1,7 @@
 package steps_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -131,10 +132,12 @@ func TestConfigSync(t *testing.T) {
 		fake.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
 		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 	}
-	// waiting scripts the commits waiting, as times, newest first as git log
+	// forked scripts the commits waiting, as times, newest first as git log
 	// lists them, and the repository as Push finds it settled, git's status
-	// of it status, the remote's last fetch behind by behind.
-	waiting := func(times []time.Time, status, behind string) *runnertest.Fake {
+	// of it status, the remote's last fetch behind by behind; then where
+	// HEAD forked from the upstream, as its reflog has it, fork, and where
+	// they meet now, base, as real git prints them.
+	forked := func(times []time.Time, status, behind, fork, base string) *runnertest.Fake {
 		fake := runnertest.New(t)
 		var out string
 		for _, at := range times {
@@ -144,11 +147,17 @@ func TestConfigSync(t *testing.T) {
 		fake.On("git", log...).Prints(out)
 		fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
 		fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
+		fake.On("git", git("merge-base", "--fork-point", "refs/remotes/origin/main", "HEAD")...).Prints(fork + "\n")
+		fake.On("git", git("merge-base", "refs/remotes/origin/main", "HEAD")...).Prints(base + "\n")
 		fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints(behind + "\n")
 		return fake
 	}
+	// waiting is forked with nothing here the remote's history dropped.
+	waiting := func(times []time.Time, status, behind string) *runnertest.Fake {
+		return forked(times, status, behind, head, head)
+	}
 	sync := func(fake *runnertest.Fake) engine.Step {
-		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now)
+		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now, steps.Pulled{})
 	}
 
 	fake := runnertest.New(t)
@@ -181,6 +190,18 @@ func TestConfigSync(t *testing.T) {
 		t.Errorf("held back by a staged change = %+v", res)
 	}
 
+	// The remote's history rewritten, dropping a commit this Mac has: it
+	// counts as waiting, but Push refuses, so this says why, rather than to
+	// push it. Real git's fork point is the dropped commit, past where HEAD
+	// and the upstream meet now.
+	const dropped, before = "8d2c41f0b6a94e1f2d7c3b5a6e9f0a1b2c3d4e5f", "3a7b9c1d5e2f4a6b8c0d1e3f5a7b9c2d4e6f8a0b"
+	fake = forked([]time.Time{now().Add(-3 * time.Hour)}, "", "1", dropped, before)
+	res = sync(fake).Check(t.Context())
+	if res.State != check.Attention || len(res.Items) != 1 || res.Items[0].ID != "config-sync:held" ||
+		!strings.HasPrefix(res.Items[0].Detail, "the remote's history was rewritten, dropping a commit this Mac has") {
+		t.Errorf("the remote's history rewritten = %+v; want it held back, saying why", res)
+	}
+
 	// No remote: nothing to push to.
 	fake = runnertest.New(t)
 	fake.On("git", git("remote")...)
@@ -202,6 +223,55 @@ func TestConfigSync(t *testing.T) {
 	fake.On("git", git("remote")...).Exits(128)
 	if state, _, _ := checked(t, sync(fake)); state != check.Failed {
 		t.Errorf("git failing = %s, want failed", state)
+	}
+}
+
+// How bringing in the remote's commits went as the run began is said once:
+// those brought in after how the step stands, and counted; none brought
+// in, an item saying why, quiet for its first day as drift is, then a
+// problem. With the check failed, the item stays, so the drift record
+// keeps when it was first seen, and the step stays failed.
+func TestConfigSyncSaysWhatCameIn(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
+	pushed := func() *runnertest.Fake {
+		fake := runnertest.New(t)
+		fake.On("git", git("remote")...).Prints("origin\n")
+		fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
+		fake.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
+		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints("0e0bf17a399109574ffb00e33300280a33f81ab7\n")
+		fake.On("git", git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")...)
+		return fake
+	}
+	sync := func(fake *runnertest.Fake, pulled steps.Pulled) check.Result {
+		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now, pulled).Check(t.Context())
+	}
+
+	res := sync(pushed(), steps.Pulled{Brought: 2})
+	if res.State != check.OK || res.Summary != "pushed; 2 commits brought in" || res.Glance != "pushed" || res.Counts["brought_in"] != 2 || len(res.Items) != 0 {
+		t.Errorf("2 brought in = %+v", res)
+	}
+	if res := sync(pushed(), steps.Pulled{Brought: 1}); res.Summary != "pushed; 1 commit brought in" {
+		t.Errorf("1 brought in = %q", res.Summary)
+	}
+
+	offline := errors.New("couldn't reach the remote, so nothing was brought in")
+	res = sync(pushed(), steps.Pulled{Missed: offline, Quiet: "new"})
+	want := check.Item{ID: "config-sync:pull", Name: "the remote's commits not brought in", State: check.Problem, Detail: offline.Error(), Quiet: "new"}
+	if res.State != check.OK || res.Summary != "pushed" || len(res.Items) != 1 || res.Items[0] != want {
+		t.Errorf("missed, quiet = %+v; want ok, saying why %+v", res, want)
+	}
+	since := now().Add(-48 * time.Hour)
+	res = sync(pushed(), steps.Pulled{Missed: offline, Since: since})
+	want.Quiet, want.Since = "", since
+	if res.State != check.Attention || !res.ToDo() || len(res.Items) != 1 || res.Items[0] != want {
+		t.Errorf("missed for 2 days = %+v; want it a problem %+v", res, want)
+	}
+
+	fake := runnertest.New(t)
+	fake.On("git", git("remote")...).Exits(128)
+	if res := sync(fake, steps.Pulled{Missed: offline, Since: since}); res.State != check.Failed || len(res.Items) != 1 || res.Items[0] != want {
+		t.Errorf("the check failing, missed = %+v; want it failed, keeping %+v", res, want)
 	}
 }
 

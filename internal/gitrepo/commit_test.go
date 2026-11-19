@@ -57,12 +57,12 @@ const lockHeld = "fatal: Unable to create '" + dir + "/.git/index.lock': File ex
 const unsigned = "error: Couldn't load public key /Users/someone/.ssh/signing.pub: No such file or directory?\n\nfatal: failed to write commit object\n"
 
 // begins scripts a commit's commands up to the new files, added, entered in
-// git's index: status of paths, status git's answer, then the git folder,
-// and whether git signs, signs.
+// git's index: the git folder, status of paths, status git's answer, and
+// whether git signs, signs.
 func (s *sequence) begins(t *testing.T, status string, signs bool, added []string, paths ...string) {
 	t.Helper()
-	s.expect(statusOf(paths...)...).Prints(status)
 	s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
+	s.expect(statusOf(paths...)...).Prints(status)
 	if signs {
 		s.expect(signing...).Prints("true\n")
 	} else {
@@ -181,6 +181,7 @@ func TestCommitWithNothingToCommit(t *testing.T) {
 	} {
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
+		s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
 		s.expect(statusOf("laptop")...).Prints(c.status)
 		if committed, err := commit(fake, "laptop"); committed || err != nil {
 			t.Errorf("Commit(), %s = %v, %v", c.name, committed, err)
@@ -342,8 +343,8 @@ func TestCommitRefusesWhileGitIsPartWay(t *testing.T) {
 		}
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
-		s.expect(statusOf("a")...).Prints(" M a\x00")
 		s.expect(gitDirOf...).Prints(gitDir + "\n")
+		s.expect(statusOf("a")...).Prints(" M a\x00")
 		if committed, err := commit(fake, "a"); committed || err == nil || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("Commit(), %s there = %v, %v; want %q", c.file, committed, err, c.says)
 		}
@@ -358,6 +359,7 @@ func TestCommitRefusesAConflict(t *testing.T) {
 	for _, code := range []string{"UU", "AA", "DD", "AU", "UA", "DU", "UD"} {
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
+		s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
 		s.expect(statusOf("laptop")...).Prints(" M laptop/a\x00" + code + " laptop/b\x00")
 		if committed, err := commit(fake, "laptop"); committed || err == nil || !strings.Contains(err.Error(), "a conflict in laptop/b is waiting to be resolved") {
 			t.Errorf("Commit(), %s = %v, %v; want the conflict named", code, committed, err)
@@ -424,7 +426,8 @@ func TestCommitFinishesOnceBegun(t *testing.T) {
 // prints is what real git does.
 func TestCommitFails(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("git", statusOf("a")...).Exits(128).PrintsToStderr("fatal: not a git repository (or any of the parent directories): .git\n")
+	fake.On("git", gitDirOf...).Prints(t.TempDir() + "\n")
+	fake.On("git", statusOf("a")...).Exits(128).PrintsToStderr("fatal: bad object HEAD\n")
 	if committed, err := commit(fake, "a"); committed || err == nil {
 		t.Errorf("Commit(), status failing = %v, %v", committed, err)
 	}
@@ -436,7 +439,6 @@ func TestCommitFails(t *testing.T) {
 	}{{"not a repository", "", 128}, {"no folder named", "\n", 0}, {"a relative folder", ".git\n", 0}} {
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
-		s.expect(statusOf("a")...).Prints(" M a\x00")
 		s.expect(gitDirOf...).Prints(c.prints).Exits(c.exit)
 		if committed, err := commit(fake, "a"); committed || err == nil {
 			t.Errorf("Commit(), %s = %v, %v", c.name, committed, err)
@@ -446,8 +448,8 @@ func TestCommitFails(t *testing.T) {
 
 	fake = runnertest.New(t)
 	s := &sequence{fake: fake}
-	s.expect(statusOf("a")...).Prints(" M a\x00")
 	s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
+	s.expect(statusOf("a")...).Prints(" M a\x00")
 	s.expect(signing...).Exits(3).PrintsToStderr("fatal: bad config line 1 in file .git/config\n")
 	if committed, err := commit(fake, "a"); committed || err == nil {
 		t.Errorf("Commit(), the signing setting unreadable = %v, %v", committed, err)

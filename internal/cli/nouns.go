@@ -75,7 +75,7 @@ func (a *app) prepared(cmd *cobra.Command, command string, do func(ctx context.C
 // preparedAs runs do in a run prepared for command, as run, redacted, in
 // the log named logName, then closes the run.
 func (a *app) preparedAs(ctx context.Context, command, logName string, do func(ctx context.Context, r *run) error) error {
-	r, err := a.prepare(redact.Text(command), logName)
+	r, err := a.prepare(ctx, redact.Text(command), logName)
 	if err != nil {
 		return err
 	}

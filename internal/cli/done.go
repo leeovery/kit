@@ -21,7 +21,7 @@ func newDoneCommand(a *app) *cobra.Command {
 itself, such as signing in somewhere. --undo marks them not done.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, names []string) error {
-			r, err := a.prepare(config.ManualKind+" done", config.ManualKind+"-done")
+			r, err := a.prepare(cmd.Context(), config.ManualKind+" done", config.ManualKind+"-done")
 			if err != nil {
 				return err
 			}

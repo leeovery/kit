@@ -42,30 +42,37 @@ const stashMessage = "kit: your changes before pulling"
 // rebases and put back as it was, staged or not, git's list of stashes
 // left as it is unless what was set aside won't go back, when it's kept
 // there, and the error says so. A rebase that stops on a conflict is
-// aborted, leaving the repository as it was.
+// aborted, leaving the repository as it was. It refuses too while HEAD
+// holds a commit the remote's rewritten history dropped (rewritten). It
+// waits while another kit is at the repository (lockRepo).
 func (r Repo) Pull(ctx context.Context) error {
-	_, _, err := r.pull(ctx)
-	return err
+	return r.exclusively(ctx, pushed, func(remote, gitDir string) error {
+		_, err := r.pull(ctx, remote, gitDir)
+		return err
+	})
 }
 
 // Push pulls the remote's changes (Pull), then pushes to the branch's
 // upstream on the repository's one remote, the remote PushURLs reads,
 // named, so git's pushRemote or pushDefault can't send it elsewhere:
 // nothing when Pull refuses or fails. A branch with no upstream is pushed
-// to the same branch there, which becomes its upstream.
+// to the same branch there, which becomes its upstream. It holds the lock
+// on the repository through the push, so no other kit pulls in between.
 func (r Repo) Push(ctx context.Context) error {
-	remote, t, err := r.pull(ctx)
-	if err != nil {
-		return err
-	}
-	args := []string{"push", "--quiet", remote, "HEAD:" + t.merge}
-	if t.up == "" {
-		args = []string{"push", "--quiet", "-u", remote, "HEAD"}
-	}
-	if _, err := r.git(ctx, args...); err != nil {
-		return fmt.Errorf("couldn't push: %w", err)
-	}
-	return nil
+	return r.exclusively(ctx, pushed, func(remote, gitDir string) error {
+		t, err := r.pull(ctx, remote, gitDir)
+		if err != nil {
+			return err
+		}
+		args := []string{"push", "--quiet", remote, "HEAD:" + t.merge}
+		if t.up == "" {
+			args = []string{"push", "--quiet", "-u", remote, "HEAD"}
+		}
+		if _, err := r.git(ctx, args...); err != nil {
+			return fmt.Errorf("couldn't push: %w", err)
+		}
+		return nil
+	})
 }
 
 // Holding is why Push holds back now, as far as the remote's last fetch
@@ -84,44 +91,52 @@ func (r Repo) Holding(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := r.rewritten(ctx, t.up, pushed); err != nil {
+		return err
+	}
 	if n, err := r.behind(ctx, t.up); err != nil || n == 0 {
 		return nil
 	}
 	return r.holds(ctx, dirty, t.up)
 }
 
-// pull is Pull: the repository's remote, and the branch HEAD is on.
-func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
-	if remote, err = r.remote(ctx); err != nil {
-		return "", tracking{}, err
-	}
-	gitDir, err := r.gitDir(ctx)
-	if err != nil {
-		return "", tracking{}, err
-	}
+// pull is Pull from remote, kit holding the lock on the repository whose
+// git folder is gitDir: the branch HEAD is on.
+func (r Repo) pull(ctx context.Context, remote, gitDir string) (tracking, error) {
 	dirty, err := r.settled(ctx, gitDir)
 	if err != nil {
-		return "", tracking{}, err
+		return tracking{}, err
 	}
-	if t, err = r.upstream(ctx); err != nil {
-		return "", tracking{}, err
+	t, err := r.upstream(ctx)
+	if err != nil {
+		return tracking{}, err
 	}
-	if err := r.fetch(ctx, remote, t); err != nil {
-		return "", tracking{}, err
+	if err := r.fetch(ctx, remote, t, pushed); err != nil {
+		return tracking{}, err
+	}
+	if err := r.rewritten(ctx, t.up, pushed); err != nil {
+		return tracking{}, err
 	}
 	n, err := r.behind(ctx, t.up)
 	if err != nil {
-		return "", tracking{}, fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+		return tracking{}, fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
 	}
 	if n == 0 {
-		return remote, t, nil
+		return t, nil
 	}
 	if err := r.holds(ctx, dirty, t.up); err != nil {
-		return "", tracking{}, err
+		return tracking{}, err
 	}
 	// Begun, what's set aside is put back whatever becomes of the run.
-	return remote, t, r.catchUp(context.WithoutCancel(ctx), gitDir, t.up)
+	return t, r.catchUp(context.WithoutCancel(ctx), gitDir, t.up)
 }
+
+// What a pull that went wrong left undone, after "nothing was": a push,
+// or bringing in the remote's commits alone (BringIn).
+const (
+	pushed    = "pushed"
+	broughtIn = "brought in"
+)
 
 // remote is the repository's one remote: ErrNoRemote without one, and a
 // refusal (ErrNowhere) with several, as kit pushes only to one.
@@ -179,27 +194,30 @@ func (r Repo) settled(ctx context.Context, gitDir string) ([]entry, error) {
 	return dirty, nil
 }
 
-// fetch brings in remote's commits, pruning its branches gone from it. A
+// fetch brings in remote's commits, pruning its branches gone from it,
+// saying, should it fail, what was undone, as nothing was pushed. A
 // clone of one branch fetches that branch alone, and git fails the fetch
 // while the remote hasn't it: in a repository whose branch may be missing
 // (BranchMayBeMissing), t's upstream not there has nothing to bring in, as
 // on a new, empty remote, and its remote-tracking ref, which the fetch
 // couldn't prune, is deleted, so what's waiting is counted against the
-// remote as it is.
-func (r Repo) fetch(ctx context.Context, remote string, t tracking) error {
+// remote as it is. Past ctx's deadline, the remote didn't answer in time.
+func (r Repo) fetch(ctx context.Context, remote string, t tracking, undone string) error {
 	_, err := r.git(ctx, "fetch", "--prune", "--quiet", remote)
 	switch {
 	case err == nil:
 		return nil
 	case r.BranchMayBeMissing && t.up != "" && notThere(err, t.merge):
 		if _, err := r.git(ctx, "update-ref", "-d", t.up); err != nil {
-			return fmt.Errorf("couldn't forget %s, gone from the remote, so nothing was pushed: %w", t.up, err)
+			return fmt.Errorf("couldn't forget %s, gone from the remote, so nothing was %s: %w", t.up, undone, err)
 		}
 		return nil
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("the remote didn't answer in time, so nothing was %s", undone)
 	case unreachable(err):
-		return errors.New("couldn't reach the remote, so nothing was pushed")
+		return fmt.Errorf("couldn't reach the remote, so nothing was %s", undone)
 	}
-	return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+	return fmt.Errorf("couldn't bring in the remote's changes, so nothing was %s: %w", undone, err)
 }
 
 // notThere reports whether git failed a fetch for want of ref on the
@@ -220,6 +238,59 @@ func (r Repo) behind(ctx context.Context, up string) (int, error) {
 		return 0, err
 	}
 	return r.count(ctx, "HEAD.."+up)
+}
+
+// rewritten is the refusal while HEAD holds a commit the remote's history
+// had and dropped, as another Mac's forced push does: rebasing onto it, or
+// pushing, would put the commit back. git merge-base --fork-point finds it
+// from what up, the upstream, has been (its reflog), which outlives every
+// fetch, as a commit up had in HEAD's history past where the two meet now
+// (git merge-base). Once HEAD holds it no more, as after a reset to up by
+// hand, they agree, as they do with nothing rewritten. There's nothing to
+// refuse with no upstream; with no fork point (exit 1), as once the
+// reflog's record of the commit has expired; or with no history in common
+// (git merge-base exiting 1), as a branch deleted on the remote and pushed
+// anew by another Mac, which the reflog still forks from: that's for the
+// pull's own handling of an unrelated history.
+func (r Repo) rewritten(ctx context.Context, up, undone string) error {
+	cantTell := func(err error) error {
+		return fmt.Errorf("couldn't tell whether the remote's history was rewritten, so nothing was %s: %w", undone, err)
+	}
+	if up == "" {
+		return nil
+	}
+	at, err := r.commitAt(ctx, up)
+	if err != nil {
+		return cantTell(err)
+	}
+	if at == "" {
+		return nil
+	}
+	fork, err := r.git(ctx, "merge-base", "--fork-point", up, "HEAD")
+	if none(err) {
+		return nil
+	}
+	if err != nil {
+		return cantTell(err)
+	}
+	base, err := r.git(ctx, "merge-base", up, "HEAD")
+	if none(err) {
+		return nil
+	}
+	if err != nil {
+		return cantTell(err)
+	}
+	if strings.TrimSpace(string(fork.Stdout)) != strings.TrimSpace(string(base.Stdout)) {
+		return fmt.Errorf("the remote's history was rewritten, dropping a commit this Mac has, so nothing was %s: bring it in by hand", undone)
+	}
+	return nil
+}
+
+// none reports whether git merge-base failed for want of a commit to name,
+// exiting 1, as it does with no answer.
+func none(err error) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && exit.Code == 1
 }
 
 // count is how many commits revs names, as git rev-list --count has them.
@@ -295,24 +366,48 @@ func keptBack(path, was string) error {
 // clashes is the refusal when up's commits, those HEAD hasn't, change what's
 // not committed here, dirty, staged or not, a nested repository's folder
 // by any path in it: put back after the rebase, it would conflict, leaving
-// git's markers in a file that may be linked into the home folder.
-// Nothing's touched.
+// git's markers in a file that may be linked into the home folder; or add
+// a file git ignores that's on disk here, which the rebase would overwrite
+// without a word. Nothing's touched.
 func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
+	return r.clashing(ctx, dirty, up, pushed)
+}
+
+// clashing is clashes, saying, should it refuse, what was undone, as
+// nothing was touched or pushed.
+func (r Repo) clashing(ctx context.Context, dirty []entry, up, undone string) error {
 	incoming, err := r.incoming(ctx, up)
 	if err != nil {
-		return fmt.Errorf("couldn't read the remote's changes, so nothing was pushed: %w", err)
+		return fmt.Errorf("couldn't read the remote's changes, so nothing was %s: %w", undone, err)
 	}
+	if hit := meeting(dirty, incoming); len(hit) > 0 {
+		return fmt.Errorf("the remote's commits change what's not committed here, so nothing was touched or %s: commit or undo the change to %s first", undone, strings.Join(hit, ", "))
+	}
+	res, err := r.git(ctx, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
+	if err != nil {
+		return fmt.Errorf("couldn't list the files git ignores, so nothing was %s: %w", undone, err)
+	}
+	var ignored []entry
+	for _, path := range names(res.Stdout) {
+		ignored = append(ignored, entry{code: "!!", path: path})
+	}
+	if hit := meeting(ignored, incoming); len(hit) > 0 {
+		return fmt.Errorf("the remote's commits add %s, which git ignores here, so nothing was touched or %s: move it aside first", strings.Join(hit, ", "), undone)
+	}
+	return nil
+}
+
+// meeting are the paths of entries that paths, the remote's commits',
+// change: each once, a nested repository's folder by any path in it.
+func meeting(entries []entry, paths []string) []string {
 	var hit []string
-	for _, e := range dirty {
+	for _, e := range entries {
 		meets := func(p string) bool { return p == e.path || e.nested() && strings.HasPrefix(p, e.path) }
-		if slices.ContainsFunc(incoming, meets) && !slices.Contains(hit, e.path) {
+		if slices.ContainsFunc(paths, meets) && !slices.Contains(hit, e.path) {
 			hit = append(hit, e.path)
 		}
 	}
-	if len(hit) == 0 {
-		return nil
-	}
-	return fmt.Errorf("the remote's commits change what's not committed here, so nothing was touched or pushed: commit or undo the change to %s first", strings.Join(hit, ", "))
+	return hit
 }
 
 // incoming are the paths up's commits change, those HEAD hasn't: since the
@@ -357,7 +452,7 @@ func (r Repo) catchUp(ctx context.Context, gitDir, up string) error {
 	if err != nil {
 		return err
 	}
-	rebased := r.rebase(ctx, gitDir, up)
+	rebased := r.rebase(ctx, gitDir, up, pushed)
 	switch {
 	case stash == "":
 		return rebased
@@ -387,8 +482,9 @@ func (r Repo) setAside(ctx context.Context) (string, error) {
 // rebase rebases what's committed here onto up, a remote-tracking ref,
 // aborted if it stops part way, so back as it was: on a conflict, or when
 // git, set to sign its commits, couldn't sign one it rebased, which is
-// ErrUnsigned, as Commit's is.
-func (r Repo) rebase(ctx context.Context, gitDir, up string) error {
+// ErrUnsigned, as Commit's is. Failing, it says what was undone, as
+// nothing was pushed.
+func (r Repo) rebase(ctx context.Context, gitDir, up, undone string) error {
 	// Not by fork-point, which leaves out a commit the upstream had once,
 	// before it was pushed over, so the rebase changes more than the
 	// remote's commits, as clashes reads them.
@@ -397,11 +493,11 @@ func (r Repo) rebase(ctx context.Context, gitDir, up string) error {
 	case err == nil:
 		return nil
 	case !rebasing(gitDir):
-		return fmt.Errorf("couldn't rebase onto the remote's changes, so nothing was pushed: %w", err)
+		return fmt.Errorf("couldn't rebase onto the remote's changes, so nothing was %s: %w", undone, err)
 	}
-	then := "so nothing was pushed; the rebase was undone"
+	then := "so nothing was " + undone + "; the rebase was undone"
 	if _, abort := r.git(ctx, "rebase", "--abort"); abort != nil || rebasing(gitDir) {
-		then = "and the rebase couldn't be undone, so nothing was pushed: git rebase --abort undoes it"
+		then = "and the rebase couldn't be undone, so nothing was " + undone + ": git rebase --abort undoes it"
 	}
 	if unwritten(err) {
 		if signs, _ := r.flag(ctx, "commit.gpgsign"); signs {

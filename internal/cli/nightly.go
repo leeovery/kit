@@ -36,7 +36,8 @@ jobs run every time; the nightly ones once a day, when the nightly run falls
 due (nightly_at in kit.toml, 03:00 unless it says), or on the first run after
 it's been missed, as by a Mac asleep then. The jobs run in order, each after
 the one before, and one that fails never stops the others; the checks follow.
-Nothing is installed or removed.
+Nothing is installed or removed. It brings in kit-config's remote commits
+first, leaving your edits as they are.
 
 kit apply installs the hourly launch: launchd opens kit.app on the hour, and
 kit.app runs kit nightly, so that Full Disk Access is kit.app's. Its runs
@@ -52,7 +53,8 @@ named add, remove or at).`,
 				command, logName = "nightly --plan", "nightly-plan"
 			}
 			a.scheduled = scheduled
-			r, err := a.prepare(command, logName)
+			a.pull = !plan
+			r, err := a.prepare(cmd.Context(), command, logName)
 			if err != nil {
 				return err
 			}

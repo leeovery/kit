@@ -22,8 +22,11 @@ var (
 	upstreamOf  = git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")
 	fetchIt     = git("fetch", "--prune", "--quiet", "origin")
 	upstreamAt  = git("rev-parse", "--verify", "--quiet", upstreamRef)
+	forkPointOf = git("merge-base", "--fork-point", upstreamRef, "HEAD")
+	mergeBaseOf = git("merge-base", upstreamRef, "HEAD")
 	behindOf    = git("rev-list", "--count", "HEAD.."+upstreamRef)
 	incomingOf  = git("diff", "--name-only", "-z", "--no-renames", "HEAD..."+upstreamRef)
+	ignoredOf   = git("ls-files", "-z", "--others", "--ignored", "--exclude-standard")
 	stashCreate = git("stash", "create", "kit: your changes before pulling")
 	resetHard   = git("reset", "--hard", "--quiet")
 	rebase      = git("rebase", "--no-fork-point", "--quiet", upstreamRef)
@@ -74,14 +77,31 @@ func pulling(fake *runnertest.Fake, gitDir, status, behind string) *sequence {
 // upstream, origin's; the fetch; then how many of the upstream's commits
 // HEAD hasn't, behind.
 func (s *sequence) pulls(gitDir, status, behind string) {
+	s.fetches(gitDir, status)
+	s.expect(fetchIt...)
+	s.unrewritten()
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(behindOf...).Prints(behind + "\n")
+}
+
+// fetches expects a pull as far as the fetch, which it leaves to the test,
+// as pulls has it.
+func (s *sequence) fetches(gitDir, status string) {
 	s.expect(remoteOf...).Prints("origin\n")
 	s.expect(gitDirOf...).Prints(gitDir + "\n")
 	s.expect(statusOf()...).Prints(status)
 	s.expect(branchOf...).Prints("refs/heads/main\n")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
-	s.expect(fetchIt...)
+}
+
+// unrewritten expects git asked, once fetched, whether HEAD holds a commit
+// the remote's history dropped, as real git answers with nothing
+// rewritten: the upstream there, and where it forked from HEAD's history,
+// as its reflog has it, where they meet now.
+func (s *sequence) unrewritten() {
 	s.expect(upstreamAt...).Prints(upstream + "\n")
-	s.expect(behindOf...).Prints(behind + "\n")
+	s.expect(forkPointOf...).Prints(upstream + "\n")
+	s.expect(mergeBaseOf...).Prints(upstream + "\n")
 }
 
 // rebasing has script, a rebase, stop part way, as real git does on a
@@ -123,6 +143,7 @@ func TestPush(t *testing.T) {
 	s.expect(branchOf...).Prints("refs/heads/main\n")
 	s.expect(upstreamOf...).Prints(upstreamRef + " refs/heads/trunk\n")
 	s.expect(fetchIt...)
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("0\n")
 	s.expect(git("push", "--quiet", "origin", "HEAD:refs/heads/trunk")...)
@@ -151,6 +172,7 @@ func TestPushRebasesOntoTheRemote(t *testing.T) {
 	fake := runnertest.New(t)
 	s := pulling(fake, t.TempDir(), "M  shared/staged.txt\x00 M shared/config.toml\x00A  shared/n\x00?? shared/untracked.txt\x00", "1")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	s.expect(rebase...)
@@ -164,6 +186,7 @@ func TestPushRebasesOntoTheRemote(t *testing.T) {
 	fake = runnertest.New(t)
 	s = pulling(fake, t.TempDir(), "?? shared/untracked.txt\x00", "2")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...)
 	s.expect(rebase...)
 	s.expect(pushIt...)
@@ -246,6 +269,7 @@ func TestPushLeavesASwapAlone(t *testing.T) {
 	s := &sequence{fake: fake, root: top}
 	s.pulls(t.TempDir(), " D f\x00?? fx/y\x00 T link\x00 D notes/a\x00?? note\x00", "1")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	s.expect(rebase...)
@@ -272,6 +296,7 @@ func TestPushWhenTheRebaseStops(t *testing.T) {
 	fake := runnertest.New(t)
 	s := pulling(fake, gitDir, " M laptop/a\x00", "1")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	rebasing(t, s.expect(rebase...), gitDir)
@@ -291,6 +316,7 @@ func TestPushWhenTheRebaseStops(t *testing.T) {
 	fake = runnertest.New(t)
 	s = pulling(fake, gitDir, " M laptop/a\x00", "1")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	rebasing(t, s.expect(rebase...), gitDir)
@@ -306,6 +332,7 @@ func TestPushWhenTheRebaseStops(t *testing.T) {
 	fake = runnertest.New(t)
 	s = pulling(fake, t.TempDir(), " M laptop/a\x00", "1")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	s.expect(rebase...).Exits(1).PrintsToStderr("error: The following untracked working tree files would be overwritten by checkout:\n\tlaptop/b\nPlease move or remove them before you switch branches.\nAborting\n")
@@ -321,6 +348,7 @@ func TestPushWhenTheRebaseStops(t *testing.T) {
 		fake := runnertest.New(t)
 		s := pulling(fake, gitDir, " M laptop/a\x00", "1")
 		s.expect(incomingOf...).Prints("kit.toml\x00")
+		s.expect(ignoredOf...)
 		s.expect(stashCreate...).Prints(kitsStash + "\n")
 		s.expect(resetHard...)
 		s.expect(rebase...).Exits(1).PrintsToStderr(unsignedRebase).Does(func() {
@@ -360,6 +388,7 @@ func TestPushKeepsWhatWontGoBack(t *testing.T) {
 	fake := runnertest.New(t)
 	s := pulling(fake, t.TempDir(), "M  kit.toml\x00", "1")
 	s.expect(incomingOf...).Prints("laptop/a\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	s.expect(rebase...)
@@ -374,6 +403,7 @@ func TestPushKeepsWhatWontGoBack(t *testing.T) {
 	fake = runnertest.New(t)
 	s = pulling(fake, t.TempDir(), "M  kit.toml\x00", "1")
 	s.expect(incomingOf...).Prints("laptop/a\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	s.expect(rebase...)
@@ -442,6 +472,7 @@ func TestPushToANewBranch(t *testing.T) {
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
 	s.expect(fetchIt...)
 	s.expect(upstreamAt...).Exits(1)
+	s.expect(upstreamAt...).Exits(1)
 	s.expect(pushIt...)
 	if err := push(fake); err != nil {
 		t.Errorf("Push(), the upstream not there yet = %v", err)
@@ -470,6 +501,7 @@ func TestPushToABranchMissingFromTheRemote(t *testing.T) {
 	fake := runnertest.New(t)
 	s := missing(fake, "refs/heads/main")
 	s.expect(git("update-ref", "-d", upstreamRef)...)
+	s.expect(upstreamAt...).Exits(1)
 	s.expect(upstreamAt...).Exits(1)
 	s.expect(pushIt...)
 	if err := (gitrepo.Repo{Dir: dir, Run: fake, BranchMayBeMissing: true}).Push(context.Background()); err != nil {
@@ -517,6 +549,7 @@ func TestPushOntoAnUnrelatedHistory(t *testing.T) {
 	}
 	fake := runnertest.New(t)
 	s := store(fake, " M studio/owner\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...)
 	s.expect(rebase...)
@@ -619,6 +652,7 @@ func TestPushFails(t *testing.T) {
 	fake = runnertest.New(t)
 	s = fetching(fake)
 	s.expect(fetchIt...)
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Exits(128).PrintsToStderr("fatal: bad revision\n")
 	if err := push(fake); err == nil || !strings.HasPrefix(err.Error(), "couldn't bring in the remote's changes, so nothing was pushed: ") {
@@ -638,6 +672,7 @@ func TestPushFails(t *testing.T) {
 	fake = runnertest.New(t)
 	s = pulling(fake, t.TempDir(), " M a\x00", "1")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Exits(128).PrintsToStderr("fatal: index file corrupt\n")
 	if err := push(fake); err == nil || !strings.HasPrefix(err.Error(), "couldn't set aside what's not committed, so it's left as it was and nothing was pushed: ") {
 		t.Errorf("Push(), setting aside failing = %v", err)
@@ -647,6 +682,7 @@ func TestPushFails(t *testing.T) {
 	fake = runnertest.New(t)
 	s = pulling(fake, t.TempDir(), "M  kit.toml\x00", "1")
 	s.expect(incomingOf...).Prints("laptop/a\x00")
+	s.expect(ignoredOf...)
 	s.expect(stashCreate...).Prints(kitsStash + "\n")
 	s.expect(resetHard...).Exits(128).PrintsToStderr("fatal: Unable to create '/Users/someone/.config/kit/.git/index.lock': File exists.\n")
 	if err := push(fake); err == nil || !strings.HasPrefix(err.Error(), "couldn't set aside what's not committed, so it's left as it was and nothing was pushed: ") {
@@ -665,9 +701,9 @@ func TestPushFails(t *testing.T) {
 
 // Holding is why Push would hold back now, as far as the last fetch tells,
 // fetching nothing and changing nothing: the remote's commits changing
-// what's not committed here, a folder become a file, or git part way
-// through something; nil with nothing new, no upstream, or nothing
-// clashing.
+// what's not committed here, a folder become a file, git part way
+// through something, or the remote's history rewritten; nil with nothing
+// new, no upstream, or nothing clashing.
 func TestHolding(t *testing.T) {
 	holding := func(fake *runnertest.Fake, gitDir, status string) *sequence {
 		s := &sequence{fake: fake}
@@ -683,6 +719,7 @@ func TestHolding(t *testing.T) {
 	fake := runnertest.New(t)
 	s := holding(fake, t.TempDir(), " M kit.toml\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("1\n")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
@@ -694,6 +731,7 @@ func TestHolding(t *testing.T) {
 	fake = runnertest.New(t)
 	s = holding(fake, t.TempDir(), " D shared/config.toml\x00?? shared\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("1\n")
 	if err := hold(fake); err == nil || !strings.HasPrefix(err.Error(), "shared was a folder git tracks and is a file now") {
@@ -704,9 +742,11 @@ func TestHolding(t *testing.T) {
 	fake = runnertest.New(t)
 	s = holding(fake, t.TempDir(), " M laptop/a\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("1\n")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
+	s.expect(ignoredOf...)
 	if err := hold(fake); err != nil {
 		t.Errorf("Holding(), nothing clashing = %v", err)
 	}
@@ -715,6 +755,7 @@ func TestHolding(t *testing.T) {
 	fake = runnertest.New(t)
 	s = holding(fake, t.TempDir(), " M kit.toml\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("0\n")
 	if err := hold(fake); err != nil {
@@ -729,6 +770,18 @@ func TestHolding(t *testing.T) {
 		t.Errorf("Holding(), no upstream = %v", err)
 	}
 	s.check(t, "no upstream")
+
+	// HEAD holding a commit the remote's history dropped, Push refuses, so
+	// Holding says why, whatever's behind: real git, after another Mac's
+	// forced push, answers so.
+	fake = runnertest.New(t)
+	s = holding(fake, t.TempDir(), "")
+	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.rewriting()
+	if err := hold(fake); err == nil || err.Error() != "the remote's history was rewritten, dropping a commit this Mac has, so nothing was pushed: bring it in by hand" {
+		t.Errorf("Holding(), the remote's history rewritten = %v", err)
+	}
+	s.check(t, "the remote's history rewritten")
 
 	gitDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(gitDir, "rebase-merge"), 0o700); err != nil {
