@@ -34,4 +34,4 @@ pre_tag = ['scripts/gates', 'scripts/release-build']
 post_release = ['scripts/release-upload']
 
 [release]
-diff_exclude = [".gitignore"]
+diff_exclude = [".gitignore", "art/", "cmd/capturetool/", "demo/", "internal/capture/", "internal/boot/boottest/", "internal/render/rendertest/", "internal/runner/runnertest/", "internal/testguard/"]
