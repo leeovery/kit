@@ -64,16 +64,24 @@ func onTheBranch(fake *runnertest.Fake, config, clone string) {
 	fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
-	fake.On("git", trackingOf(clone)...).Prints("origin refs/heads/prefs\n")
+	tracks(fake, clone, "origin", "refs/heads/prefs")
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		fake.On("git", "-C", clone, "config", kv[0], kv[1])
 	}
 }
 
-// trackingOf is git asking which remote, and which branch there, the
-// store's branch in its clone, at clone, tracks.
-func trackingOf(clone string) []string {
-	return []string{"-C", clone, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", "refs/heads/prefs"}
+// tracks scripts, on fake, the store's prefs branch in its clone, at
+// clone, set to track merge, a branch of remote: each "" for not set, as
+// git says by exiting 1. Its scripts answer each read in turn.
+func tracks(fake *runnertest.Fake, clone, remote, merge string) (remoteOf, mergeOf *runnertest.Script) {
+	read := func(key, value string) *runnertest.Script {
+		script := fake.On("git", "-C", clone, "config", "--get", key)
+		if value == "" {
+			return script.Exits(1)
+		}
+		return script.Prints(value + "\n")
+	}
+	return read("branch.prefs.remote", remote), read("branch.prefs.merge", merge)
 }
 
 // carries is git reading the settings the store takes from kit-config, at
@@ -442,17 +450,17 @@ func TestCaptureNamesKitConfigHoldingThePush(t *testing.T) {
 }
 
 // The store's branch is pushed only to the remote's branch of the same
-// name. One that tracks another, kit-config's main, is never pushed to it,
-// though git showed no upstream as the clone was checked, as it doesn't
-// till the branch has a commit. One that tracks nothing is pushed to the
-// branch, which it then tracks, as real git does.
+// name. One set to track another, kit-config's main, since the clone was
+// checked, is never pushed to it. One set to track nothing is pushed to
+// the branch, which it then tracks, as real git does.
 func TestCapturePushesOnlyToThePrefsBranch(t *testing.T) {
 	w := firstCapture(t)
-	w.fake.On("git", trackingOf(w.clone)...).Prints("").Then().Prints("origin refs/heads/main\n")
+	_, merge := tracks(w.fake, w.clone, "origin", "refs/heads/prefs")
+	merge.Then().Prints("refs/heads/main\n")
 	w.heldBack(t, "tracking kit-config's main", w.clone+" tracks main on origin, not kit-config's prefs branch: ")
 
 	w = firstCapture(t)
-	w.fake.On("git", trackingOf(w.clone)...).Prints(" \n")
+	tracks(w.fake, w.clone, "", "")
 	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/prefs").Prints(" \n")
 	w.fake.On("git", "-C", w.clone, "push", "--quiet", "-u", "origin", "HEAD")
 	report, err := w.p.Capture(t.Context())

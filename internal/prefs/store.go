@@ -133,24 +133,38 @@ func (p *Prefs) checkClone(ctx context.Context, remote string) error {
 	return fmt.Errorf("%s is on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there", p.Clone, cmp.Or(on, "no branch"), branch)
 }
 
-// checkUpstream refuses the store's clone unless its branch tracks the
-// remote's branch of the same name, or nothing, which the first push makes
-// it track. A clone of kit-config whose main was renamed prefs still tracks
-// main, which a pull would rebase the store onto, and a push send it to.
-// Git shows no upstream for a branch with no commit yet, so push asks again
-// once there's one.
+// checkUpstream refuses the store's clone unless its branch is set to track
+// origin's branch of the same name, or set to track nothing, which the
+// first push makes it track. A clone of kit-config whose main was renamed
+// prefs is still set to track main, which a pull would rebase the store
+// onto, and a push send it to. The settings are read, not git's upstream,
+// which git shows as none when no fetch refspec maps the branch set, and
+// for a branch with no commit. Push asks again all the same.
 func (p *Prefs) checkUpstream(ctx context.Context) error {
-	res, err := p.git(ctx, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", "refs/heads/"+branch)
+	remote, err := p.setting(ctx, "branch."+branch+".remote")
 	if err != nil {
 		return err
 	}
-	remote, ref, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), " ")
-	if remote == "" && ref == "" || remote == origin && ref == "refs/heads/"+branch {
+	merge, err := p.setting(ctx, "branch."+branch+".merge")
+	if err != nil {
+		return err
+	}
+	if remote == "" && merge == "" || remote == origin && (merge == "refs/heads/"+branch || merge == branch) {
 		return nil
 	}
-	return fmt.Errorf("%s tracks %s on %s, not kit-config's %s branch: git -C %s branch -u %s/%s %s sets it right, or, while the remote hasn't the branch, git -C %s config branch.%s.merge refs/heads/%s",
-		p.Clone, strings.TrimPrefix(ref, "refs/heads/"), cmp.Or(remote, "no remote"), branch,
-		p.Clone, origin, branch, branch, p.Clone, branch, branch)
+	return fmt.Errorf("%s tracks %s on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there, or set it to track the branch (git -C %s config branch.%s.remote %s, then git -C %s config branch.%s.merge refs/heads/%s)",
+		p.Clone, cmp.Or(strings.TrimPrefix(merge, "refs/heads/"), "no branch"), cmp.Or(remote, "no remote"), branch,
+		p.Clone, branch, origin, p.Clone, branch, branch)
+}
+
+// setting is git's setting key in the store's clone: "" when it isn't set,
+// as git says by exiting 1.
+func (p *Prefs) setting(ctx context.Context, key string) (string, error) {
+	res, err := p.git(ctx, "config", "--get", key)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return "", nil
+	}
+	return strings.TrimSpace(string(res.Stdout)), err
 }
 
 // checkPushes refuses the store's clone unless it pushes where kit-config

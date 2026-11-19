@@ -536,21 +536,45 @@ func (w *world) refused(t *testing.T, name string, run func(context.Context, *pr
 	}
 }
 
-// A clone on the prefs branch that tracks another is refused as one
+// A clone on the prefs branch set to track another is refused as one
 // elsewhere is: as git branch -m main prefs leaves a clone of kit-config,
-// its main renamed and still tracking main, which a pull would rebase the
-// store onto and a push send it to, reaching every Mac. Kit names what it
-// tracks, and how to set it right. What git prints is what real git does.
+// its main renamed and still set to track main, which a pull would rebase
+// the store onto and a push send it to, reaching every Mac. It's what the
+// branch is set to track that's read, as git shows no upstream when the
+// clone fetches prefs alone, and a push would publish kit-config's history
+// as prefs. Kit names what it tracks, and says to move it aside, or to set
+// both settings. What git prints is what real git does.
 func TestACloneTrackingAnotherBranchIsRefused(t *testing.T) {
-	for _, c := range []struct{ name, tracks, says string }{
-		{"kit-config's main", "origin refs/heads/main\n", " tracks main on origin"},
-		{"a branch of its own", ". refs/heads/prefs\n", " tracks prefs on ."},
+	for _, c := range []struct{ name, remote, merge, says string }{
+		{"kit-config's main", "origin", "refs/heads/main", " tracks main on origin"},
+		{"a branch of its own", ".", "refs/heads/prefs", " tracks prefs on ."},
+		{"no branch set", "origin", "", " tracks no branch on origin"},
+		{"no remote set", "", "refs/heads/prefs", " tracks prefs on no remote"},
 	} {
 		for _, do := range onTheStore {
 			w := refusedWorld(t)
-			w.fake.On("git", trackingOf(w.clone)...).Prints(c.tracks)
-			says := w.clone + c.says + ", not kit-config's prefs branch: git -C " + w.clone + " branch -u origin/prefs prefs sets it right, or, while the remote hasn't the branch, git -C " + w.clone + " config branch.prefs.merge refs/heads/prefs"
+			tracks(w.fake, w.clone, c.remote, c.merge)
+			says := w.clone + c.says + ", not kit-config's prefs branch: move the clone aside for kit to clone the branch there, or set it to track the branch (git -C " +
+				w.clone + " config branch.prefs.remote origin, then git -C " + w.clone + " config branch.prefs.merge refs/heads/prefs)"
 			w.refused(t, c.name+", "+do.name, do.run, says)
+		}
+	}
+}
+
+// A clone on the prefs branch set to track origin's prefs, by its full name
+// or its short one, or set to track nothing, as the first push then sets
+// it, is the store's.
+func TestACloneTrackingPrefsIsTheStores(t *testing.T) {
+	for _, c := range []struct{ name, remote, merge string }{
+		{"origin's prefs", "origin", "refs/heads/prefs"},
+		{"origin's prefs, by its short name", "origin", "prefs"},
+		{"nothing", "", ""},
+	} {
+		w := refusedWorld(t)
+		tracks(w.fake, w.clone, c.remote, c.merge)
+		w.fake.On("git", "-C", w.clone, "log", "--no-color", "-n5", "--format=%x1e%h%x00%aI%x00%s", "--shortstat", "--", "laptop")
+		if _, err := w.p.History(t.Context(), "", "", 5); !errors.Is(err, prefs.ErrNoHistory) {
+			t.Errorf("tracking %s: History() = %v; want the clone read", c.name, err)
 		}
 	}
 }
