@@ -162,14 +162,14 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 		Run: run, Sink: sink, GitHub: a.GitHub(), Now: a.Now,
 		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Homebrew: a.Homebrew, Given: given,
 		Snapshot: func(ctx context.Context, cfg *config.Config, mac string) (snapshot.Snapshot, snapshot.Mac, error) {
-			shellPath, err := cfg.ShellPath(home, mac)
+			paths, err := cfg.PathLists(home, mac)
 			if err != nil {
 				return snapshot.Snapshot{}, snapshot.Mac{}, err
 			}
 			// dirs come last in this Mac's [paths], so kit's PATH is as its
 			// later runs have it once they're declared.
 			runOn := func(dirs []string) runner.Runner {
-				p := config.SearchPathOf(slices.Concat(shellPath, dirs))
+				p := config.SearchPathOf(paths.Adding(dirs...).Shell())
 				return a.commands(p, childEnv(a.Getenv, home, p), sink, noAsks)
 			}
 			m := snapshot.Mac{

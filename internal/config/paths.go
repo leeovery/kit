@@ -12,7 +12,7 @@ import (
 var systemPath = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
 
 // SearchPath is kit's own PATH on the Mac named mac: the directories the
-// shared declarations' paths section lists, then the Mac's own, then the
+// Mac's own paths section lists, then the shared declarations', then the
 // system's, each once; a relative one (node_modules/.bin), which only a
 // shell in a project folder finds anything in, is left out. home is what ~
 // expands to. kit ignores the PATH it inherited, so it finds the same
@@ -38,29 +38,72 @@ func SearchPathOf(shellPath []string) []string {
 }
 
 // ShellPath is the PATH the shell puts ahead of the one it inherits, on the
-// Mac named mac: every directory the paths sections list, the shared
-// declarations' then the Mac's, in order, each once, ~ expanded and
-// relative ones kept.
+// Mac named mac: every directory the paths sections list, the Mac's then
+// the shared declarations', in order, each once, in the place it first
+// appears, ~ expanded and relative ones kept. A Mac's line repeating a
+// shared one raises it on that Mac.
 func (c *Config) ShellPath(home, mac string) ([]string, error) {
+	p, err := c.PathLists(home, mac)
+	if err != nil {
+		return nil, err
+	}
+	return p.Shell(), nil
+}
+
+// PathLists are the directories the paths sections list on one Mac, each
+// section's in order, ~ expanded and relative ones kept: the Mac's own,
+// and the shared declarations'.
+type PathLists struct{ Own, Shared []string }
+
+// PathLists reads the paths sections on the Mac named mac, home what ~
+// expands to.
+func (c *Config) PathLists(home, mac string) (PathLists, error) {
+	own, err := c.paths(home, mac)
+	if err != nil {
+		return PathLists{}, err
+	}
+	shared, err := c.paths(home, Shared)
+	if err != nil {
+		return PathLists{}, err
+	}
+	return PathLists{Own: own, Shared: shared}, nil
+}
+
+// Shell is the shell's PATH p makes (ShellPath): the Mac's directories,
+// then the shared ones, each once, in the place it first appears.
+func (p PathLists) Shell() []string {
 	var out []string
-	for _, scope := range []string{Shared, mac} {
-		entries, _, err := c.declared(PathsKind, scope)
-		if err != nil {
-			return nil, err
+	for _, dir := range slices.Concat(p.Own, p.Shared) {
+		if !slices.Contains(out, dir) {
+			out = append(out, dir)
 		}
-		for _, e := range entries {
-			if err := checkDir(e.Name); err != nil {
-				return nil, fmt.Errorf("%s: %w", e.Pos(), err)
-			}
-			dir := e.Name
-			if rest, ok := strings.CutPrefix(dir, "~"); ok {
-				dir = home + rest
-			}
-			dir = filepath.Clean(dir)
-			if !slices.Contains(out, dir) {
-				out = append(out, dir)
-			}
+	}
+	return out
+}
+
+// Adding is p with dirs declared last in the Mac's own paths section, as
+// kit path add and setup's snapshot declare them.
+func (p PathLists) Adding(dirs ...string) PathLists {
+	return PathLists{Own: slices.Concat(p.Own, dirs), Shared: p.Shared}
+}
+
+// paths are the directories scope's paths section lists, in order, ~
+// expanded.
+func (c *Config) paths(home, scope string) ([]string, error) {
+	entries, _, err := c.declared(PathsKind, scope)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if err := checkDir(e.Name); err != nil {
+			return nil, fmt.Errorf("%s: %w", e.Pos(), err)
 		}
+		dir := e.Name
+		if rest, ok := strings.CutPrefix(dir, "~"); ok {
+			dir = home + rest
+		}
+		out = append(out, filepath.Clean(dir))
 	}
 	return out, nil
 }
