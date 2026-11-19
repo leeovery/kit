@@ -528,20 +528,9 @@ func (s *Setup) commitStep() engine.Step {
 }
 
 // provenPrivate is why the clone isn't pushed to a repository proven
-// private, each URL git pushes it to, after any pushurl or pushInsteadOf:
-// nil when every one is.
+// private (boot.ProvenPrivate): nil when it is.
 func (s *Setup) provenPrivate(ctx context.Context) error {
-	err := gitrepo.Repo{Dir: s.Dirs.Config, Run: s.Run}.ProvePrivate(ctx)
-	notPrivate, isNot := errors.AsType[gitrepo.NotPrivate](err)
-	switch {
-	case isNot && notPrivate.Place.Repo != "":
-		return fmt.Errorf("%s, and kit-config is pushed only to a private repository: make it private, then run kit setup again", notPrivate)
-	case isNot:
-		return fmt.Errorf("%s: kit-config is pushed only to a repository kit can prove private", notPrivate)
-	case err != nil:
-		return fmt.Errorf("find where kit-config is pushed: %w", err)
-	}
-	return nil
+	return boot.ProvenPrivate(ctx, gitrepo.Repo{Dir: s.Dirs.Config, Run: s.Run}, "run kit setup again")
 }
 
 // stopped is res, setup's commit or push that didn't go, saying a run

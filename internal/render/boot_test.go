@@ -157,7 +157,7 @@ func TestBootFaceName(t *testing.T) {
 	f.Emit(event.StepStarted{Time: at, Step: "mac"})
 	named := make(chan string, 1)
 	go func() {
-		name, _ := f.Name(context.Background(), "mac", "its name, as kit-config will know it")
+		name, _ := f.Text(context.Background(), "mac", "its name, as kit-config will know it", "")
 		named <- name
 	}()
 	waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "its name") })
@@ -224,6 +224,75 @@ func TestBootFaceSignIn(t *testing.T) {
 	if f.Full(120, 30) != nil {
 		t.Error("signed in, the full screen stayed")
 	}
+}
+
+// With no kit-config of the person's, signed in, which repository is asked
+// in GitHub's row: created, kit-config suggested, or one of theirs, picked
+// or named; one refused is asked again, saying why; one created asks the
+// terminal the Mac uses. Created, the boot order follows as for any
+// config, kit-config's row saying its first files were pushed.
+func TestBootFaceNoConfig(t *testing.T) {
+	at := time.Date(2026, 11, 18, 18, 2, 0, 0, time.UTC)
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
+	order := rendertest.BootOrder()
+	f.Show(order[:1])
+	f.Emit(event.StepStarted{Time: at, Step: "github"})
+	var screens strings.Builder
+	choose := func(frame, text string, choices []look.Choice, keys ...string) {
+		t.Helper()
+		chosen := make(chan int, 1)
+		go func() {
+			i, _ := f.Choose(context.Background(), "github", text, choices)
+			chosen <- i
+		}()
+		waitFor(t, func() bool { return strings.Contains(plainView(f, 40), text) })
+		for _, k := range keys {
+			f.Key(ask.Key{Name: k})
+		}
+		screens.WriteString("--- " + frame + "\n" + plainView(f, 40))
+		f.Key(ask.Key{Name: "enter"})
+		<-chosen
+	}
+	answers := []look.Choice{
+		{Label: "Create kit-config", Does: "a new private repository on someone's account"},
+		{Label: "Join one of yours", Does: "pick from your private repositories"},
+		{Label: "Another name", Does: "create it under a name of your own"},
+	}
+	f.Emit(event.Doing{Time: at, Step: "github", Says: "reading someone/kit-config"})
+	choose("the question", "someone has no repository named kit-config", answers, "down")
+	choose("picking", "which of your private repositories?", []look.Choice{{Label: "someone/dotfiles"}, {Label: "someone/notes"}, {Label: "Another", Does: "named as owner/name"}}, "down")
+	f.Emit(event.Doing{Time: at, Step: "github", Says: "reading someone/notes"})
+	choose("refused", "someone/notes holds no kit.toml, so it's no config repository", answers, "down", "down")
+	named := make(chan string, 1)
+	go func() {
+		name, _ := f.Text(context.Background(), "github", "its name, a new private repository on someone's account", "kit-config")
+		named <- name
+	}()
+	waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "its name") })
+	screens.WriteString("--- its name, suggested\n" + plainView(f, 40))
+	f.Key(ask.Key{Name: "enter"})
+	if name := <-named; name != "kit-config" {
+		t.Errorf("named %q; want the name suggested", name)
+	}
+	choose("the terminal", "kit-config starts on this Mac: which terminal will it use?", []look.Choice{
+		{Label: "Ghostty", Does: "installed, then kit carries on there"},
+		{Label: "Terminal", Does: "macOS's own: kit carries on here"},
+	})
+	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.OK, Summary: "someone · someone/kit-config, new, private"}})
+	f.Show(order)
+	ok := func(step, summary string) {
+		f.Emit(event.StepStarted{Time: at, Step: step})
+		f.Emit(event.StepFinished{Time: at, Step: step, Result: check.Result{State: check.OK, Summary: summary}, Duration: 4 * time.Second})
+	}
+	ok("mac", "laptop")
+	ok("password", "given")
+	ok("homebrew", "5.0.1 · Xcode tools 27.0")
+	ok("apps", "Ghostty 1.3.1")
+	ok("kit-config", "cloned · first files pushed · 0 files linked")
+	f.Emit(event.StepStarted{Time: at, Step: "kit"})
+	f.Emit(event.Doing{Time: at, Step: "kit", Says: "installing"})
+	screens.WriteString("--- created\n" + plainView(f, 40))
+	golden(t, "boot-no-config.golden", screens.String())
 }
 
 // Never taller than the terminal: rows done, then those waiting, give way,

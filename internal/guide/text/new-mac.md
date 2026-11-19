@@ -12,6 +12,21 @@ kit.toml names and kit-config, links its files, and installs kit itself
 through Homebrew. It carries on in that terminal with the whole of
 `kit apply`, from Homebrew's kit; the download is removed.
 
+The config is the person's repository named kit-config, or the one
+`--config owner/name` names; the one-line install gives no flags. With
+neither, at a terminal, the boot asks in GitHub's row: one of their
+private repositories, picked from a list (never looked inside), one named
+as owner/name, or a new one created, private, kit-config suggested. One
+without a kit.toml is refused and the question asked again. A new or
+empty one starts kit-config on this Mac: the boot asks which terminal the
+Mac uses, then, once it's cloned, writes kit.toml (this Mac the primary,
+that terminal) and the Mac's folder with an empty declarations file,
+commits them and pushes, only to a repository proven private. Without a
+terminal, the question of which is the config stops it, naming `--config`:
+a new config is made at a terminal, or with `kit setup` on a Mac in use.
+An empty one named with `kit bootstrap --config` starts with no terminal,
+the boot staying in Terminal; `kit terminal <name>` names one after.
+
 So when `kit apply` starts: Homebrew, its kit and the terminal are there,
 gh is signed in to GitHub, kit-config is cloned and its files linked, and
 nothing else of the person's is.

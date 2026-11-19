@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -644,5 +645,262 @@ func TestHandOverFails(t *testing.T) {
 	t2.Driver = &opener{fails: failed}
 	if err := b.handOverStep(t2).Apply(context.Background(), check.Result{}); !errors.Is(err, failed) || !strings.HasPrefix(err.Error(), "open Ghostty: ") {
 		t.Errorf("apply = %v", err)
+	}
+}
+
+// startsHere records kit-config chosen to start on this Mac, in repo,
+// created or empty, this Mac using terminal.
+func startsHere(t *testing.T, b *Boot, repo string, create bool, terminal string) {
+	t.Helper()
+	if err := kitstate.Update(b.State, stateName, func(st *state) { st.Repo, st.Fresh = repo, &fresh{Create: create, Terminal: terminal} }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// kit-config starting on this Mac plans the boot order from the terminal
+// chosen for it, before there's a kit.toml: Ghostty's steps with it, none
+// with macOS's own.
+func TestOrderOfANewConfig(t *testing.T) {
+	for _, tt := range []struct {
+		terminal string
+		want     []string
+	}{
+		{"ghostty", []string{"mac", "password", "homebrew", "apps", "kit-config", "kit", "full-disk-access", "terminal"}},
+		{"", []string{"mac", "password", "homebrew", "kit-config", "kit"}},
+	} {
+		b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+		startsHere(t, b, "someone/kit-config", true, tt.terminal)
+		var names []string
+		for _, s := range b.Order() {
+			names = append(names, s.Name)
+		}
+		if !slices.Equal(names, tt.want) {
+			t.Errorf("terminal %q: order = %q; want %q", tt.terminal, names, tt.want)
+		}
+	}
+}
+
+// This Mac, the first of kit-config starting on it: its name asked, again
+// till it can name a Mac, or as --mac gives it; a Mac started fresh, so not
+// one the boot set up, and nothing's written in kit-config till it's
+// cloned.
+func TestThisMacOfANewConfig(t *testing.T) {
+	const (
+		named   = "mac: its name, as kit-config will know it"
+		badName = "mac: that can't name a Mac: lower case letters, digits and dashes"
+	)
+	for _, tt := range []struct {
+		name, mac string
+		ask       *asker
+		asked     []string
+		want      string
+	}{
+		{"asked", "", &asker{name: "laptop"}, []string{named}, "laptop"},
+		{"asked again", "", &asker{names: []string{"shared", "No Good"}, name: "laptop"}, []string{named, badName, badName}, "laptop"},
+		{"named", "laptop", &asker{}, nil, "laptop"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := newBoot(t, runnertest.New(t), GitHub{}, tt.ask)
+			b.Mac = tt.mac
+			startsHere(t, b, "someone/kit-config", true, "ghostty")
+			step := b.macStep()
+			if res := step.Check(context.Background()); res.State != check.Attention {
+				t.Fatalf("check before = %+v", res)
+			}
+			if err := step.Apply(context.Background(), check.Result{}); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			if !slices.Equal(tt.ask.asked, tt.asked) {
+				t.Errorf("asked %q; want %q", tt.ask.asked, tt.asked)
+			}
+			if setUp, err := SetUp(b.State); err != nil || setUp {
+				t.Errorf("SetUp() = %v, %v; want a Mac started fresh", setUp, err)
+			}
+			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != tt.want {
+				t.Errorf("check after = %+v", res)
+			}
+			if _, err := os.Stat(b.archive()); err == nil {
+				t.Error("wrote kit-config's files before it's cloned")
+			}
+		})
+	}
+	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	b.Mac = "No Good"
+	startsHere(t, b, "someone/kit-config", true, "")
+	if err := b.macStep().Apply(context.Background(), check.Result{}); err == nil || !strings.Contains(err.Error(), "can't name a Mac") {
+		t.Errorf("a bad name: %v", err)
+	}
+}
+
+// emptyClone scripts gh's clone of repo, empty, into b's config folder, as
+// gh and git do it: a warning, and HEAD on git's own first branch, unborn.
+func emptyClone(t *testing.T, run *runnertest.Fake, b *Boot, repo string) {
+	t.Helper()
+	run.On("gh", "repo", "clone", repo, b.Config, "--", "--quiet", "--single-branch").PrintsToStderr("warning: You appear to have cloned an empty repository.\n").Does(func() {
+		writeFiles(t, b.Config, map[string]string{".git/HEAD": "ref: refs/heads/master\n"})
+	})
+	git := func(args ...string) []string { return append([]string{"-C", b.Config}, args...) }
+	run.On("git", git("config", "credential.https://github.com.helper", GitCredentials)...)
+	for _, s := range OnMain {
+		run.On("git", git(s.Set...)...)
+	}
+}
+
+// pushesFirst scripts git's answers as the boot commits kit-config's first
+// files for mac and pushes them to repo, empty, as real git gives them:
+// proven private first; git with an author's name and address, or none
+// (author); the branch not on the remote till the push makes it.
+func pushesFirst(t *testing.T, run *runnertest.Fake, b *Boot, repo, mac string, author bool) {
+	t.Helper()
+	git := func(args ...string) []string { return append([]string{"-C", b.Config}, args...) }
+	on := func(args ...string) []string {
+		return git(slices.Concat([]string{"--literal-pathspecs"}, args)...)
+	}
+	gitDir := filepath.Join(b.Config, ".git")
+	run.On("git", git("remote")...).Prints("origin\n")
+	run.On("git", git("remote", "get-url", "--push", "--all", "origin")...).Prints("https://github.com/" + repo + ".git\n")
+	run.On("gh", "repo", "view", "https://github.com/"+repo, "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	if author {
+		run.On("git", git("config", "--get", "user.name")...).Prints("Some One\n")
+		run.On("git", git("config", "--get", "user.email")...).Prints("someone@example.com\n")
+	} else {
+		run.On("git", git("config", "--get", "user.name")...).Exits(1)
+	}
+	files := []string{"kit.toml", mac + "/declarations"}
+	run.On("git", on("status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "kit.toml", mac)...).Prints("?? kit.toml\x00?? " + mac + "/declarations\x00")
+	run.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
+	run.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Exits(1)
+	run.On("git", on(slices.Concat([]string{"add", "--intent-to-add", "--"}, files)...)...)
+	run.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Exits(1)
+	run.On("git", on(slices.Concat([]string{"-c", "core.hooksPath=/dev/null", "commit", "--quiet", "--only", "-m", "kit bootstrap (" + mac + "): kit-config starts on this Mac", "--"}, files)...)...)
+	run.On("git", on("status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...)
+	run.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
+	run.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
+	run.On("git", git("fetch", "--prune", "--quiet", "origin")...).Exits(128).PrintsToStderr("fatal: couldn't find remote ref refs/heads/main\n")
+	run.On("git", git("update-ref", "-d", "refs/remotes/origin/main")...)
+	run.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Exits(1)
+	run.On("git", git("push", "--quiet", "origin", "HEAD:refs/heads/main")...)
+}
+
+// kit-config starting on this Mac: its repository created, private, unless
+// it's there, empty; cloned as any is, then set on main; its first files,
+// this Mac the primary and the terminal it uses, its folder with an empty
+// declarations file, committed, as the account signed in to when git has
+// no author yet, and pushed, once proven private. Then it's kit-config as
+// any other.
+func TestKitConfigStartsOnThisMac(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		create, there   bool
+		author, unasked bool
+		terminal, toml  string
+		summary         string
+	}{
+		{name: "created", create: true, terminal: "ghostty",
+			toml: "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\n\n[macs.laptop]\n"},
+		{name: "created by a boot before", create: true, there: true, author: true,
+			toml: "format = 1\nprimary = \"laptop\"\n\n[macs.laptop]\n"},
+		{name: "empty", there: true, terminal: "ghostty",
+			toml: "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\n\n[macs.laptop]\n"},
+		{name: "empty, no terminal to ask at", there: true, unasked: true,
+			toml:    "format = 1\nprimary = \"laptop\"\n\n[macs.laptop]\n",
+			summary: "cloned · first files pushed · 0 files linked · no terminal named: kit terminal <name> names one"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gh := &gitHub{token: "gho_secret", repo: "someone/elsewhere", others: map[string]repo{}}
+			if tt.there {
+				gh.others["someone/kit-config"] = repo{}
+			}
+			run := runnertest.New(t)
+			b, _ := newBoot(t, run, gh.serve(t), &asker{})
+			startsHere(t, b, "someone/kit-config", tt.create, tt.terminal)
+			if tt.unasked {
+				if err := kitstate.Update(b.State, stateName, func(st *state) { st.Fresh.Unasked = true }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := config.WriteMachine(b.State, "laptop"); err != nil {
+				t.Fatal(err)
+			}
+			b.hold("gho_secret", "someone")
+			run.On("gh", "auth", "status", "--hostname", "github.com")
+			run.On("security", "delete-generic-password", "-s", keychainItem)
+			created := false
+			if tt.create && !tt.there {
+				run.On("gh", "repo", "create", "someone/kit-config", "--private").Does(func() {
+					created = true
+					gh.mu.Lock()
+					gh.others["someone/kit-config"] = repo{}
+					gh.mu.Unlock()
+				})
+			}
+			emptyClone(t, run, b, "someone/kit-config")
+			pushesFirst(t, run, b, "someone/kit-config", "laptop", tt.author)
+			step := b.configStep()
+			if res := step.Check(context.Background()); res.State != check.Attention || res.Summary != "not cloned yet" {
+				t.Fatalf("check before = %+v", res)
+			}
+			if err := step.Apply(context.Background(), check.Result{}); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			if created != (tt.create && !tt.there) {
+				t.Errorf("created %v; want it created only when it's not there", created)
+			}
+			if got, _ := os.ReadFile(filepath.Join(b.Config, config.File)); string(got) != tt.toml {
+				t.Errorf("kit.toml =\n%s\nwant\n%s", got, tt.toml)
+			}
+			if got, err := os.ReadFile(filepath.Join(b.Config, "laptop", "declarations")); err != nil || len(got) > 0 {
+				t.Errorf("laptop/declarations = %q, %v; want it empty", got, err)
+			}
+			for _, c := range run.Commands() {
+				if !slices.Contains(c.Args, "commit") {
+					continue
+				}
+				want := []string{"LC_ALL=C"}
+				if !tt.author {
+					want = append(want, "GIT_AUTHOR_NAME=Some One", "GIT_AUTHOR_EMAIL=1234+someone@users.noreply.github.com",
+						"GIT_COMMITTER_NAME=Some One", "GIT_COMMITTER_EMAIL=1234+someone@users.noreply.github.com")
+				}
+				if !slices.Equal(c.Env, want) {
+					t.Errorf("committed with %q; want %q", c.Env, want)
+				}
+			}
+			st, _ := kitstate.Load[state](b.State, stateName)
+			if st.Fresh != nil || !st.Started {
+				t.Errorf("state after = %+v; want kit-config started here", st)
+			}
+			want := cmp.Or(tt.summary, "cloned · first files pushed · 0 files linked")
+			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != want {
+				t.Errorf("check after = %+v; want %q", res, want)
+			}
+		})
+	}
+}
+
+// kit-config starting on this Mac is pushed only to a repository proven
+// private: one whose push URL is elsewhere is refused, its first files
+// left uncommitted.
+func TestKitConfigStartsOnlyWhenProvenPrivate(t *testing.T) {
+	gh := &gitHub{token: "gho_secret", repo: "someone/elsewhere", others: map[string]repo{"someone/kit-config": {}}}
+	run := runnertest.New(t)
+	b, _ := newBoot(t, run, gh.serve(t), &asker{})
+	startsHere(t, b, "someone/kit-config", false, "")
+	if err := config.WriteMachine(b.State, "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	b.hold("gho_secret", "someone")
+	run.On("gh", "auth", "status", "--hostname", "github.com")
+	run.On("security", "delete-generic-password", "-s", keychainItem)
+	emptyClone(t, run, b, "someone/kit-config")
+	git := func(args ...string) []string { return append([]string{"-C", b.Config}, args...) }
+	run.On("git", git("remote")...).Prints("origin\n")
+	run.On("git", git("remote", "get-url", "--push", "--all", "origin")...).Prints("https://github.com/other/public.git\n")
+	run.On("gh", "repo", "view", "https://github.com/other/public", "--json", "visibility", "--jq", ".visibility").Prints("PUBLIC\n")
+	err := b.configStep().Apply(context.Background(), check.Result{})
+	if err == nil || err.Error() != "other/public is public on GitHub, and kit-config is pushed only to a private repository: make it private, then boot again" {
+		t.Errorf("apply = %v", err)
+	}
+	if res := b.configStep().Check(context.Background()); res.State != check.Attention || res.Summary != "cloned · first files not pushed yet" {
+		t.Errorf("check after = %+v", res)
 	}
 }

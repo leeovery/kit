@@ -1,0 +1,52 @@
+--- the question
+  SIGN IN
+  [ !! ] GitHub  someone has no repository named kit-config
+           Create kit-config  a new private repository on someone's account
+         ❯ Join one of yours  pick from your private repositories
+           Another name  create it under a name of your own
+
+  ↑↓ choose · enter decide · esc stop
+--- picking
+  SIGN IN
+  [ !! ] GitHub  which of your private repositories?
+           someone/dotfiles
+         ❯ someone/notes
+           Another  named as owner/name
+
+  ↑↓ choose · enter decide · esc stop
+--- refused
+  SIGN IN
+  [ !! ] GitHub  someone/notes holds no kit.toml, so it's no config repository
+           Create kit-config  a new private repository on someone's account
+           Join one of yours  pick from your private repositories
+         ❯ Another name  create it under a name of your own
+
+  ↑↓ choose · enter decide · esc stop
+--- its name, suggested
+  SIGN IN
+  [ !! ] GitHub  its name, a new private repository on someone's account
+         ❯ kit-config
+
+  enter done · esc stop
+--- the terminal
+  SIGN IN
+  [ !! ] GitHub  kit-config starts on this Mac: which terminal will it use?
+         ❯ Ghostty  installed, then kit carries on there
+           Terminal  macOS's own: kit carries on here
+
+  ↑↓ choose · enter decide · esc stop
+--- created
+  SIGN IN
+  [ OK ] GitHub  someone · someone/kit-config, new, private
+
+  BOOT ORDER
+  [ OK ] This Mac  laptop
+  [ OK ] Password  given
+  [ OK ] Homebrew  5.0.1 · Xcode tools 27.0
+  [ OK ] Apps  Ghostty 1.3.1
+  [ OK ] kit-config  cloned · first files pushed · 0 files linked
+  [*   ] kit  installing
+  [    ] Full Disk Access  for Ghostty
+  [    ] Ghostty
+
+  esc stop
