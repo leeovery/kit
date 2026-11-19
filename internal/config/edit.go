@@ -479,7 +479,7 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	if s, _ := f.holding(d, e.Name); s != nil {
 		return d, nil, fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
-	if scope != Shared {
+	if scope != Shared && !d.raises {
 		shared, err := c.readDecl(Shared)
 		if err != nil {
 			return d, nil, err

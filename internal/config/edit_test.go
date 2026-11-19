@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -703,14 +704,28 @@ func TestDeclareSharedDropsASectionItEmpties(t *testing.T) {
 }
 
 // A Mac's file can't declare what the shared one does: Declare says it's in
-// the shared declarations, for every Mac, whatever the kind.
+// the shared declarations, for every Mac, whatever the kind, but for a
+// folder on the PATH, which a Mac's line raises on that Mac, and the list
+// reads with it in both.
 func TestDeclareWhatTheSharedFileHas(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"shared/declarations": "[homebrew formulae]\njq\n\n[paths]\n~/bin\n"})
-	for kind, name := range map[string]string{"brew": "jq", config.PathsKind: "~/bin"} {
-		want := name + " is in the shared declarations already (shared/declarations), for every Mac"
-		if err := cfg.Declare(kind, "laptop", config.Entry{Name: name}); err == nil || err.Error() != want {
-			t.Errorf("Declare(%s %s) = %v, want %q", kind, name, err, want)
-		}
+	tests := []struct {
+		kind, name, want string
+	}{
+		{"brew", "jq", "jq is in the shared declarations already (shared/declarations), for every Mac"},
+		{config.FeaturesKind, "remote-login", "remote-login is in the shared declarations already (shared/declarations), for every Mac"},
+		{config.PathsKind, "~/bin", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			cfg := loadRepo(t, map[string]string{"shared/declarations": "[features]\nremote-login\n\n[paths]\n~/bin\n\n[homebrew formulae]\njq\n"})
+			err := cfg.Declare(tt.kind, "laptop", config.Entry{Name: tt.name})
+			if got := fmt.Sprint(err); (tt.want == "" && err != nil) || (tt.want != "" && got != tt.want) {
+				t.Fatalf("Declare(%s %s) = %v, want %q", tt.kind, tt.name, err, tt.want)
+			}
+			if _, err := cfg.List(tt.kind, "laptop"); tt.want == "" && err != nil {
+				t.Errorf("List(%s) = %v, want it read with %s in both", tt.kind, err, tt.name)
+			}
+		})
 	}
 }
 

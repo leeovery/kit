@@ -19,11 +19,17 @@ const pathsKind = "path"
 // addPaths declares each directory last in the paths section of this Mac's
 // declarations (every Mac's, with --shared), writes the shell's PATH, then
 // commits and pushes. A directory in the home folder is declared with ~.
+// This Mac's come first on the PATH, so one every Mac has, declared for
+// this Mac too, is raised on it.
 func (a *app) addPaths(ctx context.Context, r *run, dirs []string, opts addOptions) error {
 	if opts.temp {
 		return errors.New("--temp is for packages: a directory is on the PATH, or it isn't")
 	}
 	scope := r.scope(opts.shared)
+	place := ", last of this Mac's on the PATH, ahead of every Mac's"
+	if opts.shared {
+		place = ", last on the PATH"
+	}
 	dirs = r.tildePaths(dirs)
 	c := pathChanges(r, dirs)
 	for _, dir := range dirs {
@@ -32,7 +38,7 @@ func (a *app) addPaths(ctx context.Context, r *run, dirs []string, opts addOptio
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
-			return check.Result{State: check.OK, Summary: "declared in " + scope + said + ", last on the PATH"}
+			return check.Result{State: check.OK, Summary: "declared in " + scope + said + place}
 		})
 	}
 	a.writeShellPath(ctx, r, c)

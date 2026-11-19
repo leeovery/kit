@@ -190,6 +190,9 @@ type sectionDef struct {
 	// steps is whether its lines take steps, each a line of its own
 	// indented under the line: a step by hand's.
 	steps bool
+	// raises is whether a Mac's line may repeat one of the shared file's,
+	// raising it on that Mac: kit's own PATH, the Mac's searched first.
+	raises bool
 }
 
 // ownLeading and ownTrailing are the config's own sections, which aren't
@@ -198,7 +201,7 @@ var (
 	ownLeading = []sectionDef{
 		{header: "features", kind: FeaturesKind, form: Names, holds: []string{afterOption}},
 		{header: "backups", kind: BackupsKind, form: Options},
-		{header: "paths", kind: PathsKind, form: Paths},
+		{header: "paths", kind: PathsKind, form: Paths, raises: true},
 	}
 	ownTrailing = []sectionDef{
 		{header: "prefs files", kind: PrefsFilesKind, form: Paths},
@@ -800,10 +803,16 @@ func (c *Config) declared(kind, scope string) (entries []Entry, has bool, err er
 }
 
 // List reads what kind declares for the Mac named mac: the shared file's,
-// then the Mac's own. A thing may be declared in one of them, once.
+// then the Mac's own. A thing may be declared in one of them, once, but in
+// a section whose Mac's lines raise the shared file's (kit's own PATH),
+// where it may be in both.
 func (c *Config) List(kind, mac string) (List, error) {
 	if !c.Knows(mac) {
 		return List{}, fmt.Errorf("no Mac named %s in %s: one of %s", mac, File, c.macList())
+	}
+	d, err := c.defFor(kind)
+	if err != nil {
+		return List{}, err
 	}
 	shared, inShared, err := c.declared(kind, Shared)
 	if err != nil {
@@ -813,19 +822,30 @@ func (c *Config) List(kind, mac string) (List, error) {
 	if err != nil {
 		return List{}, err
 	}
-	where := make(map[string]Entry, len(shared))
-	for _, e := range shared {
-		where[e.Name] = e
-	}
-	for _, e := range own {
-		if s, ok := where[e.Name]; ok {
-			return List{}, fmt.Errorf("%s: %s is in %s too (line %d): a thing goes in the shared declarations or a Mac's, not both", e.Pos(), e.Name, DeclFile(s.Scope), s.Line)
+	if !d.raises {
+		if err := inOne(shared, own); err != nil {
+			return List{}, err
 		}
 	}
 	if _, err := c.Places(kind, mac); err != nil {
 		return List{}, err
 	}
 	return List{Kind: kind, Entries: append(shared, own...), Declared: inShared || inOwn}, nil
+}
+
+// inOne says the first of a Mac's own entries the shared file declares
+// too: nil when there's none.
+func inOne(shared, own []Entry) error {
+	where := make(map[string]Entry, len(shared))
+	for _, e := range shared {
+		where[e.Name] = e
+	}
+	for _, e := range own {
+		if s, ok := where[e.Name]; ok {
+			return fmt.Errorf("%s: %s is in %s too (line %d): a thing goes in the shared declarations or a Mac's, not both", e.Pos(), e.Name, DeclFile(s.Scope), s.Line)
+		}
+	}
+	return nil
 }
 
 // Place is one of the sections of a kind with sections for items

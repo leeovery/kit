@@ -701,7 +701,7 @@ Homebrew's and the system's folders, and the first folder holding it, never kit'
 temporary or a relative one, nor one named for a version, as 22.11.0 (refused, saying so, when
 it alone holds the program), is declared last in the Mac's `[paths]` as `kit path add` declares
 it, its own part; the snapshot reads with kit's PATH as its later runs will have it, those folders
-before the system's), a row its counts by part, and its questions, each with its answer
+after the Mac's own and before the shared file's and the system's), a row its counts by part, and its questions, each with its answer
 suggested, its flag, and its answer kept in the record: the folders a new Mac brings back
 (`--restore`, as `kit restore add` declares them), apps' settings saved nightly (`--prefs`:
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
@@ -1016,7 +1016,7 @@ pages --transport http https://pages.example.com/mcp
 
 The sections, in the order kit writes them: `features` (the switches), `backups` (the backup
 tools, a line each, with `--after` and `--before`), `paths` (kit's PATH, in order, `~` expands; the
-shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
+Mac's, then the shared file's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `github extensions`, `macos login items`,
 `claude mcp` (and `claude mcp <folder>`), `steps` (the steps of the user's own), `manual`, `checks`, `hourly`, `nightly`
 (jobs of the user's own: a name, then `--` and a command, `~/` expanding in any word). A section kit doesn't know is refused, never
@@ -1091,7 +1091,13 @@ the file out. Both commit and push.
 
 At start-up kit builds its own PATH from the config's `paths` and the system's directories,
 ignoring what it inherited, so it behaves the same from a terminal, launchd or an agent, and
-finds tools installed partway through a run.
+finds tools installed partway through a run. The order is the Mac's own `paths`, then the
+shared file's, then the system's, each folder once, in the place it first appears
+(`config.PathLists`): a folder only one Mac needs, declared in that Mac's file, wins over
+Homebrew's, which shared declares, as a version manager's shims must. The one exception to a
+thing declared in the shared file or a Mac's, never both: a Mac may declare a folder shared
+does, raising it on that Mac (`raises`, on the `paths` section alone); `kit path remove`
+without `--shared` then takes it out of the Mac's file alone, lowering it again.
 
 The shell uses the same list, the code review's "one PATH list": the `path` step writes it
 (`~` expanded, colon-separated) to `path` in kit's state directory, and the shell's startup
@@ -1099,8 +1105,8 @@ puts the file's contents ahead of the PATH it inherits, reading it without runni
 so a config that doesn't read never leaves a shell without its PATH. Relative entries
 (`node_modules/.bin`) are kept for the shell and left out of kit's own PATH. A `$`, a colon,
 or a `~` that doesn't start the home folder is refused. `kit path add <dir>` puts a
-directory last (`--shared`: on every Mac), `kit path remove <dir>` takes it off; both write
-the file and commit.
+directory last of the Mac's own (`--shared`: last of every Mac's, taking it out of the Macs'
+files), `kit path remove <dir>` takes it off; both write the file and commit.
 
 Three features change the system, each applied through sudo: `touch-id-sudo` (sudo takes a
 fingerprint, by a line in `/etc/pam.d/sudo_local`, which macOS updates leave alone),

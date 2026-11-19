@@ -8,18 +8,50 @@ import (
 	"testing"
 )
 
-func TestAddPathDeclaresItLastAndWritesTheShellsPath(t *testing.T) {
+// A folder added for this Mac goes last in its [paths], and this Mac's come
+// first in the shell's PATH, ahead of every Mac's.
+func TestAddPathDeclaresItLastOfTheMacsAndWritesTheShellsPath(t *testing.T) {
 	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "paths", "~/go/bin\n")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit path add ~/tools/bin (laptop): the tools")
 	out, _, code := w.run(t, "path", "add", filepath.Join(w.home, "tools/bin"), "--note", "the tools")
-	if code != 0 || !strings.Contains(out, "~/tools/bin ok declared in laptop, last on the PATH") {
+	if code != 0 || !strings.Contains(out, "~/tools/bin ok declared in laptop, last of this Mac's on the PATH, ahead of every Mac's") {
 		t.Errorf("kit path add printed\n%s exit %d", out, code)
 	}
-	if got := w.readSection(t, "laptop", "paths"); got != "~/tools/bin   # the tools\n" {
+	if got := w.readSection(t, "laptop", "paths"); got != "~/go/bin\n~/tools/bin   # the tools\n" {
 		t.Errorf("[paths] = %q", got)
 	}
-	want := filepath.Join(w.home, ".local/bin") + ":/opt/homebrew/bin:" + filepath.Join(w.home, "tools/bin") + "\n"
+	want := filepath.Join(w.home, "go/bin") + ":" + filepath.Join(w.home, "tools/bin") + ":" + filepath.Join(w.home, ".local/bin") + ":/opt/homebrew/bin\n"
 	if got := w.read(t, ".local/state/kit/path"); got != want {
+		t.Errorf("the shell's PATH = %q, want %q", got, want)
+	}
+}
+
+// A Mac may declare a folder every Mac has, which raises it on that Mac:
+// first in the shell's PATH. Taken off this Mac's PATH, it comes out of
+// this Mac's [paths] alone, back in every Mac's place.
+func TestAddPathRaisesOneEveryMacHas(t *testing.T) {
+	w := laptopWorld(t)
+	local := filepath.Join(w.home, ".local/bin")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit path add /opt/homebrew/bin (laptop)")
+	if out, _, code := w.run(t, "path", "add", "/opt/homebrew/bin"); code != 0 || !strings.Contains(out, "/opt/homebrew/bin ok declared in laptop, last of this Mac's on the PATH, ahead of every Mac's") {
+		t.Errorf("kit path add of every Mac's folder printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "laptop", "paths"); got != "/opt/homebrew/bin\n" {
+		t.Errorf("laptop's [paths] = %q", got)
+	}
+	if got, want := w.read(t, ".local/state/kit/path"), "/opt/homebrew/bin:"+local+"\n"; got != want {
+		t.Errorf("the shell's PATH = %q, want %q", got, want)
+	}
+
+	w.expectSync(t, []string{"laptop/declarations"}, "kit path remove /opt/homebrew/bin (laptop)")
+	if out, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin"); code != 0 || !strings.Contains(out, "/opt/homebrew/bin ok out of laptop") {
+		t.Errorf("kit path remove of a raised folder printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "paths"); !strings.Contains(got, "/opt/homebrew/bin") {
+		t.Errorf("shared's [paths] = %q, want /opt/homebrew/bin kept", got)
+	}
+	if got, want := w.read(t, ".local/state/kit/path"), local+":/opt/homebrew/bin\n"; got != want {
 		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
 }
@@ -89,8 +121,8 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	if out, _, code := w.run(t, "feature", "on", "remote-login"); code != 0 || !strings.Contains(out, "remote-login ok on already, in the shared declarations") {
 		t.Errorf("kit feature on, on for every Mac, printed\n%s exit %d", out, code)
 	}
-	if out, _, code := w.run(t, "path", "add", "~/go/bin"); code == 0 || !strings.Contains(out, "~/go/bin is in the shared declarations already (shared/declarations), for every Mac") {
-		t.Errorf("kit path add of a shared path printed\n%s exit %d", out, code)
+	if out, _, code := w.run(t, "check", "add", "dns", "--", "dig", "example.com"); code == 0 || !strings.Contains(out, "dns is in the shared declarations already (shared/declarations), for every Mac") {
+		t.Errorf("kit check add of a shared check printed\n%s exit %d", out, code)
 	}
 }
 

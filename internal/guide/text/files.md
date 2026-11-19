@@ -48,7 +48,9 @@ here because something else is already here can break a new Mac's shell.
 
 ## The PATH
 
-`kit path add <dir>` puts a directory last on the PATH, kit's and the
-shell's, for this Mac or every Mac (`--shared`): kit-config's `[paths]`.
-Steps of your own run with that PATH, then the system's, never your
-shell's.
+`kit path add <dir>` puts a directory on the PATH, kit's and the shell's,
+for this Mac or every Mac (`--shared`): kit-config's `[paths]`. This
+Mac's directories come first, in the order declared, then every Mac's,
+then the system's, each once. Adding a directory every Mac has for this
+Mac too puts it first on this Mac, ahead of Homebrew's, for example.
+Steps of your own run with that PATH, never your shell's.

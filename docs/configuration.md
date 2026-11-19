@@ -108,12 +108,18 @@ com.apple.dock tilesize -int 60
 - **Comments before the first section** are fine. Any other line there is an error.
 - **A header appears once a file.** `[homebrew formulae]` and
   `[homebrew formulae --secret NAME]` are two headers, so a file may hold both.
-- **A thing is declared once,** in the shared file or a Mac file, not both.
+- **A thing is declared once,** in the shared file or a Mac file, not both. A folder in
+  `[paths]` is the one exception, explained after this list.
 
 kit keeps the sections of packages and settings sorted, all but `[claude mcp]`. The others
 keep the order you wrote. kit puts a new line in `[paths]` or `[restore]` last, and a new line
 anywhere else in its place by name. A kind is looked after only while a file has its section,
 even an empty one.
+
+The PATH runs in this order: the Mac file's `[paths]`, then the shared file's, then the
+system's folders. Each folder appears once, in the first place it's listed. If a Mac file
+lists a folder the shared file has, that folder comes first on that Mac. kit's PATH and your
+shell's both follow this order.
 
 ### The sections
 

@@ -231,9 +231,11 @@ func newPathCommand(a *app) *cobra.Command {
 	var opts addOptions
 	add := &cobra.Command{
 		Use:   "add <dir>...",
-		Short: "Put directories last on the PATH, for this Mac (--shared: every Mac)",
-		Long:  "Put directories last on the PATH, kit's and the shell's." + declaredWhere,
-		Args:  cobra.MinimumNArgs(1),
+		Short: "Put directories on the PATH, for this Mac (--shared: every Mac)",
+		Long: `Put directories on the PATH, kit's and the shell's: last of this Mac's own,
+which come first, or, with --shared, last of every Mac's, after this Mac's. A
+directory every Mac has, added for this Mac, comes first on this Mac.` + declaredWhere,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, pathsKind+" add", func(ctx context.Context, r *run) error {
 				return a.addPaths(ctx, r, args, opts)
