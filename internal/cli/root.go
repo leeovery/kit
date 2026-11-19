@@ -178,6 +178,11 @@ type app struct {
 	// --scheduled, kit.app's child: what it finds of Full Disk Access is
 	// kit.app's, not a terminal's.
 	scheduled bool
+	// pull is whether the run brings in kit-config's remote commits before
+	// it reads the config (pullConfig), as kit apply, status, reconcile and
+	// nightly do; pullQuietly, whether it says nothing meanwhile, as a run
+	// of steps named shows no heading.
+	pull, pullQuietly bool
 	// unwinds put back what the faces kit shows have taken of the
 	// terminal, should kit panic.
 	unwinds []func()

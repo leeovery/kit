@@ -79,7 +79,8 @@ run and one commit:
   kit reconcile go:example.com/a go:example.com/b --remove`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("reconcile", "reconcile")
+			a.pull = true
+			r, err := a.prepare(cmd.Context(), "reconcile", "reconcile")
 			if err != nil {
 				return err
 			}

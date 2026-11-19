@@ -230,11 +230,11 @@ func (a *app) applyAfterSetup(ctx context.Context, doc *built) error {
 	var err error
 	applied := &built{}
 	if doc != nil {
-		if r, err = a.build("apply", "apply", applied, false); err == nil {
+		if r, err = a.build(ctx, "apply", "apply", applied, false); err == nil {
 			a.start(r, applied)
 		}
 	} else {
-		r, err = a.prepare("apply", "apply")
+		r, err = a.prepare(ctx, "apply", "apply")
 	}
 	if err != nil {
 		return errors.Join(doc.write(a), err)
@@ -274,7 +274,7 @@ func tempDirs(getenv func(string) string) []string {
 // refused, and what's declared as it is for want of telling whether it
 // needs a secret, are items, each saying why.
 func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declaring) check.Result {
-	r, err := a.build("setup", "", sinkFace{sink}, false)
+	r, err := a.build(ctx, "setup", "", sinkFace{sink}, false)
 	if err != nil {
 		return failed(err)
 	}

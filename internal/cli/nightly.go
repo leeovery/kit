@@ -52,7 +52,8 @@ named add, remove or at).`,
 				command, logName = "nightly --plan", "nightly-plan"
 			}
 			a.scheduled = scheduled
-			r, err := a.prepare(command, logName)
+			a.pull = true
+			r, err := a.prepare(cmd.Context(), command, logName)
 			if err != nil {
 				return err
 			}

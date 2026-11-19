@@ -45,7 +45,7 @@ func newListCommand(a *app) *cobra.Command {
 		Annotations: map[string]string{brief: "what's declared for this Mac"},
 		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("list", "list")
+			r, err := a.prepare(cmd.Context(), "list", "list")
 			if err != nil {
 				return err
 			}
@@ -157,7 +157,7 @@ func newWhyCommand(a *app) *cobra.Command {
 		Annotations: map[string]string{brief: "where a package is declared, and what needs it"},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("why", "why")
+			r, err := a.prepare(cmd.Context(), "why", "why")
 			if err != nil {
 				return err
 			}

@@ -4,6 +4,7 @@
 package state
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,31 @@ func Load[T any](dir, name string) (T, error) {
 		return v, fmt.Errorf("read the %s record: %w", what, err)
 	}
 	return v, nil
+}
+
+// Lock takes the lock in the file at path, calling wait between tries
+// while another kit holds it, till ctx is done: unlock lets it go. Its
+// file's never removed, as a kit waiting for it would go on to lock a file
+// no longer there.
+func Lock(ctx context.Context, path string, wait func()) (unlock func(), err error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case err == nil:
+			return func() { _ = f.Close() }, nil
+		case !errors.Is(err, syscall.EWOULDBLOCK):
+			_ = f.Close()
+			return nil, err
+		case ctx.Err() != nil:
+			_ = f.Close()
+			return nil, ctx.Err()
+		}
+		wait()
+	}
 }
 
 // Update reads the record in the file named name in dir, changes it, and

@@ -58,11 +58,12 @@ kit apply reinstall tries those that failed again.`,
 				return err
 			}
 			a.named = args
+			a.pull, a.pullQuietly = true, len(args) > 0
 			command, logName := "apply", "apply"
 			if plan {
 				command, logName = "apply --plan", "apply-plan"
 			}
-			r, err := a.prepare(command, logName)
+			r, err := a.prepare(cmd.Context(), command, logName)
 			if err != nil {
 				return err
 			}

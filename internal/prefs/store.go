@@ -14,11 +14,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/state"
 )
 
 // cloneTimeout is how long cloning the store may take; lookTimeout how long
@@ -431,28 +431,10 @@ func (p *Prefs) lockCapture(ctx context.Context) (unlock func(), err error) {
 	return nil, fmt.Errorf("lock the store: %w", err)
 }
 
-// lock takes the lock in the file at path, trying again while another kit
-// holds it, till ctx is done: unlock lets it go. Its file's never removed,
-// as a kit waiting for it would go on to lock a file no longer there.
+// lock takes the lock in the file at path, as state.Lock does, trying
+// again every cloneRetry.
 func (p *Prefs) lock(ctx context.Context, path string) (unlock func(), err error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		switch {
-		case err == nil:
-			return func() { _ = f.Close() }, nil
-		case !errors.Is(err, syscall.EWOULDBLOCK):
-			_ = f.Close()
-			return nil, err
-		case ctx.Err() != nil:
-			_ = f.Close()
-			return nil, ctx.Err()
-		}
-		p.Sleep(cloneRetry)
-	}
+	return state.Lock(ctx, path, func() { p.Sleep(cloneRetry) })
 }
 
 // repo is the store's clone, as git drives it: pulled, committed and

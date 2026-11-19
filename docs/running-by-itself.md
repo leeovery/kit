@@ -55,6 +55,9 @@ For example, a nightly job can clear a scratch folder of files untouched for a w
   `nightly_at` in `kit.toml`. A Mac asleep then runs it at the first hourly run after it wakes.
 - **Jobs run one at a time, in order.** One that fails never stops the others. Each may run for
   an hour.
+- **It brings in what your other Macs pushed.** Each run pulls kit-config first, so a change
+  made on one Mac shows on the others within the hour. Edits you haven't committed stay as they
+  are. If the pull can't happen, the run carries on, and `kit status` says why.
 - **It installs nothing and removes nothing.** The one thing it puts right is a new folder that
   matches your backup exclusions: kit keeps it out of the backups.
 - **Settings need a feature on.** Without `kit feature on prefs`, the runs save and restore

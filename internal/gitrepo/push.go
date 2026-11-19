@@ -106,7 +106,7 @@ func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
 	if t, err = r.upstream(ctx); err != nil {
 		return "", tracking{}, err
 	}
-	if err := r.fetch(ctx, remote, t); err != nil {
+	if err := r.fetch(ctx, remote, t, pushed); err != nil {
 		return "", tracking{}, err
 	}
 	n, err := r.behind(ctx, t.up)
@@ -122,6 +122,13 @@ func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
 	// Begun, what's set aside is put back whatever becomes of the run.
 	return remote, t, r.catchUp(context.WithoutCancel(ctx), gitDir, t.up)
 }
+
+// What a pull that went wrong left undone, after "nothing was": a push,
+// or bringing in the remote's commits alone (BringIn).
+const (
+	pushed    = "pushed"
+	broughtIn = "brought in"
+)
 
 // remote is the repository's one remote: ErrNoRemote without one, and a
 // refusal (ErrNowhere) with several, as kit pushes only to one.
@@ -179,27 +186,30 @@ func (r Repo) settled(ctx context.Context, gitDir string) ([]entry, error) {
 	return dirty, nil
 }
 
-// fetch brings in remote's commits, pruning its branches gone from it. A
+// fetch brings in remote's commits, pruning its branches gone from it,
+// saying, should it fail, what was undone, as nothing was pushed. A
 // clone of one branch fetches that branch alone, and git fails the fetch
 // while the remote hasn't it: in a repository whose branch may be missing
 // (BranchMayBeMissing), t's upstream not there has nothing to bring in, as
 // on a new, empty remote, and its remote-tracking ref, which the fetch
 // couldn't prune, is deleted, so what's waiting is counted against the
-// remote as it is.
-func (r Repo) fetch(ctx context.Context, remote string, t tracking) error {
+// remote as it is. Past ctx's deadline, the remote didn't answer in time.
+func (r Repo) fetch(ctx context.Context, remote string, t tracking, undone string) error {
 	_, err := r.git(ctx, "fetch", "--prune", "--quiet", remote)
 	switch {
 	case err == nil:
 		return nil
 	case r.BranchMayBeMissing && t.up != "" && notThere(err, t.merge):
 		if _, err := r.git(ctx, "update-ref", "-d", t.up); err != nil {
-			return fmt.Errorf("couldn't forget %s, gone from the remote, so nothing was pushed: %w", t.up, err)
+			return fmt.Errorf("couldn't forget %s, gone from the remote, so nothing was %s: %w", t.up, undone, err)
 		}
 		return nil
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("the remote didn't answer in time, so nothing was %s", undone)
 	case unreachable(err):
-		return errors.New("couldn't reach the remote, so nothing was pushed")
+		return fmt.Errorf("couldn't reach the remote, so nothing was %s", undone)
 	}
-	return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+	return fmt.Errorf("couldn't bring in the remote's changes, so nothing was %s: %w", undone, err)
 }
 
 // notThere reports whether git failed a fetch for want of ref on the
@@ -298,9 +308,15 @@ func keptBack(path, was string) error {
 // git's markers in a file that may be linked into the home folder.
 // Nothing's touched.
 func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
+	return r.clashing(ctx, dirty, up, pushed)
+}
+
+// clashing is clashes, saying, should it refuse, what was undone, as
+// nothing was touched or pushed.
+func (r Repo) clashing(ctx context.Context, dirty []entry, up, undone string) error {
 	incoming, err := r.incoming(ctx, up)
 	if err != nil {
-		return fmt.Errorf("couldn't read the remote's changes, so nothing was pushed: %w", err)
+		return fmt.Errorf("couldn't read the remote's changes, so nothing was %s: %w", undone, err)
 	}
 	var hit []string
 	for _, e := range dirty {
@@ -312,7 +328,7 @@ func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
 	if len(hit) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the remote's commits change what's not committed here, so nothing was touched or pushed: commit or undo the change to %s first", strings.Join(hit, ", "))
+	return fmt.Errorf("the remote's commits change what's not committed here, so nothing was touched or %s: commit or undo the change to %s first", undone, strings.Join(hit, ", "))
 }
 
 // incoming are the paths up's commits change, those HEAD hasn't: since the
@@ -357,7 +373,7 @@ func (r Repo) catchUp(ctx context.Context, gitDir, up string) error {
 	if err != nil {
 		return err
 	}
-	rebased := r.rebase(ctx, gitDir, up)
+	rebased := r.rebase(ctx, gitDir, up, pushed)
 	switch {
 	case stash == "":
 		return rebased
@@ -387,8 +403,9 @@ func (r Repo) setAside(ctx context.Context) (string, error) {
 // rebase rebases what's committed here onto up, a remote-tracking ref,
 // aborted if it stops part way, so back as it was: on a conflict, or when
 // git, set to sign its commits, couldn't sign one it rebased, which is
-// ErrUnsigned, as Commit's is.
-func (r Repo) rebase(ctx context.Context, gitDir, up string) error {
+// ErrUnsigned, as Commit's is. Failing, it says what was undone, as
+// nothing was pushed.
+func (r Repo) rebase(ctx context.Context, gitDir, up, undone string) error {
 	// Not by fork-point, which leaves out a commit the upstream had once,
 	// before it was pushed over, so the rebase changes more than the
 	// remote's commits, as clashes reads them.
@@ -397,11 +414,11 @@ func (r Repo) rebase(ctx context.Context, gitDir, up string) error {
 	case err == nil:
 		return nil
 	case !rebasing(gitDir):
-		return fmt.Errorf("couldn't rebase onto the remote's changes, so nothing was pushed: %w", err)
+		return fmt.Errorf("couldn't rebase onto the remote's changes, so nothing was %s: %w", undone, err)
 	}
-	then := "so nothing was pushed; the rebase was undone"
+	then := "so nothing was " + undone + "; the rebase was undone"
 	if _, abort := r.git(ctx, "rebase", "--abort"); abort != nil || rebasing(gitDir) {
-		then = "and the rebase couldn't be undone, so nothing was pushed: git rebase --abort undoes it"
+		then = "and the rebase couldn't be undone, so nothing was " + undone + ": git rebase --abort undoes it"
 	}
 	if unwritten(err) {
 		if signs, _ := r.flag(ctx, "commit.gpgsign"); signs {

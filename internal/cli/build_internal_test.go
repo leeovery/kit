@@ -18,7 +18,7 @@ func (c *closing) Close() error   { c.closed = true; return nil }
 func TestBuildFailingClosesItsFace(t *testing.T) {
 	face := &closing{}
 	a := &app{HomeDir: func() (string, error) { return "", errors.New("no home") }}
-	if _, err := a.build("status", "", face, false); err == nil || !face.closed {
+	if _, err := a.build(t.Context(), "status", "", face, false); err == nil || !face.closed {
 		t.Errorf("build() = %v, the face closed %v; want an error, the face closed", err, face.closed)
 	}
 }

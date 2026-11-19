@@ -37,6 +37,9 @@ couldn't find out; `deferred`, not checked, as what it needs isn't there.
   `action` is what `kit apply` would do about it.
 - The `config` step reads `ok` on an edit's first day: each of its items
   is a file in kit-config not committed. Commit it before you finish.
+- `config-sync` counts what the run brought in from kit-config's remote
+  (`brought_in`). Its item `config-sync:pull` says why nothing came in,
+  as an edit here the remote's commits change: quiet on its first day.
 
 ## Exit statuses
 

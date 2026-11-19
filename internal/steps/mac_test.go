@@ -1,6 +1,7 @@
 package steps_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -148,7 +149,7 @@ func TestConfigSync(t *testing.T) {
 		return fake
 	}
 	sync := func(fake *runnertest.Fake) engine.Step {
-		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now)
+		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now, steps.Pulled{})
 	}
 
 	fake := runnertest.New(t)
@@ -202,6 +203,54 @@ func TestConfigSync(t *testing.T) {
 	fake.On("git", git("remote")...).Exits(128)
 	if state, _, _ := checked(t, sync(fake)); state != check.Failed {
 		t.Errorf("git failing = %s, want failed", state)
+	}
+}
+
+// How bringing in the remote's commits went as the run began is said once:
+// those brought in after how the step stands, and counted; none brought
+// in, an item saying why, quiet for its first day as drift is, then a
+// problem; never with the check failed, which says why alone.
+func TestConfigSyncSaysWhatCameIn(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
+	pushed := func() *runnertest.Fake {
+		fake := runnertest.New(t)
+		fake.On("git", git("remote")...).Prints("origin\n")
+		fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
+		fake.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
+		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints("0e0bf17a399109574ffb00e33300280a33f81ab7\n")
+		fake.On("git", git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")...)
+		return fake
+	}
+	sync := func(fake *runnertest.Fake, pulled steps.Pulled) check.Result {
+		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now, pulled).Check(t.Context())
+	}
+
+	res := sync(pushed(), steps.Pulled{Brought: 2})
+	if res.State != check.OK || res.Summary != "pushed; 2 commits brought in" || res.Glance != "pushed" || res.Counts["brought_in"] != 2 || len(res.Items) != 0 {
+		t.Errorf("2 brought in = %+v", res)
+	}
+	if res := sync(pushed(), steps.Pulled{Brought: 1}); res.Summary != "pushed; 1 commit brought in" {
+		t.Errorf("1 brought in = %q", res.Summary)
+	}
+
+	offline := errors.New("couldn't reach the remote, so nothing was brought in")
+	res = sync(pushed(), steps.Pulled{Missed: offline, Quiet: "new"})
+	want := check.Item{ID: "config-sync:pull", Name: "the remote's commits not brought in", State: check.Problem, Detail: offline.Error(), Quiet: "new"}
+	if res.State != check.OK || res.Summary != "pushed" || len(res.Items) != 1 || res.Items[0] != want {
+		t.Errorf("missed, quiet = %+v; want ok, saying why %+v", res, want)
+	}
+	since := now().Add(-48 * time.Hour)
+	res = sync(pushed(), steps.Pulled{Missed: offline, Since: since})
+	want.Quiet, want.Since = "", since
+	if res.State != check.Attention || !res.ToDo() || len(res.Items) != 1 || res.Items[0] != want {
+		t.Errorf("missed for 2 days = %+v; want it a problem %+v", res, want)
+	}
+
+	fake := runnertest.New(t)
+	fake.On("git", git("remote")...).Exits(128)
+	if res := sync(fake, steps.Pulled{Missed: offline, Brought: 0}); res.State != check.Failed || len(res.Items) != 0 {
+		t.Errorf("the check failing, missed = %+v; want it failed alone", res)
 	}
 }
 

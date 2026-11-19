@@ -281,7 +281,7 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 		// Landed, its header stays in the window: the run carries on under it.
 		a.underHome = arrival.Landed()
 	}
-	r, err := a.prepare("bootstrap", "bootstrap")
+	r, err := a.prepare(ctx, "bootstrap", "bootstrap")
 	if err != nil {
 		return err
 	}

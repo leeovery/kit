@@ -156,6 +156,22 @@ kit reconcile file:~/.zshrc --revert
 Either way, kit links the file again. At a terminal, `kit reconcile` asks about each one.
 [Linked files](linked-files.md) says more.
 
+## Your other Mac's changes don't come in
+
+`kit status` says so under CONFIG, with why:
+
+```text
+the remote's commits not brought in
+the remote's commits change what's not committed here, so nothing was touched or brought in: commit or undo the change to laptop/declarations first
+```
+
+**Cause:** each run pulls kit-config before it reads it, and this pull couldn't happen. kit
+never touches an edit you haven't committed, so an edit to a file the other Mac changed stops
+it. Being offline stops it too.
+
+**Fix:** if the message names a file, commit it with `kit reconcile`, or undo it. If you're
+offline, do nothing: the next run tries again. The line stays grey for a day, then needs you.
+
 ## Related
 
 - [Commands](commands.md)

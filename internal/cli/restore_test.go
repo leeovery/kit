@@ -257,7 +257,8 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 // [restore] paths from studio at its first kit apply, reaching it at the
 // local hostname kit-config records, then .local, trusting the host key
 // recorded alone, under studio's kit name, for the probe, the look and the
-// copy; nothing fetched, as the boot's kit-config is the record.
+// copy; the remote's record unread, as the boot's kit-config is the record,
+// brought up to date as the run began.
 func TestApplyRestoresFromTheMacItStartedFrom(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "restore", "~/Code\n")
@@ -295,8 +296,8 @@ func TestApplyRestoresFromTheMacItStartedFrom(t *testing.T) {
 	trusts := []string{"StrictHostKeyChecking=yes", "UserKnownHostsFile=" + pinned, "HostKeyAlias=studio"}
 	for _, c := range w.fake.Commands() {
 		said := strings.Join(c.Args, " ")
-		if c.Name == "git" && strings.Contains(said, " fetch ") {
-			t.Errorf("ran git %s; want nothing fetched at the first try", said)
+		if c.Name == "git" && strings.Contains(said, " show ") {
+			t.Errorf("ran git %s; want the remote's record unread at the first try", said)
 		}
 		copying := c.Name == "rsync" && slices.Contains(c.Args, from)
 		if c.Name != "ssh" && !copying {
@@ -370,7 +371,7 @@ func TestRestoreAfterTheSecretsOnlyFromTheOldMac(t *testing.T) {
 // --restore-from names a source kit knows, for the paths [restore] lists,
 // the old Mac only for a Mac started from one; and --at a date or a time,
 // with a backup's alone: anything else is an error naming the flag, before
-// anything runs.
+// anything runs but bringing in kit-config's remote commits.
 func TestApplyRestoreFlags(t *testing.T) {
 	for _, tt := range []struct {
 		args  []string
@@ -394,7 +395,9 @@ func TestApplyRestoreFlags(t *testing.T) {
 			if code != 2 || !strings.Contains(errOut, tt.want) {
 				t.Errorf("kit apply %s printed %q, exit %d; want exit 2 saying %q", strings.Join(tt.args, " "), errOut, code, tt.want)
 			}
-			if calls := w.fake.Calls(); slices.ContainsFunc(calls, func(c string) bool { return !strings.HasPrefix(c, "sudo -n") }) {
+			// The flags are read against the config as the run reads it,
+			// once kit-config's remote commits are brought in.
+			if calls := w.fake.Calls(); slices.ContainsFunc(calls, func(c string) bool { return !strings.HasPrefix(c, "sudo -n") && !w.pulled(c) }) {
 				t.Errorf("kit apply ran %q", calls)
 			}
 		})

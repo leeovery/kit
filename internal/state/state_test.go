@@ -1,6 +1,8 @@
 package state_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -46,4 +48,27 @@ func TestLoadRefusesWhatDoesntRead(t *testing.T) {
 	if _, err := state.Load[counter](dir, "count.json"); err == nil || err.Error()[:22] != "read the count record:" {
 		t.Errorf("Load() = %v", err)
 	}
+}
+
+// A lock another holds is waited for, wait called between tries, and taken
+// once it's let go; held throughout, it's given up as ctx ends, saying so.
+func TestLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.lock")
+	held, err := state.Lock(t.Context(), path, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waited := 0
+	unlock, err := state.Lock(t.Context(), path, func() {
+		waited++
+		held()
+	})
+	if err != nil || waited != 1 {
+		t.Fatalf("Lock(), held a while = %v, waited %d times; want it taken once let go", err, waited)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	if _, err := state.Lock(ctx, path, cancel); !errors.Is(err, context.Canceled) {
+		t.Errorf("Lock(), held throughout = %v; want ctx's error", err)
+	}
+	unlock()
 }

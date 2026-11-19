@@ -112,10 +112,12 @@ func TestReconcileWhenTheCommitFails(t *testing.T) {
 	if !strings.Contains(out, "kit-config failed couldn't commit shared/home/.zshrc: ") || !strings.Contains(out, "unable to write new_index file") {
 		t.Errorf("kit reconcile printed\n%s", out)
 	}
-	if slices.ContainsFunc(w.fake.Calls(), func(call string) bool {
+	calls := w.fake.Calls()
+	committing := slices.IndexFunc(calls, func(call string) bool { return strings.Contains(call, " commit ") })
+	if committing < 0 || slices.ContainsFunc(calls[committing:], func(call string) bool {
 		return strings.HasPrefix(call, "git -C "+dir+" push") || strings.HasPrefix(call, "git -C "+dir+" fetch")
 	}) {
-		t.Errorf("ran %q, want nothing pushed", w.fake.Calls())
+		t.Errorf("ran %q, want nothing pushed or brought in after the commit", calls)
 	}
 }
 
