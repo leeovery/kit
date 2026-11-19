@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,6 +82,9 @@ type world struct {
 	path     []string
 	childEnv []string
 	added    []string
+	// paths are the PATHs of every runner kit made, in order.
+	paths   [][]string
+	pathsMu sync.Mutex
 	// terminal is whether kit's output is a terminal, size its columns and
 	// lines (80 by 40 unless set), and listen reads its keys, for
 	// applying's screen.
@@ -267,6 +271,9 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Listen:   w.listen,
 		Runner: func(path, env []string) runner.Runner {
 			w.path, w.childEnv = path, env
+			w.pathsMu.Lock()
+			w.paths = append(w.paths, path)
+			w.pathsMu.Unlock()
 			w.fake.Env = slices.Concat(env, w.added)
 			// Programs are found on the world's own folders alone, never
 			// the real Mac's, as the system's.

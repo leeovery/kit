@@ -118,8 +118,9 @@ even an empty one.
 
 The PATH runs in this order: the Mac file's `[paths]`, then the shared file's, then the
 system's folders. Each folder appears once, in the first place it's listed. If a Mac file
-lists a folder the shared file has, that folder comes first on that Mac. kit's PATH and your
-shell's both follow this order.
+lists a folder the shared file has, that folder moves ahead of the shared folders on that
+Mac. kit's PATH and your shell's both follow this order. A relative folder, such as
+`node_modules/.bin`, stays in your shell's PATH but out of kit's.
 
 ### The sections
 

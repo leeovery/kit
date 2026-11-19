@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"testing"
@@ -20,9 +21,12 @@ func TestThePathsOrder(t *testing.T) {
 		shims       = "/home/someone/.local/share/mise/shims"
 	)
 	tests := []struct {
-		name, laptop string
-		shell, kits  []string
+		name, mac, laptop string
+		shell, kits       []string
 	}{
+		{name: "a Mac with no declarations file", mac: "studio",
+			shell: []string{switchboard, homebrew, "/usr/bin"},
+			kits:  []string{switchboard, homebrew, "/usr/bin", "/bin", "/usr/sbin", "/sbin"}},
 		{name: "shared alone",
 			shell: []string{switchboard, homebrew, "/usr/bin"},
 			kits:  []string{switchboard, homebrew, "/usr/bin", "/bin", "/usr/sbin", "/sbin"}},
@@ -42,10 +46,11 @@ func TestThePathsOrder(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := loadRepo(t, map[string]string{"shared/declarations": shared, "laptop/declarations": tt.laptop})
-			if got, err := cfg.ShellPath("/home/someone", "laptop"); err != nil || !slices.Equal(got, tt.shell) {
+			mac := cmp.Or(tt.mac, "laptop")
+			if got, err := cfg.ShellPath("/home/someone", mac); err != nil || !slices.Equal(got, tt.shell) {
 				t.Errorf("ShellPath() = %q, %v\nwant %q", got, err, tt.shell)
 			}
-			if got, err := cfg.SearchPath("/home/someone", "laptop"); err != nil || !slices.Equal(got, tt.kits) {
+			if got, err := cfg.SearchPath("/home/someone", mac); err != nil || !slices.Equal(got, tt.kits) {
 				t.Errorf("SearchPath() = %q, %v\nwant %q", got, err, tt.kits)
 			}
 		})
@@ -100,5 +105,16 @@ func TestPathsRefuseWhatTheyCantHold(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"shared/declarations": "[paths]\n$HOME/bin\n"})
 	if _, err := cfg.SearchPath("/home/someone", "laptop"); err == nil || !strings.Contains(err.Error(), `shared/declarations:2: "$HOME/bin" can't hold a colon or a $`) {
 		t.Errorf("SearchPath() error = %v", err)
+	}
+}
+
+// Only kit's own PATH raises: a Mac's line of any other kind may not
+// repeat the shared file's.
+func TestOnlyThePathsRaise(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{})
+	for kind, want := range map[string]bool{config.PathsKind: true, "brew": false, config.FeaturesKind: false, config.RestoreKind: false, "nosuch": false} {
+		if got := cfg.Raises(kind); got != want {
+			t.Errorf("Raises(%s) = %t, want %t", kind, got, want)
+		}
 	}
 }

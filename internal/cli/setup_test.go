@@ -391,3 +391,34 @@ func TestSetupCarriesOnFromACommitThatFailed(t *testing.T) {
 		t.Errorf("~/.zshrc links to %q, want %q", got, want)
 	}
 }
+
+// Joining as a Mac with [paths] of its own, setup's snapshot reads with
+// kit's PATH as later runs have it: the Mac's folders, then the shared
+// file's, then the system's; a folder looked along for a program goes
+// last of the Mac's, ahead of the shared file's.
+func TestSetupSnapshotReadsWithTheMacsPathFirst(t *testing.T) {
+	w := inUse(t, map[string]bool{"someone/kit-config": true})
+	w.clones(t, "someone/kit-config", map[string]string{
+		"kit.toml": twoMacs, "studio/declarations": "",
+		"laptop/declarations": "[paths]\n~/bin\n",
+		"shared/declarations": "[paths]\n~/homebrew/bin\n",
+	})
+	w.expectCommit(t, commit{
+		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+		files: []string{"laptop/declarations"}, status: " M laptop/declarations\x00",
+	})
+	out, errOut, code := w.run(t, "setup", "--json", "--join", "someone/kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--no-link", "--no-apply")
+	if code != 0 {
+		t.Fatalf("kit setup printed\n%s%s\nexit %d", out, errOut, code)
+	}
+	bin, homebrew := filepath.Join(w.home, "bin"), filepath.Join(w.home, "homebrew", "bin")
+	system := []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+	for _, want := range [][]string{
+		slices.Concat([]string{bin, homebrew}, system),
+		slices.Concat([]string{bin, "/usr/local/bin", homebrew}, system),
+	} {
+		if !slices.ContainsFunc(w.paths, func(p []string) bool { return slices.Equal(p, want) }) {
+			t.Errorf("kit setup made %d runners, none on %q", len(w.paths), want)
+		}
+	}
+}

@@ -257,15 +257,15 @@ func (c *changes) undeclareIn(kindName, scope, name string) error {
 // declarations, and the shared ones with shared, and says whose it was
 // taken out of. One declared for every Mac, without shared, is refused
 // (*everyMacError) before anything's written, as the shared file's entries
-// come first, unless this Mac declares it too, raising it (kit's own PATH):
-// then it comes out of this Mac's alone.
+// come first, unless the kind raises (config.Config.Raises) and this Mac
+// declares it too: then it comes out of this Mac's alone.
 func (c *changes) undeclareHere(kindName, name string, shared bool) ([]string, error) {
 	r := c.run
 	where, err := r.cfg.Where(kindName, name)
 	if err != nil {
 		return nil, err
 	}
-	raised := slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == r.machine })
+	raised := r.cfg.Raises(kindName) && slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == r.machine })
 	var from []string
 	for _, e := range where {
 		switch {

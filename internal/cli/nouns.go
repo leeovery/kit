@@ -234,7 +234,8 @@ func newPathCommand(a *app) *cobra.Command {
 		Short: "Put directories on the PATH, for this Mac (--shared: every Mac)",
 		Long: `Put directories on the PATH, kit's and the shell's: last of this Mac's own,
 which come first, or, with --shared, last of every Mac's, after this Mac's. A
-directory every Mac has, added for this Mac, comes first on this Mac.` + declaredWhere,
+directory every Mac has, added for this Mac, moves ahead of every Mac's on
+this Mac, in its place among this Mac's own.` + declaredWhere,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, pathsKind+" add", func(ctx context.Context, r *run) error {
@@ -249,8 +250,13 @@ directory every Mac has, added for this Mac, comes first on this Mac.` + declare
 		Use:     "remove <dir>...",
 		Aliases: []string{"rm"},
 		Short:   "Take directories off the PATH",
-		Long:    "Take directories off the PATH, kit's and the shell's." + undeclaredWhere,
-		Args:    cobra.MinimumNArgs(1),
+		Long: "Take directories off the PATH, kit's and the shell's." + undeclaredWhere + `
+
+A directory every Mac has that this Mac's file declares too comes out of this
+Mac's file alone, without --shared: it stays on every Mac's PATH, in its place
+among theirs. With --shared, kit says which Macs' own files keep it on their
+PATH.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, pathsKind+" remove", func(ctx context.Context, r *run) error {
 				return a.removePaths(ctx, r, args, shared)

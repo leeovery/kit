@@ -54,12 +54,43 @@ func (a *app) removePaths(ctx context.Context, r *run, dirs []string, shared boo
 	c := pathChanges(r, dirs)
 	for _, dir := range dirs {
 		c.step(ctx, dir, func(context.Context) check.Result {
-			return c.undeclare(config.PathsKind, dir, shared, "PATH")
+			res := c.undeclare(config.PathsKind, dir, shared, "PATH")
+			if res.State != check.OK {
+				return res
+			}
+			kept, err := r.stillOnThePath(dir, shared)
+			if err != nil {
+				return failed(err)
+			}
+			res.Summary += kept
+			return res
 		})
 	}
 	a.writeShellPath(ctx, r, c)
 	c.sync(ctx, commitMessage("remove", pathsKind, dirs, r.machine, ""))
 	return c.finish()
+}
+
+// stillOnThePath says where dir stays on a PATH once it's out of this
+// Mac's [paths]: on every Mac's while the shared file declares it; out of
+// the shared file too (shared), on those of the Macs whose own [paths]
+// raised it. Nothing for none.
+func (r *run) stillOnThePath(dir string, shared bool) (string, error) {
+	where, err := r.cfg.Where(config.PathsKind, dir)
+	if err != nil {
+		return "", err
+	}
+	var macs, at []string
+	for _, e := range where {
+		if e.Scope == config.Shared {
+			return "; still on every Mac's PATH, from " + e.Pos(), nil
+		}
+		macs, at = append(macs, e.Scope), append(at, e.Pos())
+	}
+	if !shared || len(macs) == 0 {
+		return "", nil
+	}
+	return "; still on the PATH of " + strings.Join(macs, " and ") + ", from " + strings.Join(at, " and "), nil
 }
 
 // undeclare takes name out of the section of the kind called kindName,

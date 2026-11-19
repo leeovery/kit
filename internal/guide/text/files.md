@@ -52,5 +52,8 @@ here because something else is already here can break a new Mac's shell.
 for this Mac or every Mac (`--shared`): kit-config's `[paths]`. This
 Mac's directories come first, in the order declared, then every Mac's,
 then the system's, each once. Adding a directory every Mac has for this
-Mac too puts it first on this Mac, ahead of Homebrew's, for example.
+Mac too moves it ahead of every Mac's on this Mac, in its place among
+this Mac's own: ahead of Homebrew's, for example. Removing it without
+`--shared` takes it out of this Mac's file alone, back to its place
+among every Mac's.
 Steps of your own run with that PATH, never your shell's.

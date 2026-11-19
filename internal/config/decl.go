@@ -833,6 +833,13 @@ func (c *Config) List(kind, mac string) (List, error) {
 	return List{Kind: kind, Entries: append(shared, own...), Declared: inShared || inOwn}, nil
 }
 
+// Raises reports whether a Mac's line of kind may repeat one of the shared
+// file's, raising it on that Mac: kit's own PATH alone.
+func (c *Config) Raises(kind string) bool {
+	d, err := c.defFor(kind)
+	return err == nil && d.raises
+}
+
 // inOne says the first of a Mac's own entries the shared file declares
 // too: nil when there's none.
 func inOne(shared, own []Entry) error {
