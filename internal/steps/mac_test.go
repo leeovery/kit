@@ -209,7 +209,8 @@ func TestConfigSync(t *testing.T) {
 // How bringing in the remote's commits went as the run began is said once:
 // those brought in after how the step stands, and counted; none brought
 // in, an item saying why, quiet for its first day as drift is, then a
-// problem; never with the check failed, which says why alone.
+// problem. With the check failed, the item stays, so the drift record
+// keeps when it was first seen, and the step stays failed.
 func TestConfigSyncSaysWhatCameIn(t *testing.T) {
 	repo := t.TempDir()
 	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
@@ -249,8 +250,8 @@ func TestConfigSyncSaysWhatCameIn(t *testing.T) {
 
 	fake := runnertest.New(t)
 	fake.On("git", git("remote")...).Exits(128)
-	if res := sync(fake, steps.Pulled{Missed: offline, Brought: 0}); res.State != check.Failed || len(res.Items) != 0 {
-		t.Errorf("the check failing, missed = %+v; want it failed alone", res)
+	if res := sync(fake, steps.Pulled{Missed: offline, Since: since}); res.State != check.Failed || len(res.Items) != 1 || res.Items[0] != want {
+		t.Errorf("the check failing, missed = %+v; want it failed, keeping %+v", res, want)
 	}
 }
 

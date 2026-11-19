@@ -487,35 +487,43 @@ kit-config's remote commits also come in as a run starts (`gitrepo`'s `BringIn`)
 the config, so a change one Mac pushes reaches the other within the hour, and drift is judged
 against it. `--plan` runs nothing, so brings nothing in. `kit list`, `kit why`, `kit log`, bare
 `kit` and the commands that change kit-config don't, staying quick and offline (those pull as
-they push); the boot and `kit setup` clone it. What isn't committed is left exactly as it is, or nothing's brought in: with no commit
-here the upstream hasn't, the branch moves on to it (`git merge --ff-only --no-overwrite-ignore`),
-which writes only the files the remote's commits change, an edit elsewhere, staged or not, and a
-new file untouched (proven on real git: the same inode and time), and refuses to overwrite a file
-git ignores; with commits waiting to be pushed, they're rebased onto the remote's as a push's
-pull rebases them, only while no file git tracks is changed and not committed, as the rebase
-would set it aside and put it back, writing it twice, and while git doesn't sign its commits,
-as the rebase would ask for a signature, perhaps by Touch ID, with nobody there; else they're kept as they are, for the next push by hand to rebase and sign. As a push's
-pull does, it refuses, touching nothing, while git is part way through one of its operations or
-a conflict waits, and when the remote's commits change a file not committed here, or add one
-git ignores that's on disk here (which a push's rebase also refuses, as git overwrites such a
-file without a word), naming it. A remote whose history was rewritten, the upstream's commit
-before the fetch no longer in its history (`git merge-base --is-ancestor`), as when another Mac
-forced a push taking out a commit this Mac had pulled, is refused, as rebasing would put that
-commit back: it's brought in by hand. A rebase that stops is aborted. The wait for another kit
-and the fetch have 20 seconds, the prefs store's look's time, then the run carries on with the
-copy it has; once fetched, the rest is git's on the Mac, and finishes. Every pull, a push's and
-this one, holds one lock in the git folder (`kit-pull.lock`, kit's own: kit-config's commits
-have none but git's index lock), so the hourly run and a push by hand take turns, never
-rebasing or fetching over each other; a push waits as long as it takes. It never fails the run:
-what came in is read as the run's config, one this kit can't read failing the run as any config
-it can't read does. A config this kit can't read before, as a newer kit's setting or a bad edit
-from another Mac, is brought in on kit's base PATH (the system's folders and Homebrew's), as
-the fix may have been pushed, then read again; still unreadable, the run fails as it would
-have. A Mac with no name brings nothing in, nothing running before its name. `config-sync` says
-how it went, once: the commits brought in after its summary and counted (`brought_in`), a row
-of their own under kit-config's in `kit status`; or an item (`config-sync:pull`) saying why
-none came in and what to do, quiet on its first day as drift is, its first sighting in the
-drift record, then a problem.
+they push); the boot and `kit setup` clone it. What isn't committed is left exactly as it is,
+or nothing's brought in: with no commit here the upstream hasn't, the branch moves on to it
+(`git merge --ff-only --no-overwrite-ignore`), which writes only the files the remote's commits
+change, an edit elsewhere, staged or not, and a new file untouched (proven on real git: the
+same inode and time), and refuses to overwrite a file git ignores; with commits waiting to be
+pushed, they're rebased onto the remote's as a push's pull rebases them, only while no file git
+tracks is changed and not committed, as the rebase would set it aside and put it back, writing
+it twice, and while git doesn't sign its commits, as the rebase would ask for a signature,
+perhaps by Touch ID, with nobody there; else they're kept as they are, for the next push by
+hand to rebase and sign. As a push's pull does, it refuses, touching nothing, while git is part
+way through one of its operations or a conflict waits, and when the remote's commits change a
+file not committed here, or add one git ignores that's on disk here (which a push's rebase also
+refuses, as git overwrites such a file without a word), naming it. Both refuse, too, while HEAD
+holds a commit the remote's history had and dropped, as when another Mac forced a push taking
+out a commit this Mac had pulled: rebasing onto it, or pushing, would put the commit back.
+`git merge-base --fork-point` finds it in the upstream's reflog, which outlives every fetch, a
+run's or one by hand, as a fork point past where HEAD and the upstream meet now (`git
+merge-base`); the two agree with nothing rewritten (proven on real git: behind, ahead, both, a
+fresh clone, an emptied reflog), and again once the commit's gone from HEAD, as after `git
+reset --keep @{u}` by hand, when runs carry on. No fork point (exit 1), as once the reflog's
+record of the commit expires, is no refusal. A rebase that stops is aborted. The wait for
+another kit and the fetch have 20 seconds, the prefs store's look's time, then the run carries
+on with the copy it has; once fetched, the rest is git's on the Mac, and finishes. Committing,
+pulling and pushing all hold one lock in the git folder (`kit.lock`, kit's own: git has none
+but its index lock), Push through the push itself, so the hourly run and a command by hand take
+turns, never committing, rebasing, fetching or pushing over each other; each takes it once, at
+its outset, and a command by hand waits as long as it takes. It never fails the run: what came
+in is read as the run's config, one this kit can't read failing the run as any config it can't
+read does. A config this kit can't read before, as a newer kit's setting or a bad edit from
+another Mac, is brought in on kit's base PATH (the system's folders and Homebrew's), as the fix
+may have been pushed, then read again; still unreadable, the run fails as it would have, saying
+why nothing came in if nothing could. A Mac with no name brings nothing in, nothing running
+before its name. `config-sync` says how it went, once: the commits brought in after its summary
+and counted (`brought_in`), a row of their own under kit-config's in `kit status`; or an item
+(`config-sync:pull`) saying why none came in and what to do, quiet on its first day as drift
+is, its first sighting in the drift record, then a problem, kept with the step even when its
+own check fails.
 What a program says, kit looks for on the line that carries its error (git's `fatal:`, or ssh's
 own lines above it, some with no prefix of ssh's; mas's `Error:` or `[ERROR]`; brew's `Error:`;
 osascript's `execution error:`; sudo's own), as the reason is often above the last line, and a

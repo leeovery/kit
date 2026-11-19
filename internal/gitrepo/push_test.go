@@ -22,6 +22,8 @@ var (
 	upstreamOf  = git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")
 	fetchIt     = git("fetch", "--prune", "--quiet", "origin")
 	upstreamAt  = git("rev-parse", "--verify", "--quiet", upstreamRef)
+	forkPointOf = git("merge-base", "--fork-point", upstreamRef, "HEAD")
+	mergeBaseOf = git("merge-base", upstreamRef, "HEAD")
 	behindOf    = git("rev-list", "--count", "HEAD.."+upstreamRef)
 	incomingOf  = git("diff", "--name-only", "-z", "--no-renames", "HEAD..."+upstreamRef)
 	ignoredOf   = git("ls-files", "-z", "--others", "--ignored", "--exclude-standard")
@@ -75,14 +77,31 @@ func pulling(fake *runnertest.Fake, gitDir, status, behind string) *sequence {
 // upstream, origin's; the fetch; then how many of the upstream's commits
 // HEAD hasn't, behind.
 func (s *sequence) pulls(gitDir, status, behind string) {
+	s.fetches(gitDir, status)
+	s.expect(fetchIt...)
+	s.unrewritten()
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(behindOf...).Prints(behind + "\n")
+}
+
+// fetches expects a pull as far as the fetch, which it leaves to the test,
+// as pulls has it.
+func (s *sequence) fetches(gitDir, status string) {
 	s.expect(remoteOf...).Prints("origin\n")
 	s.expect(gitDirOf...).Prints(gitDir + "\n")
 	s.expect(statusOf()...).Prints(status)
 	s.expect(branchOf...).Prints("refs/heads/main\n")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
-	s.expect(fetchIt...)
+}
+
+// unrewritten expects git asked, once fetched, whether HEAD holds a commit
+// the remote's history dropped, as real git answers with nothing
+// rewritten: the upstream there, and where it forked from HEAD's history,
+// as its reflog has it, where they meet now.
+func (s *sequence) unrewritten() {
 	s.expect(upstreamAt...).Prints(upstream + "\n")
-	s.expect(behindOf...).Prints(behind + "\n")
+	s.expect(forkPointOf...).Prints(upstream + "\n")
+	s.expect(mergeBaseOf...).Prints(upstream + "\n")
 }
 
 // rebasing has script, a rebase, stop part way, as real git does on a
@@ -124,6 +143,7 @@ func TestPush(t *testing.T) {
 	s.expect(branchOf...).Prints("refs/heads/main\n")
 	s.expect(upstreamOf...).Prints(upstreamRef + " refs/heads/trunk\n")
 	s.expect(fetchIt...)
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("0\n")
 	s.expect(git("push", "--quiet", "origin", "HEAD:refs/heads/trunk")...)
@@ -452,6 +472,7 @@ func TestPushToANewBranch(t *testing.T) {
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
 	s.expect(fetchIt...)
 	s.expect(upstreamAt...).Exits(1)
+	s.expect(upstreamAt...).Exits(1)
 	s.expect(pushIt...)
 	if err := push(fake); err != nil {
 		t.Errorf("Push(), the upstream not there yet = %v", err)
@@ -480,6 +501,7 @@ func TestPushToABranchMissingFromTheRemote(t *testing.T) {
 	fake := runnertest.New(t)
 	s := missing(fake, "refs/heads/main")
 	s.expect(git("update-ref", "-d", upstreamRef)...)
+	s.expect(upstreamAt...).Exits(1)
 	s.expect(upstreamAt...).Exits(1)
 	s.expect(pushIt...)
 	if err := (gitrepo.Repo{Dir: dir, Run: fake, BranchMayBeMissing: true}).Push(context.Background()); err != nil {
@@ -630,6 +652,7 @@ func TestPushFails(t *testing.T) {
 	fake = runnertest.New(t)
 	s = fetching(fake)
 	s.expect(fetchIt...)
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Exits(128).PrintsToStderr("fatal: bad revision\n")
 	if err := push(fake); err == nil || !strings.HasPrefix(err.Error(), "couldn't bring in the remote's changes, so nothing was pushed: ") {

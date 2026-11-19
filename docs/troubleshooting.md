@@ -165,26 +165,72 @@ the remote's commits not brought in
 ```
 
 **Cause:** each run pulls kit-config before it reads it, and this pull couldn't happen. kit
-never touches an edit you haven't committed, so an edit to a file the other Mac changed stops
-it. Being offline stops it too. The row stays grey for a day, then needs you.
+pulls only if it can leave your edits and commits as they are. Being offline stops the pull
+too. The row stays grey for a day, then needs you.
 
-**Fix:** if you're offline, do nothing: the next run tries again. If the row names a file, you
-and the other Mac both changed it. To keep the other Mac's change, undo yours:
+**Fix:** if you're offline, do nothing: the next run tries again. Otherwise, do what the row
+says. Each reason ends with what to do:
+
+| The row says | What to do |
+|---|---|
+| change what's not committed | See the next section |
+| add a file git ignores | Move that file aside |
+| set aside what's not committed | Commit or undo the edit |
+| git signs its commits | Pull and push by hand |
+| history was rewritten | See the last section |
+
+To pull and push by hand, run `git -C ~/.config/kit pull --rebase`, then
+`git -C ~/.config/kit push`. git signs each commit it rebases as it goes.
+
+### You and the other Mac changed one file
+
+To keep the other Mac's change, undo yours:
 
 ```bash
 # Put the file back as last committed
 kit reconcile config:laptop/declarations --revert
 ```
 
-To keep both changes, bring them together by hand. The commit's push stops on the conflict,
-and the pull leaves git's markers in the file for you to resolve:
+To keep both changes, commit yours, then bring theirs in by hand. The pull stops on the
+conflict and leaves git's markers in the file:
 
 ```bash
 # Commit your edit
 kit reconcile config:laptop/declarations --adopt
-# Bring theirs in, then resolve the file
+# Bring theirs in: it stops on the conflict
 git -C ~/.config/kit pull --rebase --autostash
 ```
+
+Edit the file to keep what you want from both, and remove the markers. Then finish:
+
+```bash
+# Mark the file resolved, then carry on
+git -C ~/.config/kit add laptop/declarations
+git -C ~/.config/kit rebase --continue
+```
+
+Then push the result:
+
+```bash
+git -C ~/.config/kit push
+```
+
+### Another Mac rewrote kit-config's history
+
+Another Mac force-pushed kit-config, dropping a commit this Mac still has. kit won't put that
+commit back. First, list the commits here that the remote no longer has:
+
+```bash
+git -C ~/.config/kit log --oneline @{u}..
+```
+
+If none of them is yours to keep, match the remote. Your edits that aren't committed stay:
+
+```bash
+git -C ~/.config/kit reset --keep @{u}
+```
+
+The next run brings in the remote's commits again.
 
 ## Related
 

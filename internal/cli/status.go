@@ -325,7 +325,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	}
 	if at.cfg == nil || pulled.Brought > 0 {
 		if at, err = a.basis(dirs); err != nil {
-			return nil, err
+			return nil, unhealed(err, pulled)
 		}
 	}
 	cfg, machine, home, path := at.cfg, at.machine, at.home, at.path
@@ -646,6 +646,16 @@ func (a *app) healing(dirs config.Dirs, err error) (basis, error) {
 		return basis{}, err
 	}
 	return basis{machine: machine, home: home, path: config.SearchPathOf(a.Homebrew)}, nil
+}
+
+// unhealed is err, the config still unread once kit-config's remote
+// commits were to be brought in, saying why none were, as pulled has it,
+// should none have been: the fix may be waiting on the remote.
+func unhealed(err error, pulled steps.Pulled) error {
+	if pulled.Missed == nil {
+		return err
+	}
+	return fmt.Errorf("%w; kit-config's remote commits weren't brought in: %v", err, pulled.Missed)
 }
 
 // schedulingSteps are the steps that have kit run by itself, on every Mac:

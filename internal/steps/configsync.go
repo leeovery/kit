@@ -42,17 +42,18 @@ type Pulled struct {
 
 // into is res, config-sync's, with what p says: the commits brought in
 // after its summary, and counted; or an item saying why none could be,
-// needing attention once it isn't quiet. A check that failed says only
-// why.
+// needing attention once it isn't quiet. A check that failed still keeps
+// the item, so the drift record keeps when it was first seen, but stays
+// failed, its summary its own.
 func (p Pulled) into(res check.Result) check.Result {
+	failed := res.State == check.Failed
 	switch {
-	case res.State == check.Failed:
-	case p.Brought > 0:
+	case p.Brought > 0 && !failed:
 		res.Summary += fmt.Sprintf("; %d %s brought in", p.Brought, look.Plural(p.Brought, "commit", "commits"))
 		res.Counts = map[string]int{BroughtIn: p.Brought}
 	case p.Missed != nil:
 		res.Items = append(res.Items, check.Item{ID: ConfigPullID, Name: "the remote's commits not brought in", State: Problem, Detail: p.Missed.Error(), Since: p.Since, Quiet: p.Quiet})
-		if p.Quiet == "" {
+		if p.Quiet == "" && !failed {
 			res.State = check.Attention
 		}
 	}

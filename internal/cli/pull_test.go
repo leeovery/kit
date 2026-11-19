@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/status"
 )
 
@@ -115,6 +116,30 @@ func TestARunHealsAConfigItCantRead(t *testing.T) {
 	fetched := slices.Contains(w.fake.Calls(), "git -C "+filepath.Join(w.home, ".config", "kit")+" fetch --prune --quiet origin")
 	if code != 2 || errOut != "kit: "+needsNewerKit+"\n" || !fetched {
 		t.Errorf("kit status, no fix pushed, printed %q, exit %d, fetched %v; want it to try, then fail as before", errOut, code, fetched)
+	}
+
+	// Unable to bring them in, it says why too, and the hourly run's log
+	// has git's own words for it.
+	w = laptopWorld(t)
+	w.write(t, filepath.Join(".config", "kit", "kit.toml"), newerKit)
+	const unreachable = "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known\nfatal: Could not read from remote repository.\n"
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "fetch", "--prune", "--quiet", "origin").Exits(128).PrintsToStderr(unreachable)
+	_, errOut, code = w.run(t, "nightly")
+	if want := "kit: " + needsNewerKit + "; kit-config's remote commits weren't brought in: couldn't reach the remote, so nothing was brought in\n"; code != 2 || errOut != want {
+		t.Errorf("kit nightly, unable to bring the fix in, printed %q, exit %d; want %q", errOut, code, want)
+	}
+	// The run never started, so its log is the one file there, not yet a
+	// run's (logs.Latest).
+	written, err := filepath.Glob(filepath.Join(w.home, "Library", "Logs", "kit", "*-nightly*"))
+	if err != nil || len(written) != 1 {
+		t.Fatalf("the hourly run's logs = %q, %v; want one", written, err)
+	}
+	records, err := logs.Read(written[0])
+	logged := slices.ContainsFunc(records, func(r logs.Record) bool {
+		return r.Event == "command" && strings.Contains(r.Command, " fetch ") && strings.Contains(r.Stderr, "Could not resolve hostname")
+	})
+	if err != nil || !logged {
+		t.Errorf("the run's log = %+v, %v; want the fetch, failing, and why", records, err)
 	}
 
 	for _, args := range [][]string{{"list"}, {"apply", "--plan"}} {

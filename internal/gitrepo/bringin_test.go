@@ -16,37 +16,21 @@ import (
 
 // The commands bringing in the remote's commits adds to a pull's.
 var (
-	aheadOf      = git("rev-list", "--count", upstreamRef+"..HEAD")
-	moveOn       = git("merge", "--ff-only", "--no-overwrite-ignore", "--quiet", upstreamRef)
-	unrewritten  = git("merge-base", "--is-ancestor", upstream, upstreamRef)
-	wasUpstream  = upstreamAt
-	upstreamThen = "6f85e48b2a0c0f3a1f0c8d1e2b3a4c5d6e7f8091"
+	aheadOf = git("rev-list", "--count", upstreamRef+"..HEAD")
+	moveOn  = git("merge", "--ff-only", "--no-overwrite-ignore", "--quiet", upstreamRef)
 )
 
 // bringing scripts BringIn as far as the remote's commits HEAD hasn't, as
-// real git answers: the one remote, origin; the git folder, gitDir; what's
-// changed and not committed (status, -z); the branch, main, and its
-// upstream, origin's, at the commit it was at before the fetch, still in
-// its history after it; then how many of its commits HEAD hasn't, behind.
+// real git answers, as far as a pull's (pulls): behind of them.
 func bringing(fake *runnertest.Fake, gitDir, status, behind string) *sequence {
-	s := fetchingIn(fake, gitDir, status)
-	s.expect(fetchIt...)
-	s.expect(unrewritten...)
-	s.expect(upstreamAt...).Prints(upstream + "\n")
-	s.expect(behindOf...).Prints(behind + "\n")
-	return s
+	return pulling(fake, gitDir, status, behind)
 }
 
 // fetchingIn scripts BringIn as far as the fetch, which it leaves to the
 // test.
 func fetchingIn(fake *runnertest.Fake, gitDir, status string) *sequence {
 	s := &sequence{fake: fake}
-	s.expect(remoteOf...).Prints("origin\n")
-	s.expect(gitDirOf...).Prints(gitDir + "\n")
-	s.expect(statusOf()...).Prints(status)
-	s.expect(branchOf...).Prints("refs/heads/main\n")
-	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
-	s.expect(wasUpstream...).Prints(upstream + "\n")
+	s.fetches(gitDir, status)
 	return s
 }
 
@@ -93,27 +77,6 @@ func TestBringInMovesOnLeavingEditsAlone(t *testing.T) {
 	}
 	s.check(t, "no upstream")
 
-	// The upstream not there before, as before a first fetch: nothing to
-	// tell it was rewritten from.
-	fake = runnertest.New(t)
-	s = &sequence{fake: fake}
-	s.expect(remoteOf...).Prints("origin\n")
-	s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
-	s.expect(statusOf()...)
-	s.expect(branchOf...).Prints("refs/heads/main\n")
-	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
-	s.expect(wasUpstream...).Exits(1)
-	s.expect(fetchIt...)
-	s.expect(wasUpstream...).Prints(upstream + "\n")
-	s.expect(behindOf...).Prints("1\n")
-	s.expect(incomingOf...).Prints("kit.toml\x00")
-	s.expect(ignoredOf...)
-	s.expect(aheadOf...).Prints("0\n")
-	s.expect(moveOn...)
-	if n, err := bringIn(context.Background(), fake); n != 1 || err != nil {
-		t.Errorf("BringIn(), the upstream new = %d, %v", n, err)
-	}
-	s.check(t, "the upstream new")
 }
 
 // With the remote's commits changing what's not committed here, nothing's
@@ -221,26 +184,91 @@ func TestBringInRebasesWhatsWaiting(t *testing.T) {
 	s.check(t, "the rebase stopping")
 }
 
-// A remote whose history was rewritten, its upstream's commit before the
-// fetch no longer in it, as when another Mac forced a push taking out a
-// commit this Mac has, brings in nothing, touching nothing: rebasing what's
-// here would put that commit back. Real git's merge-base --is-ancestor
-// exits 1 for it.
-func TestBringInLeavesARewrittenHistoryAlone(t *testing.T) {
+// The commits real git names as another Mac rewrites the remote's history:
+// the one it dropped, which this Mac had pulled, and where the two
+// histories meet, before it.
+const (
+	dropped = "8d2c41f0b6a94e1f2d7c3b5a6e9f0a1b2c3d4e5f"
+	before  = "3a7b9c1d5e2f4a6b8c0d1e3f5a7b9c2d4e6f8a0b"
+)
+
+// rewriting scripts git's answers, once fetched, as HEAD holds a commit
+// the remote's history dropped, as real git gives them, whether behind,
+// ahead or both: the upstream's reflog has HEAD fork from it at the
+// dropped commit, past where the two meet now.
+func (s *sequence) rewriting() {
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(forkPointOf...).Prints(dropped + "\n")
+	s.expect(mergeBaseOf...).Prints(before + "\n")
+}
+
+// While HEAD holds a commit the remote's rewritten history dropped, as
+// another Mac's forced push does, nothing's brought in or pushed, nothing
+// touched: rebasing onto it, or pushing, would put the commit back. The
+// upstream's reflog keeps the commit, so real git's answers are the same
+// on the first run after the rewrite, on the next, its fetch bringing
+// nothing new, and after a fetch by hand, which the reflog outlives: every
+// one is refused. Pull and Push refuse as BringIn does. Once HEAD holds
+// the commit no more, as after git reset --hard to the upstream, or a
+// rebase --onto it leaving the commit out, real git's fork point and
+// merge base agree, and runs carry on; as they do with no fork point
+// (exit 1), as once the reflog's record of the commit has expired.
+func TestARewrittenHistoryIsLeftAlone(t *testing.T) {
+	const refusal = "the remote's history was rewritten, dropping a commit this Mac has, so nothing was %s: bring it in by hand"
+	for _, run := range []string{"the first run after the rewrite", "the next run", "after a fetch by hand"} {
+		fake := runnertest.New(t)
+		s := fetchingIn(fake, t.TempDir(), "")
+		s.expect(fetchIt...)
+		s.rewriting()
+		n, err := bringIn(context.Background(), fake)
+		if n != 0 || err == nil || err.Error() != strings.ReplaceAll(refusal, "%s", "brought in") {
+			t.Errorf("BringIn(), %s = %d, %v", run, n, err)
+		}
+		s.check(t, run)
+	}
+
+	for name, f := range map[string]func(*runnertest.Fake) error{"Push": push, "Pull": pull} {
+		fake := runnertest.New(t)
+		s := fetchingIn(fake, t.TempDir(), "")
+		s.expect(fetchIt...)
+		s.rewriting()
+		if err := f(fake); err == nil || err.Error() != strings.ReplaceAll(refusal, "%s", "pushed") {
+			t.Errorf("%s(), the remote's history rewritten = %v", name, err)
+		}
+		s.check(t, name+", the remote's history rewritten")
+	}
+
 	fake := runnertest.New(t)
 	s := fetchingIn(fake, t.TempDir(), "")
 	s.expect(fetchIt...)
-	s.expect(unrewritten...).Exits(1)
-	n, err := bringIn(context.Background(), fake)
-	if n != 0 || err == nil || err.Error() != "the remote's history was rewritten, so nothing was brought in: bring it in by hand" {
-		t.Errorf("BringIn(), the remote's history rewritten = %d, %v", n, err)
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(forkPointOf...).Prints(upstream + "\n")
+	s.expect(mergeBaseOf...).Prints(upstream + "\n")
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(behindOf...).Prints("0\n")
+	s.expect(pushIt...)
+	if err := push(fake); err != nil {
+		t.Errorf("Push(), healed by a reset to the upstream = %v", err)
 	}
-	s.check(t, "the remote's history rewritten")
+	s.check(t, "healed")
 
 	fake = runnertest.New(t)
 	s = fetchingIn(fake, t.TempDir(), "")
 	s.expect(fetchIt...)
-	s.expect(unrewritten...).Exits(128).PrintsToStderr("fatal: Not a valid commit name " + upstreamThen + "\n")
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(forkPointOf...).Exits(1)
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(behindOf...).Prints("0\n")
+	if n, err := bringIn(context.Background(), fake); n != 0 || err != nil {
+		t.Errorf("BringIn(), no fork point = %d, %v", n, err)
+	}
+	s.check(t, "no fork point")
+
+	fake = runnertest.New(t)
+	s = fetchingIn(fake, t.TempDir(), "")
+	s.expect(fetchIt...)
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(forkPointOf...).Exits(128).PrintsToStderr("fatal: No such ref: '" + upstreamRef + "'\n")
 	if n, err := bringIn(context.Background(), fake); n != 0 || err == nil || !strings.HasPrefix(err.Error(), "couldn't tell whether the remote's history was rewritten, so nothing was brought in: ") {
 		t.Errorf("BringIn(), unable to tell = %d, %v", n, err)
 	}
@@ -295,61 +323,78 @@ func TestBringInWhenItCant(t *testing.T) {
 	}
 }
 
-// Two kits at once take turns, by a lock in the git folder that Push and
-// BringIn both hold: either waits while another holds it, then pulls; past
-// ctx's deadline, BringIn gives up, saying so, having fetched nothing.
-func TestPullsTakeTurns(t *testing.T) {
+// Two kits at once take turns, by a lock in the git folder that Commit,
+// Push, Pull and BringIn all hold: each waits while another holds it, then
+// goes on, Push holding it through the push itself, so no pull slips in
+// between; past ctx's deadline, BringIn gives up, saying so, having
+// fetched nothing.
+func TestKitsTakeTurns(t *testing.T) {
 	gitDir := t.TempDir()
-	lock := filepath.Join(gitDir, "kit-pull.lock")
-	held, err := state.Lock(context.Background(), lock, func() {})
-	if err != nil {
-		t.Fatal(err)
+	lock := filepath.Join(gitDir, "kit.lock")
+	hold := func() func() {
+		t.Helper()
+		held, err := state.Lock(context.Background(), lock, func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return held
 	}
+	// waiting is a Repo whose waits for the lock are counted in waited, the
+	// first letting held go, and none of which come once the fake ran
+	// anything past the git folder.
+	waiting := func(fake *runnertest.Fake, held func(), waited *int) gitrepo.Repo {
+		return gitrepo.Repo{Dir: dir, Run: fake, Sleep: func(time.Duration) {
+			*waited++
+			if calls := fake.Calls(); len(calls) > 2 {
+				t.Errorf("ran %q while another kit held the lock", calls)
+			}
+			held()
+		}}
+	}
+
 	fake := runnertest.New(t)
 	s := bringing(fake, gitDir, "", "0")
 	waited := 0
-	repo := gitrepo.Repo{Dir: dir, Run: fake, Sleep: func(time.Duration) {
-		waited++
-		held()
-	}}
-	if n, err := repo.BringIn(context.Background()); n != 0 || err != nil || waited != 1 {
+	if n, err := waiting(fake, hold(), &waited).BringIn(context.Background()); n != 0 || err != nil || waited != 1 {
 		t.Errorf("BringIn(), another kit at it = %d, %v, waited %d times; want it to wait its turn", n, err, waited)
 	}
 	s.check(t, "bringing in, waiting its turn")
 
-	held, err = state.Lock(context.Background(), lock, func() {})
-	if err != nil {
-		t.Fatal(err)
-	}
 	fake = runnertest.New(t)
 	s = pulling(fake, gitDir, "", "0")
-	s.expect(pushIt...)
-	waited = 0
-	repo = gitrepo.Repo{Dir: dir, Run: fake, Sleep: func(time.Duration) {
-		waited++
-		if fetched := len(fake.Calls()) > 2; fetched {
-			t.Errorf("Push() ran %q while another kit pulled", fake.Calls())
+	s.expect(pushIt...).Does(func() {
+		done, cancel := context.WithCancel(context.Background())
+		cancel()
+		if unlock, err := state.Lock(done, lock, func() {}); err == nil {
+			unlock()
+			t.Error("Push() let the lock go before it pushed")
 		}
-		held()
-	}}
-	if err := repo.Push(context.Background()); err != nil || waited != 1 {
-		t.Errorf("Push(), another kit pulling = %v, waited %d times; want it to wait its turn, then push", err, waited)
+	})
+	waited = 0
+	if err := waiting(fake, hold(), &waited).Push(context.Background()); err != nil || waited != 1 {
+		t.Errorf("Push(), another kit at it = %v, waited %d times; want it to wait its turn, then push", err, waited)
 	}
 	s.check(t, "pushing, waiting its turn")
 
-	held, err = state.Lock(context.Background(), lock, func() {})
-	if err != nil {
-		t.Fatal(err)
+	fake = runnertest.New(t)
+	s = &sequence{fake: fake}
+	s.expect(gitDirOf...).Prints(gitDir + "\n")
+	s.expect(statusOf("laptop")...)
+	waited = 0
+	if committed, err := waiting(fake, hold(), &waited).Commit(context.Background(), message, "laptop"); committed || err != nil || waited != 1 {
+		t.Errorf("Commit(), another kit at it = %v, %v, waited %d times; want it to wait its turn", committed, err, waited)
 	}
-	defer held()
+	s.check(t, "committing, waiting its turn")
+
+	defer hold()()
 	fake = runnertest.New(t)
 	s = &sequence{fake: fake}
 	s.expect(remoteOf...).Prints("origin\n")
 	s.expect(gitDirOf...).Prints(gitDir + "\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	repo = gitrepo.Repo{Dir: dir, Run: fake, Sleep: func(time.Duration) { time.Sleep(time.Millisecond) }}
-	if _, err := repo.BringIn(ctx); err == nil || err.Error() != "another kit was bringing in the remote's commits all the while, so nothing was brought in" {
+	repo := gitrepo.Repo{Dir: dir, Run: fake, Sleep: func(time.Duration) { time.Sleep(time.Millisecond) }}
+	if _, err := repo.BringIn(ctx); err == nil || err.Error() != "another kit was pulling or pushing all the while, so nothing was brought in" {
 		t.Errorf("BringIn(), another kit at it throughout = %v", err)
 	}
 	s.check(t, "another kit at it throughout")
