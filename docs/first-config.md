@@ -47,6 +47,9 @@ file:
 
 - **Everything installed and not yet declared,** of each kind whose program is here, such as
   Homebrew casks, login items and MCP servers.
+- **The folders those programs need on kit's PATH,** such as `~/.local/bin` for Claude Code.
+  kit adds each to this Mac's `[paths]`, as `kit path add` does, if your shell finds the program
+  there and kit's PATH doesn't.
 - **The macOS settings set now,** leaving out the state macOS keeps for itself, and git's global
   settings.
 - **The features on and the backup tools set up,** such as Touch ID for sudo and Time Machine.

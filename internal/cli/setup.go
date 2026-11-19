@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/restore"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/setup"
 	"github.com/leeovery/kit/internal/snapshot"
 	"github.com/leeovery/kit/internal/status"
@@ -50,7 +52,9 @@ one of kit-config's Macs, or a new one, a copy of another with --from.
 
 Then it declares everything on this Mac as it is, in its own file: every
 kind whose program is here, the macOS settings set now, git's settings, the
-features on and the backups set up. It asks:
+features on and the backups set up. A program kit's PATH doesn't find, but
+Homebrew's folders or your shell's PATH do, has its folder declared in this
+Mac's [paths], as kit path add does. It asks:
   which folders a new Mac brings back from your backups (--restore,
   --no-restore), declared as kit restore add does;
   whether apps' settings are saved every night (--prefs, --no-prefs);
@@ -162,9 +166,14 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 			if err != nil {
 				return snapshot.Snapshot{}, snapshot.Mac{}, err
 			}
-			path = distinct(slices.Concat(path, bootPath))
+			runOn := func(dirs []string) runner.Runner {
+				p := distinct(slices.Concat(path, dirs))
+				return a.commands(p, childEnv(a.Getenv, home, p), sink, noAsks)
+			}
 			m := snapshot.Mac{
-				Name: mac, Config: cfg, Run: a.commands(path, childEnv(a.Getenv, home, path), sink, noAsks), Home: home,
+				Name: mac, Config: cfg, Run: runOn(nil), RunOn: runOn, Home: home,
+				Beyond:     offPath(a.Getenv),
+				Temp:       tempDirs(a.Getenv),
 				ConfigHome: a.configHome(), Dirs: dirs, AppDirs: a.appFolders(home).Dirs, SudoLocal: a.SudoLocal, Now: a.Now,
 				Looks: func(l snapshot.Look) {
 					found := event.Finding{Time: a.Now(), Step: setup.SnapshotStep, Part: l.Label, Doing: l.Doing, Found: l.Looked, Count: l.Found, Names: l.Names}
@@ -174,8 +183,7 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 					sink.Emit(found)
 				},
 			}
-			found, err := snapshot.Find(ctx, m)
-			return found, m, err
+			return snapshot.Find(ctx, m)
 		},
 		Declare: func(ctx context.Context, d setup.Declaring) check.Result { return a.declareSetup(ctx, sink, d) },
 	}
@@ -241,6 +249,19 @@ func (a *app) applyAfterSetup(ctx context.Context, doc *built) error {
 		return errors.Join(doc.write(a), failure{})
 	}
 	return doc.write(a)
+}
+
+// offPath are the folders off kit's PATH setup's snapshot looks along for
+// a kind's program kit's PATH doesn't find, in order: Homebrew's and the
+// system's, then the PATH setup was run with, the person's shell's.
+func offPath(getenv func(string) string) []string {
+	return slices.Concat(bootPath, filepath.SplitList(getenv("PATH")))
+}
+
+// tempDirs are the temporary folders: the system's, and the one the
+// environment names.
+func tempDirs(getenv func(string) string) []string {
+	return []string{"/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders", getenv("TMPDIR")}
 }
 
 // distinct is dirs, each once, where it first comes.

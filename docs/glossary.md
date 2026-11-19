@@ -118,8 +118,8 @@ holds the Mac as it stands:
 - the macOS settings set now, and git's settings;
 - the features on, and the backup tools set up.
 
-**Installed by hand.** An app that no kind installed: not from Homebrew or the App Store, and not
-Apple's. `kit setup` lists these apps, and kit never manages them. A package you install
+**Installed by hand.** An app that no kind installed: not from Homebrew or the App Store, not
+Apple's, and not one Chrome made for a website. `kit setup` lists these apps, and kit never manages them. A package you install
 yourself through Homebrew isn't one: it comes up as drift.
 
 ## A new Mac

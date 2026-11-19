@@ -1181,3 +1181,15 @@ func TestToInstallSaysWhatItCouldntTell(t *testing.T) {
 		}
 	}
 }
+
+// The folders the snapshot declares on the PATH count as its parts do, on
+// the screen and in --json.
+func TestTheSnapshotCountsThePath(t *testing.T) {
+	res := counted([]snapshot.Part{
+		{Kind: config.PathsKind, Label: snapshot.PathsLabel, Lines: []config.Entry{{Name: "/opt/homebrew/bin"}, {Name: "~/.local/share/mise/shims"}}},
+		{Kind: "npm", Label: "npm packages", Lines: []config.Entry{{Name: "typescript"}}},
+	})
+	if want := "3: 2 PATH directories · 1 npm packages"; res.Summary != want || res.Counts[config.PathsKind] != 2 {
+		t.Errorf("counted = %q, %v; want %q, 2 paths", res.Summary, res.Counts, want)
+	}
+}

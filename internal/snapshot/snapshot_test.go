@@ -124,7 +124,7 @@ func counts(s snapshot.Snapshot) []string {
 // take finds what a snapshot of m declares, and declares it.
 func take(t *testing.T, m snapshot.Mac) snapshot.Snapshot {
 	t.Helper()
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestTheDataFoldersOffered(t *testing.T) {
 	if err := os.Symlink(filepath.Join(m.Home, "Code"), filepath.Join(m.Home, "Elsewhere")); err != nil {
 		t.Fatal(err)
 	}
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestTheDataFoldersOffered(t *testing.T) {
 	}
 
 	m.SizeFor = time.Nanosecond
-	if s, err = snapshot.Find(t.Context(), m); err != nil {
+	if s, _, err = snapshot.Find(t.Context(), m); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range s.Folders {
@@ -331,7 +331,7 @@ func TestTheFilesOfferedToLink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(m.Home, ".zshrc"), filepath.Join(m.Home, ".zprofile")); err != nil {
 		t.Fatal(err)
 	}
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if want := []string{"~/.zshrc", "~/.ssh/config", "~/.config/ghostty/config"}; err != nil || !slices.Equal(s.Files, want) {
 		t.Errorf("files = %q, %v; want %q", s.Files, err, want)
 	}
@@ -342,7 +342,7 @@ func TestTheFilesOfferedToLink(t *testing.T) {
 func TestAFileKitOwnsIsntOfferedToLink(t *testing.T) {
 	m, _ := newMac(t, "[secrets]\n~/.ssh/config op://vault/item/config\n")
 	write(t, m.Home, map[string]string{".zshrc": "export A=1\n", ".ssh/config": "Host *\n"})
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if want := []string{"~/.zshrc"}; err != nil || !slices.Equal(s.Files, want) {
 		t.Errorf("files = %q, %v; want %q, the secret's file left out", s.Files, err, want)
 	}
@@ -361,7 +361,7 @@ func TestAFolderThatCantBeReadIsntWhole(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(path, 0o700) })
 	}
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,15 +407,16 @@ func TestAHardLinkedFileCountsOnce(t *testing.T) {
 		}
 		want += info.Sys().(*syscall.Stat_t).Blocks * 512
 	}
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if err != nil || len(s.Folders) != 1 || s.Folders[0].Size != want {
 		t.Errorf("folders = %+v, %v; want ~/Code, %d bytes", s.Folders, err, want)
 	}
 }
 
 // The apps installed by hand are those that are neither Apple's, nor the
-// App Store's, nor put in place by a cask, as its app, in its suite's
-// folder, or through its package.
+// App Store's, nor made by Chrome for a website, wherever it put them, nor
+// put in place by a cask, as its app, in its suite's folder, or through
+// its package. Chrome itself, installed by hand, is.
 func TestTheAppsInstalledByHand(t *testing.T) {
 	m, fake := newMac(t, "")
 	apps := m.AppDirs[0]
@@ -429,6 +430,10 @@ func TestTheAppsInstalledByHand(t *testing.T) {
 		"Tool.app/Contents/Info.plist":               app("com.example.tool"),
 		"Example Suite/Part.app/Contents/Info.plist": app("com.example.part"),
 		"Other Tool.app/Contents/Info.plist":         app("com.example.other"),
+		"Google Chrome.app/Contents/Info.plist":      app("com.google.Chrome"),
+		// As Chrome names the apps it makes for websites, measured.
+		"Chrome Apps.localized/Google Meet.app/Contents/Info.plist": app("com.google.Chrome.app.kjgfgldnnfoeklkmfkjfagphfepbbdan"),
+		"Mail Site.app/Contents/Info.plist":                         app("com.google.Chrome.app.pommaclcbfghclhalboakcipcmmndhcj"),
 	})
 	homebrew(fake, "", "", "agent\ndriver\neditor\nsuite\n")
 	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": [
@@ -444,8 +449,8 @@ func TestTheAppsInstalledByHand(t *testing.T) {
 	fake.On("pkgutil", "--files", "com.example.driver.app").Prints("Driver.app\nDriver.app/Contents\nDriver.app/Contents/Info.plist\n")
 	fake.On("pkgutil", "--pkg-info-plist", "com.example.agent").Prints(receipt(filepath.Join(apps, "Agent.app")))
 	fake.On("pkgutil", "--files", "com.example.agent").Prints("Contents\nContents/Info.plist\n")
-	s, err := snapshot.Find(t.Context(), m)
-	if want := []string{"Other Tool", "Tool"}; err != nil || !slices.Equal(s.ByHand, want) {
+	s, _, err := snapshot.Find(t.Context(), m)
+	if want := []string{"Google Chrome", "Other Tool", "Tool"}; err != nil || !slices.Equal(s.ByHand, want) {
 		t.Errorf("by hand = %q, %v; want %q", s.ByHand, err, want)
 	}
 	if slices.Contains(fake.Calls(), "pkgutil --files com.example.other") {
@@ -459,7 +464,7 @@ func TestWithoutHomebrew(t *testing.T) {
 	m, fake := newMac(t, "")
 	write(t, m.AppDirs[0], map[string]string{"Tool.app/Contents/Info.plist": app("com.example.tool")})
 	fake.On("brew").Fails(runner.ErrNotFound)
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if err != nil || !slices.Equal(s.ByHand, []string{"Tool"}) {
 		t.Errorf("by hand = %q, %v; want Tool", s.ByHand, err)
 	}
@@ -474,7 +479,7 @@ func TestAppsByHandThatCantBeToldSayWhy(t *testing.T) {
 	m, fake := newMac(t, "")
 	homebrew(fake, "", "", "ghostty\n")
 	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Exits(1).PrintsToStderr("Error: something broke\n")
-	s, err := snapshot.Find(t.Context(), m)
+	s, _, err := snapshot.Find(t.Context(), m)
 	if err != nil || s.ByHandErr == nil || s.ByHand != nil {
 		t.Errorf("Find() = by hand %q, why %v, %v; want why they can't be told", s.ByHand, s.ByHandErr, err)
 	}

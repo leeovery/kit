@@ -17,9 +17,10 @@ import (
 )
 
 // byHand are the apps in the Mac's app folders installed by hand, by name:
-// none of Apple's, nor the App Store's (its receipt in the app), nor one a
-// cask put in place, as its app, in its suite's folder, or through its
-// package (pkgutil's receipts).
+// none of Apple's, nor the App Store's (its receipt in the app), nor one
+// Chrome made for a website (chromeApp), nor one a cask put in place, as
+// its app, in its suite's folder, or through its package (pkgutil's
+// receipts).
 func (m Mac) byHand(ctx context.Context, deps *kind.Deps) ([]string, error) {
 	var casked brew.Casked
 	var packaged map[string]bool
@@ -36,13 +37,18 @@ func (m Mac) byHand(ctx context.Context, deps *kind.Deps) ([]string, error) {
 	for _, app := range apps.Installed(m.AppDirs) {
 		name := filepath.Base(app)
 		inSuite := slices.Contains(m.AppDirs, filepath.Dir(filepath.Dir(app))) && slices.Contains(casked.Suites, filepath.Base(filepath.Dir(app)))
-		if strings.HasPrefix(apps.BundleID(app), "com.apple.") || fromAppStore(app) || slices.Contains(casked.Apps, name) || inSuite || packaged[app] {
+		id := apps.BundleID(app)
+		if strings.HasPrefix(id, "com.apple.") || strings.HasPrefix(id, chromeApp) || fromAppStore(app) || slices.Contains(casked.Apps, name) || inSuite || packaged[app] {
 			continue
 		}
 		out = append(out, strings.TrimSuffix(name, ".app"))
 	}
 	return out, nil
 }
+
+// chromeApp starts the bundle id of each app Chrome makes for a website,
+// as com.google.Chrome.app.<the website's id>: Chrome's, not the person's.
+const chromeApp = "com.google.Chrome.app."
 
 // fromAppStore reports whether the app at app carries the App Store's
 // receipt.

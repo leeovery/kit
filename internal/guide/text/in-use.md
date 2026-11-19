@@ -71,7 +71,10 @@ holds that run, as `kit apply --json` would.
 Read the document's steps, then tell them:
 
 - `snapshot` and `commit`: how much was declared, by part (`counts`), and
-  that it's committed and pushed to kit-config.
+  that it's committed and pushed to kit-config. `paths` counts the
+  folders added to this Mac's `[paths]`, as `kit path add` adds them:
+  each holds a kind's program kit's PATH didn't, found on the PATH kit
+  setup ran with, so kit's later runs find it too.
 - `commit`'s items: lines refused, and lines declared as they are because
   kit couldn't check whether they need a secret, each with why.
 - `by-hand`: the apps installed by hand. kit doesn't look after them: if

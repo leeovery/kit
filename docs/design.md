@@ -648,7 +648,10 @@ written anywhere; a config starting on this Mac has first files kit.toml (`forma
 setup runs in it, the Mac's table, its model the `description`) and the Mac's folder, its
 declarations file empty; joining, one of kit.toml's Macs or a new one, added as `kit machine
 add` adds it, `--from` a copy of another. Then the snapshot (`snapshot.Find`, on kit-config's
-PATH and Homebrew's), a row its counts by part, and its questions, each with its answer
+PATH: a kind's program that isn't there is looked for along Homebrew's and the system's folders,
+then the PATH setup was run with, and the first folder holding it, never kit's own, a temporary
+or a relative one, is declared in the Mac's `[paths]` as `kit path add` declares it, its own
+part), a row its counts by part, and its questions, each with its answer
 suggested, its flag, and its answer kept in the record: the folders a new Mac brings back
 (`--restore`, as `kit restore add` declares them), apps' settings saved nightly (`--prefs`:
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
@@ -668,7 +671,8 @@ repository as one, its branch made by the push; what's waiting that can't be tol
 taken for nothing. Till kit-config's own branch is on the remote, the prefs store pushes
 nothing, as GitHub makes a new repository's first branch pushed the one a new Mac's boot
 clones. It says what's refused and what couldn't be checked, each with why, the apps installed by hand
-(the person's to install through Homebrew or the App Store should kit set the Mac up again),
+(never Apple's, the App Store's, a cask's or those Chrome makes for websites, `com.google.Chrome.app.`;
+the person's to install through Homebrew or the App Store should kit set the Mac up again),
 and that secrets go in a store with `kit secret add`; then `kit apply` runs in the same
 process, with its own screen at a terminal. Without a terminal it asks nothing: each question
 its flag doesn't answer fails its step, naming the flag and what it chooses from, the others

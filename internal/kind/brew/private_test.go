@@ -140,6 +140,56 @@ func TestAFormulasBottleIsCheckedToo(t *testing.T) {
 	}
 }
 
+// A bottle on GitHub's packages (ghcr.io) is asked for with the anonymous
+// token Homebrew sends, Library/Homebrew/brew.sh's
+// HOMEBREW_GITHUB_PACKAGES_AUTH="Bearer QQ==", which
+// download_strategy/curl_github_packages_download_strategy.rb sends as
+// "Authorization: #{HOMEBREW_GITHUB_PACKAGES_AUTH}". Measured: a public
+// bottle answers 401 without it and 206 with it, from where ghcr.io
+// redirects; one that isn't there answers 404 with it. One that doesn't
+// open with it can't say: Homebrew opens a private package with a token of
+// its own (HOMEBREW_DOCKER_REGISTRY_TOKEN), never the GitHub token. Other
+// downloads go without.
+func TestAGhcrBottleIsAskedForAsHomebrewAsks(t *testing.T) {
+	const source = "https://github.com/owner/ext/archive/v1.tar.gz"
+	const bottle = "https://ghcr.io/v2/owner/tap/ext/blobs/sha256:2a8b015fef2a14e90c2aa093c98bb77565f42076391c4ebf12b5d6b056828511"
+	info := `{"formulae": [{"name": "ext", "full_name": "owner/tap/ext", "urls": {"stable": {"url": "` + source + `"}},
+		"bottle": {"stable": {"root_url": "https://ghcr.io/v2/owner/tap", "files": {"arm64_sequoia": {"url": "` + bottle + `"}}}}}], "casks": []}`
+	tests := []struct {
+		name, answer, wantErr string
+	}{
+		{name: "public", answer: "206 https://pkg-containers.githubusercontent.com/ghcr1/blobs/sha256:2a8b?se=2026-11-19&sig=x"},
+		{name: "not there", answer: "404 " + bottle, wantErr: "its download answered 404, from ghcr.io"},
+		{name: "private", answer: "401 " + bottle, wantErr: "its download answered 401, from ghcr.io"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("brew", "tap").Prints("owner/tap\n")
+			fake.On("brew", "update", "--quiet")
+			fake.On("brew", "info", "--json=v2", "--formula", "owner/tap/ext").Prints(info)
+			fake.On("curl", asking(source)...).Prints("200 https://codeload.github.com/owner/ext")
+			anonymous := slices.Insert(asking(bottle), len(asking(bottle))-1, "-H", "Authorization: Bearer QQ==")
+			fake.On("curl", anonymous...).Prints(tt.answer)
+			fake.On("curl", asking(bottle)...).Prints("401 " + bottle)
+
+			need, _, err := needsSecret(t, fake, (*brew.Homebrew).Formulae, "owner/tap/ext")
+			if need.Secret != "" || tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || err.Error() != tt.wantErr) {
+				t.Errorf("NeedsSecret() = %q, %v; want none, error %q", need.Secret, err, tt.wantErr)
+			}
+			var asked [][]string
+			for _, c := range fake.Commands() {
+				if c.Name == "curl" {
+					asked = append(asked, c.Args)
+				}
+			}
+			if want := [][]string{asking(source), anonymous}; !slices.EqualFunc(asked, want, slices.Equal) {
+				t.Errorf("asked curl %q, want %q: the bottle with the anonymous token, the source without", asked, want)
+			}
+		})
+	}
+}
+
 // A tap's thing known by its name alone, its tap added, is checked by the
 // full name brew info gives it.
 func TestATapsThingByItsShortNameIsChecked(t *testing.T) {
