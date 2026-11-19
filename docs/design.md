@@ -454,8 +454,9 @@ Commits waiting to be pushed
 are those the upstream hasn't, or, with none or it not there, those on none of the remote's
 branches as the clone fetches them, so a failed first push, or commits made offline, show as
 waiting. Two histories with no commit in common, as when two Macs each began the store's branch
-before either pushed, are the same pull: the remote's commits change every path the remote has
-(git's diff from where the two parted fails with no such place, so kit reads the remote's whole
+before either pushed, are the same pull in the store alone (kit-config with no commit in common
+with its upstream tracks the wrong branch, and is refused, as git's diff fails): the remote's
+commits change every path the remote has (git's diff from where the two parted fails with no such place, so kit reads the remote's whole
 tree), and the rebase replays every commit here onto the remote's. A Mac whose empty store clone
 committed offline, while the remote's new branch already holds that Mac's own folder, conflicts on
 every rebase till the clone is moved aside; that happens only if another source pushed this Mac's
@@ -1347,9 +1348,13 @@ that's on another branch, as one of the repository the store was in before, empt
 refused, naming the clone, where it points and where it should; nothing's captured into it,
 restored from it, read for history or an app's saved settings, or taken over, and kit moves
 nothing: the person moves it aside, for kit to clone the branch there, and the new clone fetches
-and pushes as kit-config does. One off its branch part way through a rebase, as one cut short, is
-refused as the rebase under way, since it holds commits not yet pushed, never as a clone to move
-aside. Removing an app with a refused clone uninstalls it all the same, deleting none of its saved
+and pushes as kit-config does. One on the branch that tracks another, as `git branch -m main prefs`
+leaves a clone of kit-config still tracking main, which a pull would rebase the store onto and a
+push send it to, is refused the same way, saying how to set it to track the remote's prefs (`git
+branch -u origin/prefs prefs`); one tracking nothing is pushed to prefs, which it then tracks. Git
+shows no upstream for a branch with no commit, so the push asks again. One off its branch part
+way through a rebase, as one cut short, is refused as the rebase under way, since it holds
+commits not yet pushed, never as a clone to move aside. Removing an app with a refused clone uninstalls it all the same, deleting none of its saved
 settings and saying why.
 
 - **`kit prefs capture`** (nightly, as the `prefs` feature's job): needs capture switched on (a

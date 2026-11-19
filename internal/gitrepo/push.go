@@ -319,10 +319,16 @@ func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
 // two parted, or, with no commit in common, as when two Macs each began the
 // store's branch, every path up has, as the rebase then replays every
 // commit HEAD has onto up. Git's diff of HEAD...up fails without a commit
-// in common, which alone has it ask for up's tree.
+// in common, which alone has it ask for up's tree, and only in a repository
+// whose branch may be missing (BranchMayBeMissing), the store's: kit-config
+// with no commit in common with its upstream tracks the wrong branch, and
+// is refused.
 func (r Repo) incoming(ctx context.Context, up string) ([]string, error) {
 	res, err := r.git(ctx, "diff", "--name-only", "-z", "--no-renames", "HEAD..."+up)
 	if err != nil {
+		if !r.BranchMayBeMissing {
+			return nil, err
+		}
 		if related, rerr := r.related(ctx, up); rerr != nil || related {
 			return nil, err
 		}

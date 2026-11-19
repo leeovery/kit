@@ -110,6 +110,7 @@ func (w *world) storeCloned() string {
 	w.fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(kitConfigURL + "\n")
 	w.fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfigURL + "\n")
 	w.fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
+	w.fake.On("git", "-C", clone, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", "refs/heads/prefs").Prints("origin refs/heads/prefs\n")
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		w.fake.On("git", "-C", clone, "config", kv[0], kv[1])
 	}

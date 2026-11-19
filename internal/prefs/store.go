@@ -125,12 +125,32 @@ func (p *Prefs) checkClone(ctx context.Context, remote string) error {
 	}
 	on := strings.TrimPrefix(strings.TrimSpace(string(res.Stdout)), "refs/heads/")
 	if on == branch {
-		return nil
+		return p.checkUpstream(ctx)
 	}
 	if err := p.repo().UnderWay(ctx); err != nil {
 		return fmt.Errorf("the store's clone, %s: %w", p.Clone, err)
 	}
 	return fmt.Errorf("%s is on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there", p.Clone, cmp.Or(on, "no branch"), branch)
+}
+
+// checkUpstream refuses the store's clone unless its branch tracks the
+// remote's branch of the same name, or nothing, which the first push makes
+// it track. A clone of kit-config whose main was renamed prefs still tracks
+// main, which a pull would rebase the store onto, and a push send it to.
+// Git shows no upstream for a branch with no commit yet, so push asks again
+// once there's one.
+func (p *Prefs) checkUpstream(ctx context.Context) error {
+	res, err := p.git(ctx, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", "refs/heads/"+branch)
+	if err != nil {
+		return err
+	}
+	remote, ref, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), " ")
+	if remote == "" && ref == "" || remote == origin && ref == "refs/heads/"+branch {
+		return nil
+	}
+	return fmt.Errorf("%s tracks %s on %s, not kit-config's %s branch: git -C %s branch -u %s/%s %s sets it right, or, while the remote hasn't the branch, git -C %s config branch.%s.merge refs/heads/%s",
+		p.Clone, strings.TrimPrefix(ref, "refs/heads/"), cmp.Or(remote, "no remote"), branch,
+		p.Clone, origin, branch, branch, p.Clone, branch, branch)
 }
 
 // checkPushes refuses the store's clone unless it pushes where kit-config
@@ -431,10 +451,10 @@ func (p *Prefs) repo() gitrepo.Repo {
 // pushes to is proven private (gitrepo.Place): why it didn't push, or ""
 // once pushed.
 func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
-	missing, err := gitrepo.Repo{Dir: p.Config, Run: p.Run}.BranchMissing(ctx)
+	missing, err := p.config().BranchMissing(ctx)
 	switch {
 	case err != nil:
-		return err.Error()
+		return "kit-config: " + err.Error()
 	case missing:
 		return "kit-config's own branch isn't on its remote yet, and a new repository's first branch pushed is the one a new Mac clones: apps' settings are pushed once kit-config's is"
 	}
@@ -449,6 +469,9 @@ func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
 	case isNot:
 		return fmt.Sprintf("kit pushes apps' settings only to a repository it can prove private, and can't for %s: %s", gitrepo.Shown(notPrivate.URL), notPrivate.Place.Unproven)
 	case err != nil:
+		return err.Error()
+	}
+	if err := p.checkUpstream(ctx); err != nil {
 		return err.Error()
 	}
 	if err := repo.Push(ctx); err != nil {
