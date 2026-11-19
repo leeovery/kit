@@ -10,6 +10,7 @@ package boot
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -47,6 +48,9 @@ type Asker interface {
 	// under it, till they press one of keys: the key pressed.
 	Wait(ctx context.Context, step, says, todo string, keys []Key) (string, error)
 }
+
+// ErrNoTerminal is a question asked without a terminal to ask it at.
+var ErrNoTerminal = errors.New("no terminal to ask at")
 
 // Answer is one answer to a question: its label, what it means, and the
 // command it leads to, when it leads to one.
@@ -277,7 +281,7 @@ func (b *Boot) macStep() engine.Step {
 			switch {
 			case known:
 				from = cfg.Macs[name].From
-			case !config.ValidName(name):
+			case !validName(name):
 				return fmt.Errorf("%q can't name a Mac: lower case letters, digits and dashes, as in studio", name)
 			}
 			// Recorded before the name: a boot stopped between the two finds
@@ -375,14 +379,19 @@ type state struct {
 	// files are pushed; Started, that it did.
 	Fresh   *fresh `json:"fresh,omitempty"`
 	Started bool   `json:"started,omitempty"`
+	// NoTerminal is whether kit-config started on this Mac with no
+	// terminal, the boot without one to ask at.
+	NoTerminal bool `json:"no_terminal,omitempty"`
 }
 
 // fresh is kit-config starting on this Mac: whether its repository's to be
 // created, rather than one empty, and the terminal this Mac uses, one kit
-// knows, by name, or "" for macOS's own.
+// knows, by name, or "" for macOS's own, or for none asked, without a
+// terminal to ask at (Unasked).
 type fresh struct {
 	Create   bool   `json:"create,omitempty"`
 	Terminal string `json:"terminal,omitempty"`
+	Unasked  bool   `json:"unasked,omitempty"`
 }
 
 const stateName = "bootstrap.json"

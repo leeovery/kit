@@ -50,7 +50,8 @@ func TheirRepo(repo string) (string, bool, error) {
 // login, signed in with token: the repository, as owner/name, and whether
 // it's to be created. has is whether login has one named Suggested,
 // offered first then; else a new one is. said, when it's not "", is asked
-// in the question's place: why the last one named was refused.
+// in the question's place: why the last one named was refused. Said with
+// has, the one refused was login's own, never offered again.
 func (a Account) ChooseRepo(ctx context.Context, ask RepoAsker, step, token, login string, has bool, said string) (string, bool, error) {
 	mine := login + "/" + Suggested
 	ownNew := Answer{Label: "Create " + Suggested, Does: "a new private repository on " + login + "'s account"}
@@ -61,10 +62,15 @@ func (a Account) ChooseRepo(ctx context.Context, ask RepoAsker, step, token, log
 		question = login + " has " + Suggested
 		answers = []Answer{{Label: "Join " + mine, Does: "your " + Suggested}, {Label: "Join another of yours", Does: pick.Does}, {Label: "Create a new one", Does: other.Does}}
 	}
+	skip := 0
 	if said != "" {
 		question = said
+		if has {
+			skip = 1
+		}
 	}
-	i, err := ask.Choose(ctx, step, question, answers)
+	i, err := ask.Choose(ctx, step, question, answers[skip:])
+	i += skip
 	switch {
 	case err != nil:
 		return "", false, err

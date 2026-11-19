@@ -1278,8 +1278,9 @@ never looked inside, one named as owner/name, or one created, private, on the si
 or holding files when it was to be created is refused before anything's written, and the
 question asked again, saying why. One empty (GitHub lists no branch), or to be created and not
 there yet, starts kit-config on this Mac: the boot asks the terminal the Mac uses (one
-`apps.Terminals` knows, or macOS's own), plans the boot order from it, and names the Mac without
-a list; the kit-config step creates the repository through GitHub's CLI unless it's there,
+`apps.Terminals` knows, or macOS's own; without a terminal to ask at, none, as no flag answers
+it, kit-config's row then naming `kit terminal <name>`), plans the boot order from it, and names
+the Mac without a list; the kit-config step creates the repository through GitHub's CLI unless it's there,
 clones it, sets it on main as setup does (`boot.OnMain`), writes `config.Start`'s first files
 (this Mac the primary, that terminal, the Mac's folder with an empty declarations file),
 commits them, as the GitHub account (its name, its private address) when git has no author

@@ -22,8 +22,10 @@ empty one starts kit-config on this Mac: the boot asks which terminal the
 Mac uses, then, once it's cloned, writes kit.toml (this Mac the primary,
 that terminal) and the Mac's folder with an empty declarations file,
 commits them and pushes, only to a repository proven private. Without a
-terminal it stops, naming `--config`: a new config is made at a terminal,
-or with `kit setup` on a Mac in use.
+terminal, the question of which is the config stops it, naming `--config`:
+a new config is made at a terminal, or with `kit setup` on a Mac in use.
+An empty one named with `kit bootstrap --config` starts with no terminal,
+the boot staying in Terminal; `kit terminal <name>` names one after.
 
 So when `kit apply` starts: Homebrew, its kit and the terminal are there,
 gh is signed in to GitHub, kit-config is cloned and its files linked, and

@@ -56,7 +56,8 @@ another. With neither there, it asks: one of your private repositories,
 one named as owner/name, or a new one, created private. A new or empty one
 starts with this Mac alone, and the terminal you choose, committed and
 pushed. Without a terminal it stops, naming --config: a new one is made at
-a terminal, or with kit setup.`,
+a terminal, or with kit setup. An empty one --config names starts with no
+terminal there, the boot staying in Terminal: kit terminal names one.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			carryingOn := handedOver && a.Getenv(carryOn) != ""
@@ -424,7 +425,7 @@ func lookKeys(keys []boot.Key) []look.Key {
 }
 
 // errNoTerminal is a question asked without a terminal to ask it at.
-var errNoTerminal = errors.New("no terminal to ask at")
+var errNoTerminal = boot.ErrNoTerminal
 
 // plainAsker is the boot without a terminal: what it would ask fails,
 // naming the flag that answers it, and signing in takes its first way

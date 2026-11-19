@@ -69,8 +69,9 @@ func (r *Repos) privateOnes() []string {
 }
 
 // Serve is GitHub, on this machine, for the test's length: Login, signed in
-// with Token, seeing repos, by owner/name, each private or not; listing the
-// private ones alone; a device signing in, with Code, once it's Entered.
+// with Token, seeing repos, by owner/name, each private or not, and empty;
+// listing the private ones alone; a device signing in, with Code, once
+// it's Entered.
 func Serve(t *testing.T, repos map[string]bool) boot.GitHub {
 	gh, _ := ServeRepos(t, repos)
 	return gh
@@ -100,6 +101,13 @@ func ServeRepos(t *testing.T, repos map[string]bool) (boot.GitHub, *Repos) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"private": private})
+	})
+	mux.HandleFunc("GET /repos/{owner}/{name}/branches", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := have.private(r.PathValue("owner") + "/" + r.PathValue("name")); !ok || !signedIn(r) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{})
 	})
 	mux.HandleFunc("GET /user/repos", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("visibility") != "private" {

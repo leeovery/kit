@@ -18,10 +18,13 @@ import (
 	kitstate "github.com/leeovery/kit/internal/state"
 )
 
-// refusal is a repository refused as kit-config, saying why: with no
-// --config, the person's asked which, at a terminal, the refusal in the
-// question's place.
-type refusal struct{ why string }
+// refusal is a repository refused as kit-config, saying why, and whether
+// it's there: with no --config, the person's asked which, at a terminal,
+// the refusal in the question's place.
+type refusal struct {
+	why   string
+	there bool
+}
 
 func (r refusal) Error() string { return r.why }
 
@@ -39,6 +42,9 @@ func (b *Boot) readConfig(ctx context.Context, token, login string) error {
 		repo = cmp.Or(st.Repo, repo)
 	}
 	create := st.Fresh != nil && st.Fresh.Create && repo == st.Repo
+	// has is whether login's kit-config is there, refused: never offered
+	// again, as join or create.
+	has := false
 	for chosen := false; ; chosen = true {
 		err := b.read(ctx, token, login, repo, create, chosen)
 		refused, isRefused := errors.AsType[refusal](err)
@@ -48,7 +54,8 @@ func (b *Boot) readConfig(ctx context.Context, token, login string) error {
 		case b.Repo != "":
 			return fmt.Errorf("%s: name yours with --config owner/name", refused)
 		}
-		if repo, create, err = b.account().ChooseRepo(ctx, b.Ask, GitHubStep, token, login, false, refused.why); err != nil {
+		has = has || refused.there && repo == login+"/"+Suggested
+		if repo, create, err = b.account().ChooseRepo(ctx, b.Ask, GitHubStep, token, login, has, refused.why); err != nil {
 			return err
 		}
 	}
@@ -66,14 +73,14 @@ func (b *Boot) read(ctx context.Context, token, login, repo string, create, chos
 	switch {
 	case errors.Is(err, ErrNotFound) && create:
 		return b.startHere(ctx, repo, true)
-	case errors.Is(err, ErrNotFound) && repo == login+"/"+Suggested:
-		return refusal{login + " has no repository named " + Suggested}
+	case errors.Is(err, ErrNotFound) && b.Repo == "" && repo == login+"/"+Suggested:
+		return refusal{why: login + " has no repository named " + Suggested}
 	case errors.Is(err, ErrNotFound):
-		return refusal{repo + " isn't on GitHub, or this sign-in can't see it"}
+		return refusal{why: repo + " isn't on GitHub, or this sign-in can't see it"}
 	case err != nil:
 		return fmt.Errorf("find %s: %w", repo, err)
 	case !private && chosen:
-		return refusal{repo + " is public on GitHub, and a config repository is always private"}
+		return refusal{why: repo + " is public on GitHub, and a config repository is always private", there: true}
 	case !private:
 		return fmt.Errorf("%s is public on GitHub, and a config repository is always private: make it private, then boot again", repo)
 	}
@@ -84,7 +91,7 @@ func (b *Boot) read(ctx context.Context, token, login, repo string, create, chos
 	case empty:
 		return b.startHere(ctx, repo, create)
 	case create && chosen:
-		return refusal{repo + " is on GitHub already, holding files"}
+		return refusal{why: repo + " is on GitHub already, holding files", there: true}
 	}
 	if err := b.GitHub.fetch(ctx, token, repo, b.archive()); err != nil {
 		return fmt.Errorf("read %s: %w", repo, err)
@@ -93,7 +100,7 @@ func (b *Boot) read(ctx context.Context, token, login, repo string, create, chos
 		if err := os.RemoveAll(b.archive()); err != nil {
 			return err
 		}
-		return refusal{repo + " holds no " + config.File + ", so it's no config repository"}
+		return refusal{why: repo + " holds no " + config.File + ", so it's no config repository", there: true}
 	}
 	return kitstate.Update(b.State, stateName, func(st *state) { st.Repo, st.Fresh = repo, nil })
 }
@@ -113,17 +120,19 @@ func (b *Boot) startHere(ctx context.Context, repo string, create bool) error {
 		return err
 	}
 	terminal, err := b.askTerminal(ctx)
-	if err != nil {
+	unasked := errors.Is(err, ErrNoTerminal)
+	if err != nil && !unasked {
 		return err
 	}
 	return kitstate.Update(b.State, stateName, func(st *state) {
-		st.Repo, st.Fresh = repo, &fresh{Create: create, Terminal: terminal}
+		st.Repo, st.Fresh = repo, &fresh{Create: create, Terminal: terminal, Unasked: unasked}
 	})
 }
 
 // askTerminal asks which terminal this Mac uses, for kit-config starting
 // on it: one kit knows, by name, or "" for macOS's own, which the boot
-// runs in.
+// runs in. Without a terminal to ask at (ErrNoTerminal), no flag answers
+// it: kit terminal names one later.
 func (b *Boot) askTerminal(ctx context.Context) (string, error) {
 	names := slices.Sorted(maps.Keys(apps.Terminals))
 	answers := make([]Answer, 0, len(names)+1)
@@ -210,7 +219,9 @@ func (b *Boot) pushFirst(ctx context.Context) error {
 	if err := repo.Push(ctx); err != nil {
 		return fmt.Errorf("push kit-config's first files: %w", err)
 	}
-	return kitstate.Update(b.State, stateName, func(st *state) { st.Fresh, st.Started = nil, true })
+	return kitstate.Update(b.State, stateName, func(st *state) {
+		st.Started, st.NoTerminal, st.Fresh = true, st.Fresh.Unasked, nil
+	})
 }
 
 // author is who commits kit-config's first files, as git's environment

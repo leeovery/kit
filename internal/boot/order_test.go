@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -789,10 +790,11 @@ func pushesFirst(t *testing.T, run *runnertest.Fake, b *Boot, repo, mac string, 
 // any other.
 func TestKitConfigStartsOnThisMac(t *testing.T) {
 	for _, tt := range []struct {
-		name           string
-		create, there  bool
-		author         bool
-		terminal, toml string
+		name            string
+		create, there   bool
+		author, unasked bool
+		terminal, toml  string
+		summary         string
 	}{
 		{name: "created", create: true, terminal: "ghostty",
 			toml: "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\n\n[macs.laptop]\n"},
@@ -800,6 +802,9 @@ func TestKitConfigStartsOnThisMac(t *testing.T) {
 			toml: "format = 1\nprimary = \"laptop\"\n\n[macs.laptop]\n"},
 		{name: "empty", there: true, terminal: "ghostty",
 			toml: "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\n\n[macs.laptop]\n"},
+		{name: "empty, no terminal to ask at", there: true, unasked: true,
+			toml:    "format = 1\nprimary = \"laptop\"\n\n[macs.laptop]\n",
+			summary: "cloned · first files pushed · 0 files linked · no terminal named: kit terminal <name> names one"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			gh := &gitHub{token: "gho_secret", repo: "someone/elsewhere", others: map[string]repo{}}
@@ -809,6 +814,11 @@ func TestKitConfigStartsOnThisMac(t *testing.T) {
 			run := runnertest.New(t)
 			b, _ := newBoot(t, run, gh.serve(t), &asker{})
 			startsHere(t, b, "someone/kit-config", tt.create, tt.terminal)
+			if tt.unasked {
+				if err := kitstate.Update(b.State, stateName, func(st *state) { st.Fresh.Unasked = true }); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := config.WriteMachine(b.State, "laptop"); err != nil {
 				t.Fatal(err)
 			}
@@ -859,8 +869,9 @@ func TestKitConfigStartsOnThisMac(t *testing.T) {
 			if st.Fresh != nil || !st.Started {
 				t.Errorf("state after = %+v; want kit-config started here", st)
 			}
-			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "cloned · first files pushed · 0 files linked" {
-				t.Errorf("check after = %+v", res)
+			want := cmp.Or(tt.summary, "cloned · first files pushed · 0 files linked")
+			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != want {
+				t.Errorf("check after = %+v; want %q", res, want)
 			}
 		})
 	}

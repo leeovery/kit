@@ -468,6 +468,11 @@ func (b *Boot) configStep() engine.Step {
 			if n := found.Counts[linked.Diverged]; n > 0 {
 				says = append(says, fmt.Sprintf("%d %s", n, look.Plural(n, "differs: kit reconcile settles it", "differ: kit reconcile settles them")))
 			}
+			if st.NoTerminal {
+				if cfg, err := config.Load(b.Config, b.Kinds); err == nil && cfg.Terminal == "" {
+					says = append(says, "no terminal named: kit terminal <name> names one")
+				}
+			}
 			if st.NewMac != "" {
 				if cfg, err := config.Load(b.Config, b.Kinds); err == nil && cfg.Knows(st.NewMac) {
 					says = append(says, st.NewMac+" added to kit.toml")

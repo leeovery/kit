@@ -485,6 +485,8 @@ func TestGitHubRefusesAPublicConfig(t *testing.T) {
 			want: "someone/nowhere isn't on GitHub, or this sign-in can't see it: name yours with --config owner/name"},
 		{name: "no kit.toml, named", repo: "someone/notes", config: "someone/notes", files: map[string]string{"README.md": "notes\n"}, ask: &asker{},
 			want: "someone/notes holds no kit.toml, so it's no config repository: name yours with --config owner/name"},
+		{name: "kit-config missing, named", repo: "someone/elsewhere", config: "someone/kit-config", ask: &asker{},
+			want: "someone/kit-config isn't on GitHub, or this sign-in can't see it: name yours with --config owner/name"},
 		{name: "missing, no terminal", repo: "someone/elsewhere", ask: &asker{err: noTerminal}, want: noTerminal.Error(),
 			asked: []string{noConfig}},
 	} {
@@ -569,6 +571,10 @@ func TestGitHubWithNoKitConfig(t *testing.T) {
 		{name: "pasted, not there", ask: &asker{chooses: []int{1, 0, 0, 0}, names: []string{"other/nowhere"}},
 			asked: []string{noConfig, which + pasted, "github: its name, as owner/name", refused("other/nowhere isn't on GitHub, or this sign-in can't see it"), terminal},
 			repo:  "someone/kit-config", fresh: &fresh{Create: true, Terminal: "ghostty"}, summary: "someone · someone/kit-config, new, private"},
+		{name: "their own, no kit.toml", others: map[string]repo{"someone/kit-config": notes}, ask: &asker{chooses: []int{1, 0}, name: "configs"},
+			asked: []string{"github: someone/kit-config holds no kit.toml, so it's no config repository Join another of yours (pick from your private repositories), Create a new one (create it under a name of your own)",
+				"github: its name, a new private repository on someone's account [kit-config]", terminal},
+			repo: "someone/configs", fresh: &fresh{Create: true, Terminal: "ghostty"}, summary: "someone · someone/configs, new, private"},
 		{name: "created, there with files", others: map[string]repo{"someone/notes": notes}, ask: &asker{chooses: []int{2, 0, 0}, names: []string{"notes"}},
 			asked: []string{noConfig, "github: its name, a new private repository on someone's account [kit-config]", refused("someone/notes is on GitHub already, holding files"), terminal},
 			repo:  "someone/kit-config", fresh: &fresh{Create: true, Terminal: "ghostty"}, summary: "someone · someone/kit-config, new, private"},
@@ -708,12 +714,14 @@ func TestThisMac(t *testing.T) {
 			}
 		})
 	}
-	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
-	b.Mac = "No Good"
-	_ = os.MkdirAll(b.archive(), 0o700)
-	_ = os.WriteFile(filepath.Join(b.archive(), config.File), []byte(kitToml), 0o600)
-	if err := b.macStep().Apply(context.Background(), check.Result{}); err == nil || !strings.Contains(err.Error(), "can't name a Mac") {
-		t.Errorf("a bad name: %v", err)
+	for _, bad := range []string{"No Good", config.Shared} {
+		b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+		b.Mac = bad
+		_ = os.MkdirAll(b.archive(), 0o700)
+		_ = os.WriteFile(filepath.Join(b.archive(), config.File), []byte(kitToml), 0o600)
+		if err := b.macStep().Apply(context.Background(), check.Result{}); err == nil || !strings.Contains(err.Error(), "can't name a Mac") {
+			t.Errorf("--mac %s: %v; want it refused", bad, err)
+		}
 	}
 }
 
