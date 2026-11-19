@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-19
+
+Set up a Mac you already use with one command, `kit setup`, which makes or joins your kit-config and declares everything on the Mac as it is.
+
+💥 Breaking
+- The `prefs_repo` setting in kit.toml is no longer accepted, and kit stops reading kit.toml while it's there — take the line out, as apps' settings are now saved on kit-config's own `prefs` branch.
+- A Mac can no longer have `shared` or `add` as its name when you add or boot it, as those are reserved.
+
+✨ Added
+- `kit setup` brings a Mac in use onto kit in one run — signs in to GitHub, creates or joins kit-config, names the Mac, declares its apps, settings, git config, features and backups, then commits, pushes and runs `kit apply`.
+- `kit setup` asks which folders a new Mac brings back, whether to save apps' settings nightly, which shell files kit-config keeps and whether to install what the config declares, each with its own flag (`--restore`, `--prefs`, `--link`, `--apply` and their `--no-` forms) for use without a terminal.
+- The new-Mac boot lets you create a kit-config or join one of your private repositories when you have none named kit-config, and starts an empty one with your Mac and chosen terminal.
+- `kit terminal` shows or sets the terminal a new Mac's boot hands over to, and `--none` takes it out.
+- `kit nightly at` shows or sets when the nightly run falls due.
+- Bare `kit` on a Mac that isn't set up, or whose setup stopped part-way, offers to run or carry on `kit setup`.
+- `kit agent in-use` guide tells agents how to run `kit setup` for a person.
+- A new kit-config declares Homebrew's folders in the shared `[paths]`, so kit's runs find brew.
+
+🔧 Changed
+- Apps' settings are saved on a `prefs` branch of kit-config itself rather than a separate repository, and the boot clones only kit-config's own branch.
+- Uninstalling an app now says its saved settings weren't looked at when the settings store can't be read, instead of silently skipping them.
+- `kit status` marks the config repository as needing you while part of it does, and says plainly what to do when it isn't proven private.
+- Declaring Homebrew formulae and casks from tapped packages checks whether a private download needs a GitHub token without tapping or updating, and checks GitHub's package registry anonymously as Homebrew does.
+- The save-panel expanded state and the menu-bar clock's date setting are now watched as your own choices rather than ignored as noise.
+
+🐛 Fixed
+- Pushing kit-config no longer reports "nothing changed" when it couldn't tell what's waiting to be pushed; it asks for attention instead.
+- Long or multi-line errors no longer leave stray lines behind on in-place screens.
+- Tall question cards in `kit apply` no longer break the log pane.
+- Signing in with a QR code fits short terminal windows, keeping the code and its expiry visible.
+- Cancelling a key read at the terminal no longer swallows the next question's keys.
+
 ## [0.1.2] - 2026-11-17
 
 🔧 Changed
