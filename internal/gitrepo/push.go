@@ -91,6 +91,9 @@ func (r Repo) Holding(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := r.rewritten(ctx, t.up, pushed); err != nil {
+		return err
+	}
 	if n, err := r.behind(ctx, t.up); err != nil || n == 0 {
 		return nil
 	}
@@ -243,9 +246,12 @@ func (r Repo) behind(ctx context.Context, up string) (int, error) {
 // from what up, the upstream, has been (its reflog), which outlives every
 // fetch, as a commit up had in HEAD's history past where the two meet now
 // (git merge-base). Once HEAD holds it no more, as after a reset to up by
-// hand, they agree, as they do with nothing rewritten. With no fork point
-// (exit 1), as with no history in common, or the reflog's record of the
-// commit expired, or with no upstream, there's nothing to refuse.
+// hand, they agree, as they do with nothing rewritten. There's nothing to
+// refuse with no upstream; with no fork point (exit 1), as once the
+// reflog's record of the commit has expired; or with no history in common
+// (git merge-base exiting 1), as a branch deleted on the remote and pushed
+// anew by another Mac, which the reflog still forks from: that's for the
+// pull's own handling of an unrelated history.
 func (r Repo) rewritten(ctx context.Context, up, undone string) error {
 	cantTell := func(err error) error {
 		return fmt.Errorf("couldn't tell whether the remote's history was rewritten, so nothing was %s: %w", undone, err)
@@ -261,13 +267,16 @@ func (r Repo) rewritten(ctx context.Context, up, undone string) error {
 		return nil
 	}
 	fork, err := r.git(ctx, "merge-base", "--fork-point", up, "HEAD")
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+	if none(err) {
 		return nil
 	}
 	if err != nil {
 		return cantTell(err)
 	}
 	base, err := r.git(ctx, "merge-base", up, "HEAD")
+	if none(err) {
+		return nil
+	}
 	if err != nil {
 		return cantTell(err)
 	}
@@ -275,6 +284,13 @@ func (r Repo) rewritten(ctx context.Context, up, undone string) error {
 		return fmt.Errorf("the remote's history was rewritten, dropping a commit this Mac has, so nothing was %s: bring it in by hand", undone)
 	}
 	return nil
+}
+
+// none reports whether git merge-base failed for want of a commit to name,
+// exiting 1, as it does with no answer.
+func none(err error) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && exit.Code == 1
 }
 
 // count is how many commits revs names, as git rev-list --count has them.

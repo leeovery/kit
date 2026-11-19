@@ -132,10 +132,12 @@ func TestConfigSync(t *testing.T) {
 		fake.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
 		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 	}
-	// waiting scripts the commits waiting, as times, newest first as git log
+	// forked scripts the commits waiting, as times, newest first as git log
 	// lists them, and the repository as Push finds it settled, git's status
-	// of it status, the remote's last fetch behind by behind.
-	waiting := func(times []time.Time, status, behind string) *runnertest.Fake {
+	// of it status, the remote's last fetch behind by behind; then where
+	// HEAD forked from the upstream, as its reflog has it, fork, and where
+	// they meet now, base, as real git prints them.
+	forked := func(times []time.Time, status, behind, fork, base string) *runnertest.Fake {
 		fake := runnertest.New(t)
 		var out string
 		for _, at := range times {
@@ -145,8 +147,14 @@ func TestConfigSync(t *testing.T) {
 		fake.On("git", log...).Prints(out)
 		fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
 		fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
+		fake.On("git", git("merge-base", "--fork-point", "refs/remotes/origin/main", "HEAD")...).Prints(fork + "\n")
+		fake.On("git", git("merge-base", "refs/remotes/origin/main", "HEAD")...).Prints(base + "\n")
 		fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints(behind + "\n")
 		return fake
+	}
+	// waiting is forked with nothing here the remote's history dropped.
+	waiting := func(times []time.Time, status, behind string) *runnertest.Fake {
+		return forked(times, status, behind, head, head)
 	}
 	sync := func(fake *runnertest.Fake) engine.Step {
 		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now, steps.Pulled{})
@@ -180,6 +188,18 @@ func TestConfigSync(t *testing.T) {
 		res.Items[0].ID != "config-sync:held" || res.Items[0].Name != "1 commit not pushed" ||
 		!strings.Contains(res.Items[0].Detail, "commit or undo the change to notes first") {
 		t.Errorf("held back by a staged change = %+v", res)
+	}
+
+	// The remote's history rewritten, dropping a commit this Mac has: it
+	// counts as waiting, but Push refuses, so this says why, rather than to
+	// push it. Real git's fork point is the dropped commit, past where HEAD
+	// and the upstream meet now.
+	const dropped, before = "8d2c41f0b6a94e1f2d7c3b5a6e9f0a1b2c3d4e5f", "3a7b9c1d5e2f4a6b8c0d1e3f5a7b9c2d4e6f8a0b"
+	fake = forked([]time.Time{now().Add(-3 * time.Hour)}, "", "1", dropped, before)
+	res = sync(fake).Check(t.Context())
+	if res.State != check.Attention || len(res.Items) != 1 || res.Items[0].ID != "config-sync:held" ||
+		!strings.HasPrefix(res.Items[0].Detail, "the remote's history was rewritten, dropping a commit this Mac has") {
+		t.Errorf("the remote's history rewritten = %+v; want it held back, saying why", res)
 	}
 
 	// No remote: nothing to push to.

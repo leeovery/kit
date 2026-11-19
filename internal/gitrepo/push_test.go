@@ -701,9 +701,9 @@ func TestPushFails(t *testing.T) {
 
 // Holding is why Push would hold back now, as far as the last fetch tells,
 // fetching nothing and changing nothing: the remote's commits changing
-// what's not committed here, a folder become a file, or git part way
-// through something; nil with nothing new, no upstream, or nothing
-// clashing.
+// what's not committed here, a folder become a file, git part way
+// through something, or the remote's history rewritten; nil with nothing
+// new, no upstream, or nothing clashing.
 func TestHolding(t *testing.T) {
 	holding := func(fake *runnertest.Fake, gitDir, status string) *sequence {
 		s := &sequence{fake: fake}
@@ -719,6 +719,7 @@ func TestHolding(t *testing.T) {
 	fake := runnertest.New(t)
 	s := holding(fake, t.TempDir(), " M kit.toml\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("1\n")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
@@ -730,6 +731,7 @@ func TestHolding(t *testing.T) {
 	fake = runnertest.New(t)
 	s = holding(fake, t.TempDir(), " D shared/config.toml\x00?? shared\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("1\n")
 	if err := hold(fake); err == nil || !strings.HasPrefix(err.Error(), "shared was a folder git tracks and is a file now") {
@@ -740,6 +742,7 @@ func TestHolding(t *testing.T) {
 	fake = runnertest.New(t)
 	s = holding(fake, t.TempDir(), " M laptop/a\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("1\n")
 	s.expect(incomingOf...).Prints("kit.toml\x00")
@@ -752,6 +755,7 @@ func TestHolding(t *testing.T) {
 	fake = runnertest.New(t)
 	s = holding(fake, t.TempDir(), " M kit.toml\x00")
 	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.unrewritten()
 	s.expect(upstreamAt...).Prints(upstream + "\n")
 	s.expect(behindOf...).Prints("0\n")
 	if err := hold(fake); err != nil {
@@ -766,6 +770,18 @@ func TestHolding(t *testing.T) {
 		t.Errorf("Holding(), no upstream = %v", err)
 	}
 	s.check(t, "no upstream")
+
+	// HEAD holding a commit the remote's history dropped, Push refuses, so
+	// Holding says why, whatever's behind: real git, after another Mac's
+	// forced push, answers so.
+	fake = runnertest.New(t)
+	s = holding(fake, t.TempDir(), "")
+	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+	s.rewriting()
+	if err := hold(fake); err == nil || err.Error() != "the remote's history was rewritten, dropping a commit this Mac has, so nothing was pushed: bring it in by hand" {
+		t.Errorf("Holding(), the remote's history rewritten = %v", err)
+	}
+	s.check(t, "the remote's history rewritten")
 
 	gitDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(gitDir, "rebase-merge"), 0o700); err != nil {

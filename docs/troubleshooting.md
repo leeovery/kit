@@ -174,8 +174,12 @@ says. Each reason ends with what to do:
 | The row says | What to do |
 |---|---|
 | change what's not committed | See the next section |
-| add a file git ignores | Move that file aside |
+| conflict with this Mac's | See the next section |
+| which git ignores | Move that file aside |
 | set aside what's not committed | Commit or undo the edit |
+| pulling would delete | Commit or undo the change |
+| is under way | Finish it, or abort it |
+| is waiting to be resolved | Resolve the conflict |
 | git signs its commits | Pull and push by hand |
 | history was rewritten | See the last section |
 
@@ -191,8 +195,9 @@ To keep the other Mac's change, undo yours:
 kit reconcile config:laptop/declarations --revert
 ```
 
-To keep both changes, commit yours, then bring theirs in by hand. The pull stops on the
-conflict and leaves git's markers in the file:
+To keep both changes, commit yours, then bring theirs in by hand. If the row says "conflict
+with this Mac's", yours is committed already: start at the pull. The pull stops on the conflict
+and leaves git's markers in the file:
 
 ```bash
 # Commit your edit
@@ -201,7 +206,8 @@ kit reconcile config:laptop/declarations --adopt
 git -C ~/.config/kit pull --rebase --autostash
 ```
 
-Edit the file to keep what you want from both, and remove the markers. Then finish:
+Edit the file to keep what you want from both, and remove the markers. Then finish. If
+`rebase --continue` opens your editor with the commit message, save and close it:
 
 ```bash
 # Mark the file resolved, then carry on
@@ -218,19 +224,30 @@ git -C ~/.config/kit push
 ### Another Mac rewrote kit-config's history
 
 Another Mac force-pushed kit-config, dropping a commit this Mac still has. kit won't put that
-commit back. First, list the commits here that the remote no longer has:
+commit back. First, list the commits here that the remote doesn't have, newest first:
 
 ```bash
 git -C ~/.config/kit log --oneline @{u}..
 ```
 
-If none of them is yours to keep, match the remote. Your edits that aren't committed stay:
+The list holds the commits the other Mac dropped, and any of yours not pushed yet. If none of
+them is yours, match the remote. Your edits that aren't committed stay:
 
 ```bash
 git -C ~/.config/kit reset --keep @{u}
 ```
 
-The next run brings in the remote's commits again.
+If that says `not uptodate`, an edit touches a dropped file: commit or undo the edit, then run
+it again.
+
+If some of them are yours, keep those and leave the dropped ones out. Name the newest dropped
+commit from the list, here `1a2b3c4`. Your commits above it in the list stay:
+
+```bash
+git -C ~/.config/kit rebase --autostash \
+  --onto @{u} 1a2b3c4
+git -C ~/.config/kit push
+```
 
 ## Related
 

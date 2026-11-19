@@ -507,9 +507,12 @@ run's or one by hand, as a fork point past where HEAD and the upstream meet now 
 merge-base`); the two agree with nothing rewritten (proven on real git: behind, ahead, both, a
 fresh clone, an emptied reflog), and again once the commit's gone from HEAD, as after `git
 reset --keep @{u}` by hand, when runs carry on. No fork point (exit 1), as once the reflog's
-record of the commit expires, is no refusal. A rebase that stops is aborted. The wait for
-another kit and the fetch have 20 seconds, the prefs store's look's time, then the run carries
-on with the copy it has; once fetched, the rest is git's on the Mac, and finishes. Committing,
+record of the commit expires, is no refusal; nor is no history in common (`git merge-base`
+exiting 1, as the prefs store's branch deleted and pushed anew, unrelated, by another Mac,
+the reflog still forking from it), which the pull handles as an unrelated history. `Holding`
+checks it too, so `config-sync` says why a dropped commit isn't pushed. A rebase that stops is
+aborted. The wait for another kit and the fetch have 20 seconds, the prefs store's look's time,
+then the run carries on with the copy it has; once fetched, the rest is git's on the Mac, and finishes. Committing,
 pulling and pushing all hold one lock in the git folder (`kit.lock`, kit's own: git has none
 but its index lock), Push through the push itself, so the hourly run and a command by hand take
 turns, never committing, rebasing, fetching or pushing over each other; each takes it once, at

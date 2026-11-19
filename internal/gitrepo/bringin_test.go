@@ -273,6 +273,25 @@ func TestARewrittenHistoryIsLeftAlone(t *testing.T) {
 		t.Errorf("BringIn(), unable to tell = %d, %v", n, err)
 	}
 	s.check(t, "unable to tell")
+
+	// With no history in common, as the store's branch deleted on the
+	// remote and pushed anew, unrelated, by another Mac, real git's reflog
+	// still has a fork point, but merge-base exits 1, printing nothing:
+	// that's no rewrite, and the pull's own refusal of an unrelated history
+	// says why nothing came in.
+	fake = runnertest.New(t)
+	s = fetchingIn(fake, t.TempDir(), "")
+	s.expect(fetchIt...)
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(forkPointOf...).Prints(dropped + "\n")
+	s.expect(mergeBaseOf...).Exits(1)
+	s.expect(upstreamAt...).Prints(upstream + "\n")
+	s.expect(behindOf...).Prints("1\n")
+	s.expect(incomingOf...).Exits(128).PrintsToStderr("fatal: HEAD..." + upstreamRef + ": no merge base\n")
+	if n, err := bringIn(context.Background(), fake); n != 0 || err == nil || !strings.HasPrefix(err.Error(), "couldn't read the remote's changes, so nothing was brought in: ") {
+		t.Errorf("BringIn(), no history in common = %d, %v", n, err)
+	}
+	s.check(t, "no history in common")
 }
 
 // Offline, or with the remote not answering by ctx's deadline, nothing's
