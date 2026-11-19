@@ -125,12 +125,47 @@ func (p *Prefs) checkClone(ctx context.Context, remote string) error {
 	}
 	on := strings.TrimPrefix(strings.TrimSpace(string(res.Stdout)), "refs/heads/")
 	if on == branch {
-		return nil
+		return p.checkUpstream(ctx)
 	}
 	if err := p.repo().UnderWay(ctx); err != nil {
 		return fmt.Errorf("the store's clone, %s: %w", p.Clone, err)
 	}
 	return fmt.Errorf("%s is on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there", p.Clone, cmp.Or(on, "no branch"), branch)
+}
+
+// checkUpstream refuses the store's clone unless its branch is set to track
+// origin's branch of the same name, as every clone kit makes is
+// (cloneBranch). A clone of kit-config whose main was renamed prefs is
+// still set to track main, which a pull would rebase the store onto, and a
+// push send it to; one set to track nothing would be pushed whole as
+// prefs. The settings are read, not git's upstream, which git shows as
+// none when no fetch refspec maps the branch set, and for a branch with no
+// commit. Push asks again all the same.
+func (p *Prefs) checkUpstream(ctx context.Context) error {
+	remote, err := p.setting(ctx, "branch."+branch+".remote")
+	if err != nil {
+		return err
+	}
+	merge, err := p.setting(ctx, "branch."+branch+".merge")
+	if err != nil {
+		return err
+	}
+	if remote == origin && (merge == "refs/heads/"+branch || merge == branch) {
+		return nil
+	}
+	return fmt.Errorf("%s tracks %s on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there, or set it to track the branch (git -C %s config branch.%s.remote %s, then git -C %s config branch.%s.merge refs/heads/%s)",
+		p.Clone, cmp.Or(strings.TrimPrefix(merge, "refs/heads/"), "no branch"), cmp.Or(remote, "no remote"), branch,
+		p.Clone, branch, origin, p.Clone, branch, branch)
+}
+
+// setting is git's setting key in the store's clone: "" when it isn't set,
+// as git says by exiting 1.
+func (p *Prefs) setting(ctx context.Context, key string) (string, error) {
+	res, err := p.git(ctx, "config", "--get", key)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return "", nil
+	}
+	return strings.TrimSpace(string(res.Stdout)), err
 }
 
 // checkPushes refuses the store's clone unless it pushes where kit-config
@@ -431,10 +466,10 @@ func (p *Prefs) repo() gitrepo.Repo {
 // pushes to is proven private (gitrepo.Place): why it didn't push, or ""
 // once pushed.
 func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
-	missing, err := gitrepo.Repo{Dir: p.Config, Run: p.Run}.BranchMissing(ctx)
+	missing, err := p.config().BranchMissing(ctx)
 	switch {
 	case err != nil:
-		return err.Error()
+		return "kit-config: " + err.Error()
 	case missing:
 		return "kit-config's own branch isn't on its remote yet, and a new repository's first branch pushed is the one a new Mac clones: apps' settings are pushed once kit-config's is"
 	}
@@ -449,6 +484,9 @@ func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
 	case isNot:
 		return fmt.Sprintf("kit pushes apps' settings only to a repository it can prove private, and can't for %s: %s", gitrepo.Shown(notPrivate.URL), notPrivate.Place.Unproven)
 	case err != nil:
+		return err.Error()
+	}
+	if err := p.checkUpstream(ctx); err != nil {
 		return err.Error()
 	}
 	if err := repo.Push(ctx); err != nil {

@@ -64,9 +64,24 @@ func onTheBranch(fake *runnertest.Fake, config, clone string) {
 	fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
+	tracks(fake, clone, "origin", "refs/heads/prefs")
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		fake.On("git", "-C", clone, "config", kv[0], kv[1])
 	}
+}
+
+// tracks scripts, on fake, the store's prefs branch in its clone, at
+// clone, set to track merge, a branch of remote: each "" for not set, as
+// git says by exiting 1. Its scripts answer each read in turn.
+func tracks(fake *runnertest.Fake, clone, remote, merge string) (remoteOf, mergeOf *runnertest.Script) {
+	read := func(key, value string) *runnertest.Script {
+		script := fake.On("git", "-C", clone, "config", "--get", key)
+		if value == "" {
+			return script.Exits(1)
+		}
+		return script.Prints(value + "\n")
+	}
+	return read("branch.prefs.remote", remote), read("branch.prefs.merge", merge)
 }
 
 // carries is git reading the settings the store takes from kit-config, at
@@ -387,22 +402,75 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 // branch pushed the one a new Mac's boot clones. The commit waits, and the
 // record says since when.
 func TestCaptureWaitsForKitConfigsBranch(t *testing.T) {
+	w := firstCapture(t)
+	w.fake.On("git", "-C", w.config, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Exits(1)
+	w.heldBack(t, "kit-config's branch not on its remote", "kit-config's own branch isn't on its remote yet")
+}
+
+// firstCapture is a Mac's first capture, of one domain, scripted to its
+// push (pushes).
+func firstCapture(t *testing.T) *world {
+	t.Helper()
 	w := newWorld(t, prefs.Lists{})
 	writeRecord(t, w.state, `{"on": "started fresh"}`)
 	w.fake.On("defaults", "domains").Prints("com.example.app\n")
 	w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
 	w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
 		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
-	w.fake.On("git", "-C", w.config, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Exits(1)
+	return w
+}
+
+// heldBack checks a capture saves, pushing nothing, the push held saying
+// says, and the record saying since when.
+func (w *world) heldBack(t *testing.T, name, says string) {
+	t.Helper()
 	report, err := w.p.Capture(t.Context())
-	if says := "kit-config's own branch isn't on its remote yet"; err != nil || !strings.HasPrefix(report.PushError, says) {
-		t.Errorf("Capture() = %+v, %v; want the push held, saying %q", report, err, says)
+	if err != nil || !strings.HasPrefix(report.PushError, says) {
+		t.Errorf("%s: Capture() = %+v, %v; want the push held, saying %q", name, report, err, says)
 	}
 	if slices.ContainsFunc(w.fake.Calls(), func(call string) bool { return strings.Contains(call, " push ") }) {
-		t.Error("pushed apps' settings before kit-config's branch")
+		t.Errorf("%s: pushed apps' settings", name)
 	}
 	if rec, _ := w.p.Load(); rec.Unpushed.IsZero() {
-		t.Errorf("record = %+v, want the push waiting", rec)
+		t.Errorf("%s: record = %+v, want the push waiting", name, rec)
+	}
+}
+
+// A push held back by kit-config's own state, not the store's, says so:
+// HEAD on no branch, or git failing to tell whether kit-config's branch is
+// on its remote.
+func TestCaptureNamesKitConfigHoldingThePush(t *testing.T) {
+	w := firstCapture(t)
+	w.fake.On("git", "-C", w.config, "symbolic-ref", "-q", "HEAD").Exits(1)
+	w.heldBack(t, "kit-config on no branch", "kit-config: HEAD isn't on a branch, so kit pushes nothing")
+
+	w = firstCapture(t)
+	w.fake.On("git", "-C", w.config, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Exits(128).PrintsToStderr("fatal: bad object\n")
+	w.heldBack(t, "kit-config's branch unreadable", "kit-config: ")
+}
+
+// The store's branch is pushed only to the remote's branch of the same
+// name. One set to track another, kit-config's main, since the clone was
+// checked, is never pushed to it. One set to track origin's prefs by its
+// short name, for which git shows no upstream, is pushed to the branch of
+// its own name, prefs, which it then tracks, as real git does.
+func TestCapturePushesOnlyToThePrefsBranch(t *testing.T) {
+	w := firstCapture(t)
+	_, merge := tracks(w.fake, w.clone, "origin", "refs/heads/prefs")
+	merge.Then().Prints("refs/heads/main\n")
+	w.heldBack(t, "tracking kit-config's main", w.clone+" tracks main on origin, not kit-config's prefs branch: ")
+
+	w = firstCapture(t)
+	tracks(w.fake, w.clone, "origin", "prefs")
+	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/prefs").Prints(" \n")
+	w.fake.On("git", "-C", w.clone, "push", "--quiet", "-u", "origin", "HEAD")
+	report, err := w.p.Capture(t.Context())
+	if err != nil || report.PushError != "" {
+		t.Errorf("tracking prefs by its short name: Capture() = %+v, %v; want it pushed", report, err)
+	}
+	pushed := slices.DeleteFunc(w.fake.Calls(), func(call string) bool { return !strings.Contains(call, " push ") })
+	if want := "git -C " + w.clone + " push --quiet -u origin HEAD"; !slices.Equal(pushed, []string{want}) {
+		t.Errorf("tracking prefs by its short name: pushed %q; want %q alone", pushed, want)
 	}
 }
 

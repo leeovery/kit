@@ -473,26 +473,8 @@ func TestACloneElsewhereIsRefused(t *testing.T) {
 		{"kit-config's own branch", remote, remote, "refs/heads/main\n", " is on main, not kit-config's prefs branch: " + moveAside},
 		{"no branch", remote, remote, "", " is on no branch, not kit-config's prefs branch: " + moveAside},
 	} {
-		for _, do := range []struct {
-			name string
-			run  func(context.Context, *prefs.Prefs) error
-		}{
-			{"capture", func(ctx context.Context, p *prefs.Prefs) error { _, err := p.Capture(ctx); return err }},
-			{"restore", func(ctx context.Context, p *prefs.Prefs) error {
-				_, err := p.Restore(ctx, prefs.RestoreOptions{})
-				return err
-			}},
-			{"history", func(ctx context.Context, p *prefs.Prefs) error { _, err := p.History(ctx, "", "", 5); return err }},
-			{"saved for an app", func(ctx context.Context, p *prefs.Prefs) error {
-				_, err := p.SavedFor(ctx, "com.example.app")
-				return err
-			}},
-			{"take over", func(ctx context.Context, p *prefs.Prefs) error { return p.TakeOver(ctx) }},
-		} {
-			w := newWorld(t, prefs.Lists{})
-			writeRecord(t, w.state, `{"on": "restored"}`)
-			w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
-			w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-OLD\nmodel Mac1,1\n")
+		for _, do := range onTheStore {
+			w := refusedWorld(t)
 			url := w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(c.url + "\n")
 			if c.url == "" {
 				url.Exits(2).PrintsToStderr("error: No such remote 'origin'\n")
@@ -502,17 +484,97 @@ func TestACloneElsewhereIsRefused(t *testing.T) {
 			if c.on == "" {
 				branch.Exits(1)
 			}
-			if err := do.run(t.Context(), w.p); err == nil || err.Error() != w.clone+c.says {
-				t.Errorf("%s, %s: %v; want %q", c.name, do.name, err, w.clone+c.says)
-			}
-			for _, call := range w.fake.Calls() {
-				if slices.ContainsFunc([]string{" fetch ", " commit ", " push ", " log ", "defaults "}, func(s string) bool { return strings.Contains(call, s) }) {
-					t.Errorf("%s, %s: ran %s; want nothing pulled, saved, restored or read", c.name, do.name, call)
-				}
-			}
-			if got := w.read(t, filepath.Join(w.clone, "laptop", "owner")); got != "hardware HW-OLD\nmodel Mac1,1\n" {
-				t.Errorf("%s, %s: the owner file says %q; want it as it was", c.name, do.name, got)
-			}
+			w.refused(t, c.name+", "+do.name, do.run, w.clone+c.says)
+		}
+	}
+}
+
+// onTheStore are what works on the store's clone, each refusing one that
+// isn't of kit-config's prefs branch.
+var onTheStore = []struct {
+	name string
+	run  func(context.Context, *prefs.Prefs) error
+}{
+	{"capture", func(ctx context.Context, p *prefs.Prefs) error { _, err := p.Capture(ctx); return err }},
+	{"restore", func(ctx context.Context, p *prefs.Prefs) error {
+		_, err := p.Restore(ctx, prefs.RestoreOptions{})
+		return err
+	}},
+	{"history", func(ctx context.Context, p *prefs.Prefs) error { _, err := p.History(ctx, "", "", 5); return err }},
+	{"saved for an app", func(ctx context.Context, p *prefs.Prefs) error {
+		_, err := p.SavedFor(ctx, "com.example.app")
+		return err
+	}},
+	{"take over", func(ctx context.Context, p *prefs.Prefs) error { return p.TakeOver(ctx) }},
+}
+
+// refusedWorld is a Mac whose clone of the store holds a save, from other
+// hardware, its settings restored.
+func refusedWorld(t *testing.T) *world {
+	t.Helper()
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "restored"}`)
+	w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
+	w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-OLD\nmodel Mac1,1\n")
+	return w
+}
+
+// refused checks run refuses w's clone, saying says, having pulled, saved,
+// restored and read nothing, the owner file as it was.
+func (w *world) refused(t *testing.T, name string, run func(context.Context, *prefs.Prefs) error, says string) {
+	t.Helper()
+	if err := run(t.Context(), w.p); err == nil || err.Error() != says {
+		t.Errorf("%s: %v; want %q", name, err, says)
+	}
+	for _, call := range w.fake.Calls() {
+		if slices.ContainsFunc([]string{" fetch ", " commit ", " push ", " log ", "defaults "}, func(s string) bool { return strings.Contains(call, s) }) {
+			t.Errorf("%s: ran %s; want nothing pulled, saved, restored or read", name, call)
+		}
+	}
+	if got := w.read(t, filepath.Join(w.clone, "laptop", "owner")); got != "hardware HW-OLD\nmodel Mac1,1\n" {
+		t.Errorf("%s: the owner file says %q; want it as it was", name, got)
+	}
+}
+
+// A clone on the prefs branch set to track another is refused as one
+// elsewhere is: as git branch -m main prefs leaves a clone of kit-config,
+// its main renamed and still set to track main, which a pull would rebase
+// the store onto and a push send it to, reaching every Mac. It's what the
+// branch is set to track that's read, as git shows no upstream when the
+// clone fetches prefs alone, and a push would publish kit-config's history
+// as prefs. One set to track nothing is refused too: pushed, it would be
+// published whole as prefs. Kit names what it tracks, and says to move it
+// aside, or to set both settings. What git prints is what real git does.
+func TestACloneTrackingAnotherBranchIsRefused(t *testing.T) {
+	for _, c := range []struct{ name, remote, merge, says string }{
+		{"kit-config's main", "origin", "refs/heads/main", " tracks main on origin"},
+		{"a branch of its own", ".", "refs/heads/prefs", " tracks prefs on ."},
+		{"no branch set", "origin", "", " tracks no branch on origin"},
+		{"no remote set", "", "refs/heads/prefs", " tracks prefs on no remote"},
+		{"nothing set", "", "", " tracks no branch on no remote"},
+	} {
+		for _, do := range onTheStore {
+			w := refusedWorld(t)
+			tracks(w.fake, w.clone, c.remote, c.merge)
+			says := w.clone + c.says + ", not kit-config's prefs branch: move the clone aside for kit to clone the branch there, or set it to track the branch (git -C " +
+				w.clone + " config branch.prefs.remote origin, then git -C " + w.clone + " config branch.prefs.merge refs/heads/prefs)"
+			w.refused(t, c.name+", "+do.name, do.run, says)
+		}
+	}
+}
+
+// A clone on the prefs branch set to track origin's prefs, by its full name
+// or its short one, is the store's.
+func TestACloneTrackingPrefsIsTheStores(t *testing.T) {
+	for _, c := range []struct{ name, remote, merge string }{
+		{"origin's prefs", "origin", "refs/heads/prefs"},
+		{"origin's prefs, by its short name", "origin", "prefs"},
+	} {
+		w := refusedWorld(t)
+		tracks(w.fake, w.clone, c.remote, c.merge)
+		w.fake.On("git", "-C", w.clone, "log", "--no-color", "-n5", "--format=%x1e%h%x00%aI%x00%s", "--shortstat", "--", "laptop")
+		if _, err := w.p.History(t.Context(), "", "", 5); !errors.Is(err, prefs.ErrNoHistory) {
+			t.Errorf("tracking %s: History() = %v; want the clone read", c.name, err)
 		}
 	}
 }
