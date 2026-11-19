@@ -40,9 +40,9 @@ A blank Mac is one pasted line away: sign in to GitHub on your phone, and kit in
 - **Secrets from 1Password.** kit-config holds only where each secret is kept, and each Mac
   gets the value as a shell variable or file, never printed. [Secrets](docs/secrets.md)
 
-More: [Linked files](docs/linked-files.md) · [Your data](docs/your-data.md) ·
-[Steps](docs/steps.md) · [Running by itself](docs/running-by-itself.md) ·
-[Backups](docs/backups.md)
+More: [Apps' settings](docs/apps-settings.md) · [Linked files](docs/linked-files.md) ·
+[Your data](docs/your-data.md) · [Steps](docs/steps.md) ·
+[Running by itself](docs/running-by-itself.md) · [Backups](docs/backups.md)
 
 ## Screens
 
@@ -55,11 +55,11 @@ More: [Linked files](docs/linked-files.md) · [Your data](docs/your-data.md) ·
 ## Install
 
 You need macOS 15 or later on Apple silicon, the Macs Homebrew supports. On an Intel Mac,
-Homebrew gives only its best effort. You also need a GitHub account holding a private
-kit-config, and the GitHub CLI (`gh`) signed in to it. 1Password is needed only for secrets.
+Homebrew gives only its best effort. You also need a GitHub account, where kit makes a private
+kit-config if you have none. 1Password is needed only for secrets.
 
 ```bash
-# On a Mac with Homebrew
+# On a Mac you already use, with Homebrew
 brew install leeovery/tools/kit
 ```
 
@@ -81,21 +81,20 @@ hour. Uninstalling kit leaves:
 
 ## Quick start
 
-This assumes you have a kit-config. To make your first one, see
-[Your first kit-config](docs/first-config.md) (coming).
+On a blank Mac, the install line is the whole start: the boot ends in `kit apply`.
+[A new Mac from one line](docs/new-mac.md) says what it asks. On a Mac you already use:
 
 ```bash
-# Clone kit-config where kit reads it
-gh repo clone owner/kit-config ~/.config/kit
-# Name this Mac, as kit.toml names it
-kit machine laptop
+# Make kit-config, and declare this Mac in it
+kit setup
 # See how this Mac stands against kit-config
 kit status
-# Install what's declared and missing
-kit apply
+# Keep or undo what you changed by hand
+kit reconcile
 ```
 
-`kit apply` installs and sets what kit-config declares, and never removes anything.
+`kit setup` asks a few questions, then runs `kit apply`.
+[Your first kit-config](docs/first-config.md) says what it declares.
 
 ## Questions you may have
 

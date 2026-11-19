@@ -6,10 +6,11 @@ rest, then carries on in your own terminal. You'd use it on every Mac you set up
 
 The line reads the repository named `kit-config` in your GitHub account. If no repository has
 that name, kit asks: pick one of your private repositories, type its name, or create one. A new
-one holds only this Mac and its terminal, so see [Your first kit-config](first-config.md) for the
-rest. To copy from one of your Macs, ready it first.
-Then make your user in macOS's own setup with the same user name as that Mac.
-[Your data on a new Mac](your-data.md) says how.
+one holds only this Mac and its terminal. If you have a Mac in use, start kit-config there
+instead: see [Your first kit-config](first-config.md).
+
+To copy from one of your Macs, ready it first. Then make your user in macOS's own setup with the
+same user name as that Mac. [Your data on a new Mac](your-data.md) says how.
 
 ## Try it
 
