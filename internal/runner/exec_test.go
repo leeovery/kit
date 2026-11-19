@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // programs writes shell scripts, by name, into a new directory, and returns
@@ -166,6 +167,15 @@ func TestExecFindsOnlyWhatsOnItsPath(t *testing.T) {
 		if got := runner.Has(r, name); got != want {
 			t.Errorf("Has(%s) = %v, want %v", name, got, want)
 		}
+	}
+	// Where it's found, through what wraps it; a runner that can't say
+	// finds none.
+	wrapped := runner.Observed(r, func(context.Context, runner.Report) {}, time.Now)
+	if got, err := runner.Find(wrapped, "here"); err != nil || got != filepath.Join(dir, "here") {
+		t.Errorf("Find(here) = %q, %v; want it in %s", got, err, dir)
+	}
+	if _, err := runner.Find(only{runnertest.New(t)}, "here"); !errors.Is(err, runner.ErrNotFound) {
+		t.Errorf("Find() from a runner that can't say = %v, want ErrNotFound", err)
 	}
 }
 

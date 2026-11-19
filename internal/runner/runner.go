@@ -146,6 +146,21 @@ func Has(r Runner, name string) bool {
 	return true
 }
 
+// Locator is a runner that can say where it finds a program, without
+// running it.
+type Locator interface {
+	Find(name string) (string, error)
+}
+
+// Find is where r finds the program name, as it would to run it; a runner
+// that can't say finds none (ErrNotFound).
+func Find(r Runner, name string) (string, error) {
+	if l, ok := r.(Locator); ok {
+		return l.Find(name)
+	}
+	return "", fmt.Errorf("%s: %w", name, ErrNotFound)
+}
+
 // Environer is a runner that can say what environment it runs a command in.
 type Environer interface {
 	Environ(ctx context.Context, cmd Command) ([]string, bool)
@@ -248,6 +263,8 @@ type observed struct {
 	now     func() time.Time
 }
 
+func (o observed) Find(name string) (string, error) { return Find(o.runner, name) }
+
 func (o observed) Has(name string) bool {
 	return Has(o.runner, name)
 }
@@ -307,6 +324,8 @@ type prepared struct {
 	prepare func(cmd Command) Command
 }
 
+func (p prepared) Find(name string) (string, error) { return Find(p.runner, name) }
+
 func (p prepared) Has(name string) bool {
 	return Has(p.runner, name)
 }
@@ -331,6 +350,8 @@ type streamed struct {
 	want   func(ctx context.Context) bool
 	lines  func(ctx context.Context, cmd Command, line string)
 }
+
+func (s streamed) Find(name string) (string, error) { return Find(s.runner, name) }
 
 func (s streamed) Has(name string) bool {
 	return Has(s.runner, name)

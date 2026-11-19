@@ -418,7 +418,8 @@ func (m *mac) ended(t *testing.T) ended {
 // private on the account setup signed in to, and this Mac named as its
 // model suggests: the config's first files say this kit is the oldest
 // that reads it, this Mac is the primary, and, run in Ghostty, it's the
-// terminal a new Mac's boot hands over to. The clone's on main, tracking
+// terminal a new Mac's boot hands over to; Homebrew's folders are on every
+// Mac's PATH, as kit's runs find brew. The clone's on main, tracking
 // main alone, though GitHub has no branch yet, and git signs in through
 // GitHub's CLI.
 func TestSetupCreatesAConfig(t *testing.T) {
@@ -428,6 +429,7 @@ func TestSetupCreatesAConfig(t *testing.T) {
 	m.creates(t, "someone/kit-config")
 	s := m.setup(Answers{})
 	s.Getenv = func(name string) string { return map[string]string{"TERM_PROGRAM": "ghostty"}[name] }
+	s.Homebrew = config.HomebrewPaths
 	p, _ := engine.New(s.Steps()...)
 	report, _ := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1, Only: []string{MacStep}})
 	want := []string{
@@ -451,6 +453,10 @@ func TestSetupCreatesAConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(m.dirs.Config, config.DeclFile("macbook-pro"))); err != nil {
 		t.Errorf("the Mac's declarations file: %v", err)
+	}
+	const homebrew = "[paths]\n/opt/homebrew/bin   # Homebrew\n/opt/homebrew/sbin   # Homebrew\n"
+	if got, err := os.ReadFile(filepath.Join(m.dirs.Config, config.DeclFile(config.Shared))); err != nil || string(got) != homebrew {
+		t.Errorf("shared/declarations = %q, %v; want %q", got, err, homebrew)
 	}
 	if e.Machine != "macbook-pro" {
 		t.Errorf("this Mac is named %q, want macbook-pro", e.Machine)
@@ -1179,5 +1185,17 @@ func TestToInstallSaysWhatItCouldntTell(t *testing.T) {
 		case !terminal && (res.State != check.Failed || !strings.Contains(res.Reason, "--apply installs what kit-config declares that this Mac hasn't with the rest, or --no-apply stops to look first; "+couldnt+", for Homebrew formulae (Error: something broke")):
 			t.Errorf("without a terminal, stood %s %q; want its flags named, saying it couldn't tell", res.State, res.Reason)
 		}
+	}
+}
+
+// The folders the snapshot declares on the PATH count as its parts do, on
+// the screen and in --json.
+func TestTheSnapshotCountsThePath(t *testing.T) {
+	res := counted([]snapshot.Part{
+		{Kind: config.PathsKind, Label: snapshot.PathsLabel, Lines: []config.Entry{{Name: "/opt/homebrew/bin"}, {Name: "~/.local/share/mise/shims"}}},
+		{Kind: "npm", Label: "npm packages", Lines: []config.Entry{{Name: "typescript"}}},
+	})
+	if want := "3: 2 PATH directories · 1 npm packages"; res.Summary != want || res.Counts[config.PathsKind] != 2 {
+		t.Errorf("counted = %q, %v; want %q, 2 paths", res.Summary, res.Counts, want)
 	}
 }

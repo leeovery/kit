@@ -36,8 +36,18 @@ import (
 type Mac struct {
 	Name   string
 	Config *config.Config
-	Run    runner.Runner
-	Home   string
+	// Run runs programs on kit's PATH, as kit-config declares it.
+	Run  runner.Runner
+	Home string
+	// Beyond are folders off kit's PATH a kind's program Run doesn't find
+	// is looked for in, in order: the PATH kit setup was run with, then
+	// Homebrew's and the system's. RunOn is Run with folders last in the
+	// Mac's [paths], as kit's later runs have them once they're declared;
+	// without it, nothing is looked for there.
+	Beyond []string
+	RunOn  func(dirs []string) runner.Runner
+	// Temp are the temporary folders, never declared on the PATH.
+	Temp []string
 	// ConfigHome is XDG's config folder, "" for the default; Dirs are kit's
 	// own folders.
 	ConfigHome string
@@ -153,19 +163,21 @@ const (
 var settingsKinds = []string{gitconfig.Descriptor.Name, defaults.Descriptor.Name}
 
 // Find looks at the Mac as it stands: what each part would declare, and
-// what the questions offer. It declares nothing: Write does. A part that
-// couldn't be looked at says why, as the apps installed by hand do, and
-// the rest are found; it fails only when the home folder, or what's kit's
-// there, can't be read.
-func Find(ctx context.Context, m Mac) (Snapshot, error) {
+// what the questions offer; and returns m as it looked, its Run on the PATH
+// the folders it declares make (along). It declares nothing: Write does. A
+// part that couldn't be looked at says why, as the apps installed by hand
+// do, and the rest are found; it fails only when the home folder, or what's
+// kit's there, can't be read.
+func Find(ctx context.Context, m Mac) (Snapshot, Mac, error) {
+	m, paths := m.along()
 	deps := &kind.Deps{Run: m.Run, Home: m.Home, ConfigHome: m.ConfigHome, StateDir: m.Dirs.State, AppDirs: m.AppDirs}
 	owned, err := m.owned(ctx, deps)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, m, err
 	}
 	folders, err := m.folders(owned)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, m, err
 	}
 	// The folders are sized while the rest is found, for no longer than
 	// SizeFor.
@@ -173,7 +185,11 @@ func Find(ctx context.Context, m Mac) (Snapshot, error) {
 	defer sized()
 	sizes := make(chan []Folder, 1)
 	go func() { sizes <- sizeAll(sizing, m.Home, folders, os.ReadDir) }()
-	parts := m.kindParts(ctx, deps, featuresLabel, backupsLabel)
+	var parts []Part
+	if paths != nil {
+		parts = append(parts, *paths)
+	}
+	parts = append(parts, m.kindParts(ctx, deps, featuresLabel, backupsLabel)...)
 	parts = append(parts, m.lookAt(featuresLabel, func() Part { return m.featuresPart(ctx) }), m.lookAt(backupsLabel, func() Part { return m.backupsPart(ctx) }))
 	s := Snapshot{Parts: parts, Files: m.files(owned)}
 	s.ByHand, s.ByHandErr = m.byHand(ctx, deps)
@@ -184,7 +200,7 @@ func Find(ctx context.Context, m Mac) (Snapshot, error) {
 		s.Folders = <-sizes
 		m.look(Look{Label: FoldersLabel, Looked: true, Found: len(s.Folders)})
 	}
-	return s, nil
+	return s, m, nil
 }
 
 // kindParts are the parts of the kinds a snapshot declares whose program is
@@ -195,7 +211,7 @@ func (m Mac) kindParts(ctx context.Context, deps *kind.Deps, then ...string) []P
 	var parts []Part
 	var ks []kind.Kind
 	for _, d := range kinds.All {
-		if d.Group != kind.Packages && !slices.Contains(settingsKinds, d.Name) {
+		if !snapshotted(d) {
 			continue
 		}
 		if k := d.New(deps); runner.Has(m.Run, k.Program()) {

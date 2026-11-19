@@ -25,6 +25,16 @@ const githubToken = "HOMEBREW_GITHUB_API_TOKEN"
 // releases' storage among them: the token opens these alone.
 var githubHosts = []string{"github.com", "api.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"}
 
+// ghcr is GitHub's packages' registry, where taps' bottles may be: it
+// answers no request without a bearer token, 401, public packages
+// included. ghcrAnonymous is the one Homebrew sends unless it's given its
+// own, opening public packages alone; curl sends it to ghcr.io alone, not
+// on to where it redirects.
+const (
+	ghcr          = "ghcr.io"
+	ghcrAnonymous = "Authorization: Bearer QQ=="
+)
+
 // NeedsSecret is the GitHub token, for a formula of a tap other than
 // Homebrew's own whose download is private (needsToken).
 func (f formulae) NeedsSecret(ctx context.Context, name string) (kind.Need, error) {
@@ -154,11 +164,17 @@ func (h *Homebrew) downloads(ctx context.Context, which, name string) (full stri
 // private reports whether download, asked for without a token, answers as
 // a private one does: 401 or 404 from GitHub (githubHosts), once redirects
 // are followed. One request, for its first byte alone, ~/.curlrc never
-// read, as it could add a token. Any 2xx is open, cut off at the time
-// limit or not. Anything else is an error, saying how it answered or why
-// it didn't, as without the network: a token would open none of it.
+// read, as it could add a token; GitHub's packages (ghcr.io) asked as
+// Homebrew asks them, anonymously (ghcrAnonymous). Any 2xx is open, cut
+// off at the time limit or not. Anything else is an error, saying how it
+// answered or why it didn't, as without the network: a token would open
+// none of it.
 func (h *Homebrew) private(ctx context.Context, download string) (bool, error) {
-	res, err := h.run.Run(ctx, runner.Command{Name: "curl", Args: []string{"-q", "-sS", "-o", "/dev/null", "-w", "%{http_code} %{url_effective}", "-L", "-r", "0-0", "--max-time", "10", download}})
+	args := []string{"-q", "-sS", "-o", "/dev/null", "-w", "%{http_code} %{url_effective}", "-L", "-r", "0-0", "--max-time", "10"}
+	if hostOf(download) == ghcr {
+		args = append(args, "-H", ghcrAnonymous)
+	}
+	res, err := h.run.Run(ctx, runner.Command{Name: "curl", Args: append(args, download)})
 	said, effective, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), " ")
 	code, _ := strconv.Atoi(said)
 	host := hostOf(effective)

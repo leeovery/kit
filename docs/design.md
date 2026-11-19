@@ -645,10 +645,17 @@ empty, one created new and private. This Mac: `--mac`, suggested from its model,
 it (`MacBook Pro`, `macbook-pro`), named as `kit machine add` names one, recorded before it's
 written anywhere; a config starting on this Mac has first files kit.toml (`format`,
 `minimum_kit` this kit when it's a release, `primary` this Mac, `terminal` Ghostty only when
-setup runs in it, the Mac's table, its model the `description`) and the Mac's folder, its
-declarations file empty; joining, one of kit.toml's Macs or a new one, added as `kit machine
+setup runs in it, the Mac's table, its model the `description`), the Mac's folder, its
+declarations file empty, and the shared declarations, Homebrew's folders in `[paths]` (each
+`# Homebrew`, as `kit path add --shared` writes them), as kit's own PATH is `[paths]` then the
+system's and kit's runs would find no brew without them; joining, one of kit.toml's Macs or a new one, added as `kit machine
 add` adds it, `--from` a copy of another. Then the snapshot (`snapshot.Find`, on kit-config's
-PATH and Homebrew's), a row its counts by part, and its questions, each with its answer
+PATH: a kind's program that isn't there is looked for along the PATH setup was run with, then
+Homebrew's and the system's folders, and the first folder holding it, never kit's own, a
+temporary or a relative one, nor one named for a version, as 22.11.0 (refused, saying so, when
+it alone holds the program), is declared last in the Mac's `[paths]` as `kit path add` declares
+it, its own part; the snapshot reads with kit's PATH as its later runs will have it, those folders
+before the system's), a row its counts by part, and its questions, each with its answer
 suggested, its flag, and its answer kept in the record: the folders a new Mac brings back
 (`--restore`, as `kit restore add` declares them), apps' settings saved nightly (`--prefs`:
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
@@ -668,7 +675,8 @@ repository as one, its branch made by the push; what's waiting that can't be tol
 taken for nothing. Till kit-config's own branch is on the remote, the prefs store pushes
 nothing, as GitHub makes a new repository's first branch pushed the one a new Mac's boot
 clones. It says what's refused and what couldn't be checked, each with why, the apps installed by hand
-(the person's to install through Homebrew or the App Store should kit set the Mac up again),
+(never Apple's, the App Store's, a cask's or those Chrome makes for websites, `com.google.Chrome.app.`;
+the person's to install through Homebrew or the App Store should kit set the Mac up again),
 and that secrets go in a store with `kit secret add`; then `kit apply` runs in the same
 process, with its own screen at a terminal. Without a terminal it asks nothing: each question
 its flag doesn't answer fails its step, naming the flag and what it chooses from, the others
@@ -1284,7 +1292,8 @@ there yet, starts kit-config on this Mac: the boot asks the terminal the Mac use
 it, kit-config's row then naming `kit terminal <name>`), plans the boot order from it, and names
 the Mac without a list; the kit-config step creates the repository through GitHub's CLI unless it's there,
 clones it, sets it on main as setup does (`boot.OnMain`), writes `config.Start`'s first files
-(this Mac the primary, that terminal, the Mac's folder with an empty declarations file),
+(this Mac the primary, that terminal, the Mac's folder with an empty declarations file, the shared
+declarations with Homebrew's folders in `[paths]`),
 commits them, as the GitHub account (its name, its private address) when git has no author
 yet, and pushes once every push URL is proven private (`boot.ProvenPrivate`, shared with
 setup), its branch made by the push (`BranchMayBeMissing`). The record (`fresh`) keeps the

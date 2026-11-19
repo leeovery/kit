@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/kit/internal/config"
 )
 
 func TestSearchPath(t *testing.T) {
@@ -18,6 +20,17 @@ func TestSearchPath(t *testing.T) {
 	}
 	if got, err := cfg.SearchPath("/home/someone", "studio"); err != nil || len(got) != 6 {
 		t.Errorf("SearchPath(studio) = %q, %v; want the shared paths and the system's", got, err)
+	}
+}
+
+// Folders added after the shell's PATH, as setup's snapshot adds those it
+// declares last in the Mac's [paths], come before the system's, as kit's
+// later runs have them: a program there shadows the system's.
+func TestSearchPathOfFoldersAdded(t *testing.T) {
+	got := config.SearchPathOf([]string{"/opt/homebrew/bin", "node_modules/.bin", "/home/someone/.local/bin", "/usr/bin"})
+	want := []string{"/opt/homebrew/bin", "/home/someone/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+	if !slices.Equal(got, want) {
+		t.Errorf("SearchPathOf() = %q, want %q", got, want)
 	}
 }
 

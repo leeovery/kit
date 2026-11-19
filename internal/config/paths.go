@@ -22,13 +22,19 @@ func (c *Config) SearchPath(home, mac string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return SearchPathOf(dirs), nil
+}
+
+// SearchPathOf is kit's own PATH from shellPath, as ShellPath gives it:
+// its absolute directories, then the system's, each once.
+func SearchPathOf(shellPath []string) []string {
 	var out []string
-	for _, dir := range slices.Concat(dirs, systemPath) {
+	for _, dir := range slices.Concat(shellPath, systemPath) {
 		if filepath.IsAbs(dir) && !slices.Contains(out, dir) {
 			out = append(out, dir)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // ShellPath is the PATH the shell puts ahead of the one it inherits, on the
