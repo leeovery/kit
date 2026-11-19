@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-19
+
+Changes from other Macs reach each Mac within the hour, because runs now bring in kit-config's remote commits first.
+
+✨ Added
+- `kit apply`, `kit status`, `kit reconcile` and the hourly nightly run first bring in kit-config's remote commits — what another Mac pushed is applied within the hour, and uncommitted edits are left as they are.
+- A run that can't read the config because another Mac pushed a fix now brings in the remote's commits and reads it again, instead of failing.
+- `kit status` reports how many commits were brought in, and says why none could be, quiet on its first day.
+
+🔧 Changed
+- Two kits at once no longer interleave commits, pulls and pushes in the config repository — one waits its turn for the other.
+- Pushing and pulling now refuse when the remote's history was rewritten and dropped a commit this Mac has — bring it in by hand.
+- Pulling now refuses when the remote's commits would overwrite a file that git ignores on this Mac — move it aside first.
+- A remote that doesn't answer in time now reports a timeout rather than a generic failure.
+
 ## [0.2.0] - 2026-11-19
 
 Set up a Mac you already use with one command, `kit setup`, which makes or joins your kit-config and declares everything on the Mac as it is.
