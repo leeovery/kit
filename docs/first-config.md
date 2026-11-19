@@ -7,18 +7,18 @@ and runs `kit apply`. You'd run it on a Mac that's already set up, before kit lo
 ## Try it
 
 ```bash
-# Install kit through Homebrew
+# On a Mac with Homebrew, install kit
 brew install leeovery/tools/kit
 # Bring this Mac onto kit
 kit setup
 ```
 
-`kit setup` signs you in to GitHub and asks a few questions. It ends on what it declared, then
-hands over to `kit apply`:
+`kit setup` signs you in to GitHub and asks a few questions. It ends on what it declared:
 
 <img src="../art/first-config-done.webp" alt="kit setup's end on a Mac in use: GitHub, kit-config and this Mac done, 370 things declared by part, three apps installed by hand, a note on secrets, and kit apply carrying on" width="573">
 
-On a blank Mac, use the one-line install instead: see [A new Mac from one line](new-mac.md).
+On a blank Mac, use the one-line install instead: see [A new Mac from one line](new-mac.md). A
+Mac with a kit-config already is refused, because kit looks after it.
 
 ## What it asks
 
@@ -26,12 +26,12 @@ Each question comes with a suggested answer, so enter takes it. Each has a flag 
 
 | Question | Suggested | Flags |
 |---|---|---|
-| kit-config | Create it, or join yours | `--create`, `--join` |
+| kit-config | Join yours, else make `kit-config` | `--create`, `--join` |
 | This Mac | A name from its model | `--mac` |
 | Your data | Your own folders | `--restore`, `--no-restore` |
 | Apps' settings | Save every night | `--prefs`, `--no-prefs` |
-| Linked files | Your shell's files | `--link`, `--no-link` |
-| To install, joining | Install with the rest | `--apply`, `--no-apply` |
+| Linked files | Every one found | `--link`, `--no-link` |
+| What to install (joining) | Install with the rest | `--apply`, `--no-apply` |
 
 - **Your data** lists the folders in your home folder, with their sizes. A new Mac copies the
   ones you keep from your backups. Downloads, Movies, Music and Public start unticked.
@@ -40,38 +40,28 @@ Each question comes with a suggested answer, so enter takes it. Each has a flag 
 - **Linked files** lists files such as `~/.zshrc` and `~/.ssh/config`. Each one you keep moves
   into kit-config and is linked back.
 
-## What it declares
+## What happens
 
-The snapshot declares the Mac as it stands, in this Mac's own declarations file:
+kit takes a snapshot of the Mac as it stands, and declares it in this Mac's own declarations
+file:
 
-- every package of each kind whose program is on the Mac, such as Homebrew casks;
-- the macOS settings set now, leaving out the state macOS keeps for itself;
-- git's global settings;
-- the features on, such as Touch ID for sudo;
-- the backup tools set up, Time Machine or Arq.
-
-Your answers are declared beside the snapshot. kit commits all of it as one, and pushes it.
-
-## What it leaves out
-
-- **Apps installed by hand** are listed, never managed. If kit sets this Mac up again, you
+- **Everything installed and not yet declared,** of each kind whose program is here, such as
+  Homebrew casks, login items and MCP servers.
+- **The macOS settings set now,** leaving out the state macOS keeps for itself, and git's global
+  settings.
+- **The features on and the backup tools set up,** such as Touch ID for sudo and Time Machine.
+- **Your answers go beside it.** kit commits all of it as one, and pushes it.
+- **Apps installed by hand are listed, never managed.** If kit sets this Mac up again, you
   install them yourself.
-- **Secrets** aren't looked for. kit keeps a secret in a store, never in kit-config: declare
-  each one with `kit secret add`. See [Secrets from 1Password](secrets.md).
-- **A package from a private tap** needs its token declared as a secret first. Until then, kit
-  refuses its line and says why.
-
-## Running it again
-
-If setup stops part-way, run `kit setup` again. It carries on where it stopped, and nothing is
-made twice. Bare `kit` at a terminal offers the same. Before the commit, a new flag replaces the
-answer you gave. Once the commit is pushed, setup is done.
+- **Secrets aren't looked for.** kit keeps a secret in a store, never in kit-config: declare each
+  one with `kit secret add`. See [Secrets from 1Password](secrets.md).
 
 ## A second Mac joins
 
 On your next Mac, `kit setup` finds kit-config on your account and offers to join it. Then
-pick which Mac this is, or a new one. A new Mac starts empty, or as a copy of another with
-`--from`.
+pick which Mac this is, or a new one. A new Mac starts from what every Mac shares, or as a copy
+of another with `--from`. Either way, the snapshot then declares what this Mac has. kit-config
+must be private: `--join` refuses a repository that isn't.
 
 ```bash
 # Join kit-config as a new Mac named studio
@@ -83,10 +73,11 @@ or stop to look first with `kit status`.
 
 ## Good to know
 
-- **kit-config must be private.** `--join` refuses a repository that isn't.
-- **A Mac with a kit-config already** is refused: kit looks after it already.
-- **Without a terminal, kit asks nothing.** A question its flag doesn't answer stops setup,
-  naming the flag, and exits 2.
+- **Run it again if it stops.** `kit setup` carries on where it stopped, and nothing is made
+  twice. Bare `kit` at a terminal offers the same. Once the commit is pushed, setup is done.
+- **A package with a private download is left out.** Setup refuses its line without the token,
+  and won't come back to it. Declare the token with `kit secret add`, then add the package with
+  `kit brew add` or `kit cask add`.
 - **Never delete `~/.config/kit` part-way.** Setup moves files into it and links them back.
 
 ## Reference
@@ -103,7 +94,8 @@ or stop to look first with `kit status`.
 | `--no-apply` | Stop after the commit, to look first |
 
 `--restore` and `--link` take one path each time. `--restore`, `--prefs` and `--link` each
-have a `--no-` flag that answers no. `kit setup --help` lists every flag.
+have a `--no-` flag that answers no. Without a terminal, kit asks nothing: a question its flag
+doesn't answer stops setup, naming the flag.
 
 ## Related
 

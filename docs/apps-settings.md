@@ -15,15 +15,17 @@ kit prefs start-fresh
 kit prefs capture
 ```
 
-`kit setup` asks the same question on a Mac you already use, and does the first two for you.
-See [Your first kit-config](first-config.md).
+On a Mac you already use, `kit setup` asks whether to save them; a yes runs the first two
+commands for you. See [Your first kit-config](first-config.md).
 
 ## What happens
 
-- **Every app is covered,** but Apple's apps and macOS itself. kit reads each preferences
-  domain through `defaults export`.
+- **Every app is covered,** except Apple's apps and macOS itself. kit reads each preferences
+  domain through `defaults export`. It also saves the files `[prefs files]` names.
 - **The hourly run saves them once a night.** Each save that changed anything is a commit.
-- **A new Mac restores them** once its casks and App Store apps are installed.
+- **A new Mac restores them** once its casks and App Store apps are installed, if prefs is on
+  for it. It is if the new Mac takes the old one's name, or starts as a copy of it. Otherwise,
+  run `kit feature on prefs` there, or `kit feature on prefs --shared` for every Mac.
 - **A running app waits.** kit never quits an app with a window: the settings come back
   once you quit it.
 - **An app not installed yet is held.** The settings come back when kit installs it.
@@ -55,20 +57,20 @@ kit prefs restore --at "3 days ago"
 kit prefs restore --from laptop
 ```
 
-`--from` leaves out the domains `[prefs machine-bound]` lists, which stay with the
-hardware they came from. `kit prefs history` lists the saves that changed anything, newest first.
+A restore onto other hardware leaves out the domains `[prefs machine-bound]` lists. That holds
+with `--from`, and on a new Mac that took the old one's name. `kit prefs history` lists the
+saves that changed anything, newest first.
 
-## Starting afresh
-
-`kit prefs start-fresh` switches saving on without restoring anything. The next save keeps
-the settings this Mac has now. On a new Mac, `f` at the to-do does the same.
-
-`kit prefs pending --clear` drops what's held, so the next save keeps what's on the Mac.
+To start afresh instead, run `kit prefs start-fresh`. It switches saving on without restoring
+anything, and the next save keeps the settings this Mac has now. `kit prefs pending --clear`
+drops what's held, so the next save keeps what's on the Mac.
 
 ## Good to know
 
-- **kit needs Full Disk Access to save.** Without it, kit reads a sandboxed app as empty.
-  `kit status` checks it. See [Running by itself](running-by-itself.md).
+- **kit needs Full Disk Access to save or restore.** Without it, kit refuses, because macOS
+  would hand over a sandboxed app's settings as empty. kit.app needs it. So does your
+  terminal, for `kit prefs` run there. `kit status` checks it. See
+  [Running by itself](running-by-itself.md).
 - **Leave apps out of `kit defaults`.** kit saves their settings already.
 - **Four sections tune it,** listed under Reference. They have no `add` command: edit them
   by hand in a declarations file, then commit.
@@ -91,7 +93,7 @@ the settings this Mac has now. On a new Mac, `f` at the to-do does the same.
 | `[prefs files]` | Settings files saved beside the domains |
 | `[prefs deny]` | Domains left out |
 | `[prefs apps]` | Which app a domain belongs to |
-| `[prefs machine-bound]` | Domains never copied to another Mac |
+| `[prefs machine-bound]` | Domains kept to the hardware they came from |
 
 ## Related
 
