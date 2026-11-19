@@ -6,10 +6,11 @@ rest, then carries on in your own terminal. You'd use it on every Mac you set up
 
 The line reads the repository named `kit-config` in your GitHub account. If no repository has
 that name, kit asks: pick one of your private repositories, type its name, or create one. A new
-one holds only this Mac and its terminal, so see [Your first kit-config](first-config.md) for the
-rest. To copy from one of your Macs, ready it first.
-Then make your user in macOS's own setup with the same user name as that Mac.
-[Your data on a new Mac](your-data.md) says how.
+one holds only this Mac and its terminal. With a Mac in use, start kit-config there
+instead: see [Your first kit-config](first-config.md).
+
+To copy from one of your Macs, ready it first. Then make your user in macOS's own setup with the
+same user name as that Mac. [Your data on a new Mac](your-data.md) says how.
 
 ## Try it
 
@@ -19,19 +20,18 @@ Then make your user in macOS's own setup with the same user name as that Mac.
 https://raw.githubusercontent.com/leeovery/kit/main/install.sh)"
 ```
 
-The line downloads the newest release of kit, checks it against its checksum, and runs
-`kit bootstrap`. A splash plays while kit tests the Mac, then enter starts the boot. The end of
-the boot looks like this:
+The line downloads the newest kit, checks its checksum, and runs `kit bootstrap`. A splash
+plays while kit tests the Mac, then enter starts the boot, which ends like this:
 
 <img src="../art/new-mac-boot.webp" alt="The boot in Terminal near its end: the self-test, signed in to GitHub, the boot order done, and Ghostty opening" width="449">
 
 ## The boot, step by step
 
 1. **GitHub.** Press enter for a QR code to scan with your phone, or `s` for the browser here.
-   kit reads kit-config, which must be private. If yours has another name, you pick, type or
-   create one here. A new one also asks which terminal this Mac uses.
-2. **This Mac.** Pick one of the Macs kit-config names, or `new`. A new Mac gets a name, then
-   starts fresh or as a copy of one of your Macs.
+   kit reads kit-config, which must be private. A new one also asks which terminal this Mac
+   uses.
+2. **This Mac.** Pick one of the Macs kit-config names, or `new` and a name: see the table
+   below.
 3. **Password.** Typed once, for everything the boot installs.
 4. **Homebrew,** with Apple's command line tools.
 5. **Apps.** The terminal `kit.toml` names, such as Ghostty: `kit terminal` sets it.
@@ -42,10 +42,10 @@ the boot looks like this:
 
 ## What happens
 
-- **`kit apply` runs on a screen of its own.** Rows show each part of the Mac, such as
-  Homebrew casks, with what each waits for.
+- **`kit apply` runs on a screen of its own.** The rows show each part of the Mac, and
+  what each waits for.
 - **What waits for you comes up as a card,** such as signing in to 1Password, or a step by
-  hand. kit carries on by itself once it's done.
+  hand. kit carries on once it's done.
 - **A to-do list comes at the end:** steps by hand that nothing waits for, and set-up only you
   can do, such as a backup disk.
 - **The window becomes a fresh shell** once `kit apply` ends.
@@ -63,12 +63,12 @@ the boot looks like this:
 | Any other Mac kit-config names | Its own | Its own backups, or none |
 | `new`, fresh | Only `shared` | None |
 
-`kit machine add studio --from laptop` adds `studio`, started from `laptop`. Pick `studio` at
-the boot, and its first `kit apply` copies your data from `laptop`.
+`kit machine add studio --from laptop` adds `studio`. Pick it at the boot, and its first
+`kit apply` copies your data from `laptop`.
 
 ## What waits for what
 
-kit installs nothing before what it needs is in place:
+Each kind waits for what it needs:
 
 - npm packages wait for npm, from a formula;
 - GitHub CLI extensions wait for `gh`, App Store apps for `mas`;
@@ -78,13 +78,12 @@ kit installs nothing before what it needs is in place:
 - MCP servers, skills and steps declared `--after restore` wait for the data restore.
 
 App Store apps also need you signed in to the App Store, or their install fails. Declare that
-sign-in as a step by hand, and give the `[app store apps]` header `--after` its name. See
-[Steps of your own, and steps by hand](steps.md).
+sign-in as a step by hand, and give the `[app store apps]` header `--after` its name.
 
 ## Good to know
 
-- **A failure is no dead end.** Paste the install line into Terminal again. The checks find
-  the steps already done, and the boot picks up where it stopped.
+- **A failure is no dead end.** Paste the install line again, and the boot skips the steps
+  already done.
 - **After the boot, run `kit apply` again.** It installs what failed or waited, and never
   removes anything.
 

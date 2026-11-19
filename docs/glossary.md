@@ -109,6 +109,19 @@ kit-config, which the first save makes.
 that are due, then every check. It tells no one what it finds: `kit status` and `kit log` show
 it. `kit apply` installs it.
 
+## A Mac you already use
+
+**Snapshot.** What `kit setup` declares of a Mac in use, in that Mac's own declarations file. It
+holds the Mac as it stands:
+
+- everything installed and not yet declared, of each kind whose program is there;
+- the macOS settings set now, and git's settings;
+- the features on, and the backup tools set up.
+
+**Installed by hand.** An app that no kind installed: not from Homebrew or the App Store, and not
+Apple's. `kit setup` lists these apps, and kit never manages them. A package you install
+yourself through Homebrew isn't one: it comes up as drift.
+
 ## A new Mac
 
 **The boot.** The one line you paste into Terminal on a new Mac. It runs `kit bootstrap`, which

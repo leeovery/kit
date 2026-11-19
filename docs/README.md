@@ -7,7 +7,7 @@ question. Start with the first group, then go to the page for the job in front o
 
 - [A new Mac from one line](new-mac.md): what the boot does, and what waits for what.
 - [Install kit](../README.md): the install line, and a quick start.
-- [Your first kit-config](first-config.md) (coming): how to start a kit-config of your own.
+- [Your first kit-config](first-config.md): bring the Mac you use onto kit with `kit setup`.
 - [Glossary](glossary.md): the words kit uses, each defined once.
 
 ## What kit does for you
@@ -16,7 +16,7 @@ question. Start with the first group, then go to the page for the job in front o
 - [Agents](agents.md): let an agent change your set-up through kit.
 - [Drift](drift.md): keep or undo what changed by hand.
 - [Settings](settings.md): macOS, git and power settings, and features.
-- [Apps' settings](apps-settings.md) (coming): the settings your apps keep, saved and restored.
+- [Apps' settings](apps-settings.md): the settings your apps keep, saved nightly and restored.
 - [Secrets](secrets.md): secrets from 1Password, never on a command line.
 - [Linked files](linked-files.md): dotfiles kept in kit-config, linked into your home folder.
 - [Your data](your-data.md): the code and history a new Mac copies across.

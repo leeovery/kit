@@ -19,7 +19,7 @@ At a terminal, `kit` on its own opens a menu of what to run next.
 | `kit machine` | Show this Mac's name, or set it | [A new Mac](new-mac.md) |
 | `kit terminal` | The terminal a new Mac's boot hands over to | [A new Mac](new-mac.md) |
 | `kit bootstrap` | Set up a new Mac: the install line runs it | [A new Mac](new-mac.md) |
-| `kit setup` | Set up a Mac you already use | [Agents](agents.md) |
+| `kit setup` | Set up a Mac you already use | [Your first kit-config](first-config.md) |
 | `kit agent` | Instructions for an agent working through kit | [Agents](agents.md) |
 
 `kit setup` creates kit-config (`--create`) or joins yours (`--join`), declares the Mac as it is, then runs `kit apply`.
@@ -70,7 +70,7 @@ then declares it.
 | `kit file` | Files linked into your home folder | [Linked files](linked-files.md) |
 | `kit path` | Directories on the PATH | [Linked files](linked-files.md) |
 | `kit secret` | Secrets from 1Password | [Secrets](secrets.md) |
-| `kit prefs` | Apps' settings, saved and restored | [Apps' settings](apps-settings.md) (coming) |
+| `kit prefs` | Apps' settings, saved and restored | [Apps' settings](apps-settings.md) |
 | `kit feature` | Switch a feature on or off | [Settings](settings.md) |
 | `kit backup` | Backup tools this Mac uses | [Backups](backups.md) |
 | `kit restore` | Data a new Mac carries across | [Your data](your-data.md) |

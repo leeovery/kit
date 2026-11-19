@@ -66,7 +66,7 @@ A few kinds take more than the name they keep:
 - **A new Mac installs it all,** once what each kind needs is in place, such as npm for npm
   packages. [A new Mac from one line](new-mac.md) says what waits for what.
 
-## Installs by hand show up
+## Your own installs show up
 
 If you install a package with brew or npm yourself, kit-config doesn't have it. That's drift.
 After its first day, `kit status` lists it under CONFIG:
