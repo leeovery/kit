@@ -645,8 +645,10 @@ empty, one created new and private. This Mac: `--mac`, suggested from its model,
 it (`MacBook Pro`, `macbook-pro`), named as `kit machine add` names one, recorded before it's
 written anywhere; a config starting on this Mac has first files kit.toml (`format`,
 `minimum_kit` this kit when it's a release, `primary` this Mac, `terminal` Ghostty only when
-setup runs in it, the Mac's table, its model the `description`) and the Mac's folder, its
-declarations file empty; joining, one of kit.toml's Macs or a new one, added as `kit machine
+setup runs in it, the Mac's table, its model the `description`), the Mac's folder, its
+declarations file empty, and the shared declarations, Homebrew's folders in `[paths]` (each
+`# Homebrew`, as `kit path add --shared` writes them), as kit's own PATH is `[paths]` then the
+system's and kit's runs would find no brew without them; joining, one of kit.toml's Macs or a new one, added as `kit machine
 add` adds it, `--from` a copy of another. Then the snapshot (`snapshot.Find`, on kit-config's
 PATH: a kind's program that isn't there is looked for along Homebrew's and the system's folders,
 then the PATH setup was run with, and the first folder holding it, never kit's own, a temporary
@@ -1288,7 +1290,8 @@ there yet, starts kit-config on this Mac: the boot asks the terminal the Mac use
 it, kit-config's row then naming `kit terminal <name>`), plans the boot order from it, and names
 the Mac without a list; the kit-config step creates the repository through GitHub's CLI unless it's there,
 clones it, sets it on main as setup does (`boot.OnMain`), writes `config.Start`'s first files
-(this Mac the primary, that terminal, the Mac's folder with an empty declarations file),
+(this Mac the primary, that terminal, the Mac's folder with an empty declarations file, the shared
+declarations with Homebrew's folders in `[paths]`),
 commits them, as the GitHub account (its name, its private address) when git has no author
 yet, and pushes once every push URL is proven private (`boot.ProvenPrivate`, shared with
 setup), its branch made by the push (`BranchMayBeMissing`). The record (`fresh`) keeps the

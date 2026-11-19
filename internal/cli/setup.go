@@ -160,7 +160,7 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 	run := a.commands(bootPath, childEnv(a.Getenv, home, bootPath), sink, noAsks)
 	s = &setup.Setup{
 		Run: run, Sink: sink, GitHub: a.GitHub(), Now: a.Now,
-		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Given: given,
+		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Homebrew: a.Homebrew, Given: given,
 		Snapshot: func(ctx context.Context, cfg *config.Config, mac string) (snapshot.Snapshot, snapshot.Mac, error) {
 			path, err := cfg.SearchPath(home, mac)
 			if err != nil {
@@ -311,8 +311,11 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 	}
 	repo := r.repo
 	repo.BranchMayBeMissing = d.Empty
-	files := []string{config.File, r.machine}
-	res := syncing{repo: repo, files: files, what: config.File + " and " + r.machine + "/"}.commit(ctx, fmt.Sprintf("kit setup (%s): this Mac as it is", r.machine))
+	files, what := []string{config.File, r.machine}, config.File+" and "+r.machine+"/"
+	if d.Empty {
+		files, what = []string{config.File, config.Shared, r.machine}, config.File+", "+config.Shared+"/ and "+r.machine+"/"
+	}
+	res := syncing{repo: repo, files: files, what: what}.commit(ctx, fmt.Sprintf("kit setup (%s): this Mac as it is", r.machine))
 	if res.State != check.Failed {
 		res.Summary = fmt.Sprintf("%d declared · %s", total, res.Summary)
 	}

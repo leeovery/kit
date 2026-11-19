@@ -148,7 +148,7 @@ func (s *Setup) known(rec record) error {
 	if _, err := os.Stat(filepath.Join(s.Dirs.Config, config.File)); err == nil {
 		return nil
 	}
-	f := config.First{Mac: rec.Mac, Description: s.Model, Kit: s.Version}
+	f := config.First{Mac: rec.Mac, Description: s.Model, Kit: s.Version, Homebrew: s.Homebrew}
 	if t, ok := apps.Running(s.Getenv); ok && t.Name == "ghostty" {
 		f.Terminal = t.Name
 	}

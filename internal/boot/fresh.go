@@ -201,7 +201,7 @@ func (b *Boot) pushFirst(ctx context.Context) error {
 		}
 	}
 	if _, err := os.Lstat(filepath.Join(b.Config, config.File)); errors.Is(err, fs.ErrNotExist) {
-		if err := config.Start(b.Config, config.First{Mac: mac, Kit: b.Version, Terminal: st.Fresh.Terminal}); err != nil {
+		if err := config.Start(b.Config, config.First{Mac: mac, Kit: b.Version, Terminal: st.Fresh.Terminal, Homebrew: b.Homebrew}); err != nil {
 			return err
 		}
 	}
@@ -213,7 +213,7 @@ func (b *Boot) pushFirst(ctx context.Context) error {
 	if repo.Env, err = b.author(ctx, repo); err != nil {
 		return err
 	}
-	if _, err := repo.Commit(ctx, fmt.Sprintf("kit bootstrap (%s): kit-config starts on this Mac", mac), config.File, mac); err != nil {
+	if _, err := repo.Commit(ctx, fmt.Sprintf("kit bootstrap (%s): kit-config starts on this Mac", mac), config.File, config.Shared, mac); err != nil {
 		return fmt.Errorf("commit kit-config's first files: %w", err)
 	}
 	if err := repo.Push(ctx); err != nil {
