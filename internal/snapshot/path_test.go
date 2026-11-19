@@ -41,9 +41,10 @@ func alongPath(m snapshot.Mac, fake *runnertest.Fake, programs map[string][]stri
 // looked at with its folder last on kit's PATH, and the folder declared in
 // the Mac's [paths], as kit path add declares it, ~ for the home: each
 // folder once, only those a program needed, in the order looked along, so
-// Homebrew's or the system's comes before the shell's.
+// the shell's comes before Homebrew's or the system's. A folder named for
+// a version is passed over for one further along.
 func TestAProgramOffKitsPathDeclaresItsFolder(t *testing.T) {
-	const homebrew, shims = "/opt/homebrew/bin", "~/.local/share/mise/shims"
+	const homebrew, shims, local = "/opt/homebrew/bin", "~/.local/share/mise/shims", "/usr/local/bin"
 	tests := []struct {
 		name     string
 		programs map[string][]string
@@ -51,9 +52,13 @@ func TestAProgramOffKitsPathDeclaresItsFolder(t *testing.T) {
 		want     []string
 	}{
 		{name: "on the shell's PATH alone", programs: map[string][]string{"npm": {shims}},
-			beyond: []string{homebrew, shims, "~/.npm-global/bin"}, want: []string{shims}},
-		{name: "Homebrew's first", programs: map[string][]string{"npm": {shims, homebrew}},
-			beyond: []string{homebrew, shims}, want: []string{homebrew}},
+			beyond: []string{shims, "~/.npm-global/bin", homebrew}, want: []string{shims}},
+		{name: "the shell's first", programs: map[string][]string{"npm": {shims, local}},
+			beyond: []string{shims, homebrew, local}, want: []string{shims}},
+		{name: "past a folder named for a version", programs: map[string][]string{"npm": {"~/.nvm/versions/node/v22.11.0/bin", shims}},
+			beyond: []string{"~/.nvm/versions/node/v22.11.0/bin", shims}, want: []string{shims}},
+		{name: "the home itself", programs: map[string][]string{"npm": {"~"}},
+			beyond: []string{"~"}, want: []string{"~"}},
 		{name: "two programs in one folder", programs: map[string][]string{"npm": {shims}, "composer": {shims}},
 			beyond: []string{shims}, want: []string{shims}},
 		{name: "each in its own folder", programs: map[string][]string{"npm": {shims}, "composer": {"/usr/local/bin"}},
@@ -65,7 +70,7 @@ func TestAProgramOffKitsPathDeclaresItsFolder(t *testing.T) {
 			full := func(dirs []string) []string {
 				var out []string
 				for _, dir := range dirs {
-					if rest, ok := strings.CutPrefix(dir, "~/"); ok {
+					if rest, ok := strings.CutPrefix(dir, "~"); ok {
 						dir = filepath.Join(m.Home, rest)
 					}
 					out = append(out, dir)
@@ -154,4 +159,29 @@ func TestFoldersNeverDeclaredOnThePath(t *testing.T) {
 			t.Errorf("parts = %q, %v; want npm's, and nothing for the PATH", c, err)
 		}
 	})
+}
+
+// A folder named for a version, as a version manager keeps each version
+// in, is never declared, as the next upgrade takes it away: when it alone
+// holds a kind's program, the PATH's part refuses it, saying what it
+// holds and that a folder that lasts is for kit path add.
+func TestAFolderNamedForAVersionIsRefused(t *testing.T) {
+	for _, dir := range []string{"~/.nvm/versions/node/v22.11.0/bin", "~/.local/share/mise/installs/node/22.11.0/bin"} {
+		t.Run(dir, func(t *testing.T) {
+			m, fake := newMac(t, "")
+			full := filepath.Join(m.Home, strings.TrimPrefix(dir, "~/"))
+			m = alongPath(m, fake, map[string][]string{"npm": {full}}, full)
+			s, _, err := snapshot.Find(t.Context(), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c := counts(s); !slices.Equal(c, []string{"paths 0", "defaults 0", "features 0", "backups 0"}) {
+				t.Errorf("parts = %q, want the PATH's, declaring nothing, and none for npm", c)
+			}
+			refused := s.Parts[0].Refused
+			if len(refused) != 1 || refused[0].Entry.Name != dir || !strings.Contains(refused[0].Err.Error(), "holds npm") || !strings.Contains(refused[0].Err.Error(), "kit path add") {
+				t.Errorf("refused = %+v, want %s, saying it holds npm and naming kit path add", refused, dir)
+			}
+		})
+	}
 }

@@ -40,9 +40,10 @@ type Mac struct {
 	Run  runner.Runner
 	Home string
 	// Beyond are folders off kit's PATH a kind's program Run doesn't find
-	// is looked for in, in order: Homebrew's and the system's, then the
-	// PATH kit setup was run with. RunOn is Run with folders last on its
-	// PATH; without it, nothing is looked for there.
+	// is looked for in, in order: the PATH kit setup was run with, then
+	// Homebrew's and the system's. RunOn is Run with folders last in the
+	// Mac's [paths], as kit's later runs have them once they're declared;
+	// without it, nothing is looked for there.
 	Beyond []string
 	RunOn  func(dirs []string) runner.Runner
 	// Temp are the temporary folders, never declared on the PATH.

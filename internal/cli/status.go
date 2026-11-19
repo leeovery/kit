@@ -592,7 +592,7 @@ func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]e
 	app := r.notifier(a.Getenv, a.Now)
 	launch := steps.HourlyLaunch(steps.Launching{
 		Run: r.run, Dir: filepath.Join(r.homeDir, "Library", "LaunchAgents"), Domain: fmt.Sprintf("gui/%d", os.Getuid()),
-		Kit: func() (string, string) { return steps.LaunchKit(self, r.path, cmp.Or(a.Getenv("TMPDIR"), "/tmp")) },
+		Kit: func() (string, string) { return steps.LaunchKit(self, r.run, cmp.Or(a.Getenv("TMPDIR"), "/tmp")) },
 		App: app, StateDir: dirs.State, Now: a.Now,
 	})
 	// After the formulae, as kit's own may be among them, whether or not

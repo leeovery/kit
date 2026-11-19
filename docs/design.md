@@ -650,10 +650,12 @@ declarations file empty, and the shared declarations, Homebrew's folders in `[pa
 `# Homebrew`, as `kit path add --shared` writes them), as kit's own PATH is `[paths]` then the
 system's and kit's runs would find no brew without them; joining, one of kit.toml's Macs or a new one, added as `kit machine
 add` adds it, `--from` a copy of another. Then the snapshot (`snapshot.Find`, on kit-config's
-PATH: a kind's program that isn't there is looked for along Homebrew's and the system's folders,
-then the PATH setup was run with, and the first folder holding it, never kit's own, a temporary
-or a relative one, is declared in the Mac's `[paths]` as `kit path add` declares it, its own
-part), a row its counts by part, and its questions, each with its answer
+PATH: a kind's program that isn't there is looked for along the PATH setup was run with, then
+Homebrew's and the system's folders, and the first folder holding it, never kit's own, a
+temporary or a relative one, nor one named for a version, as 22.11.0 (refused, saying so, when
+it alone holds the program), is declared last in the Mac's `[paths]` as `kit path add` declares
+it, its own part; the snapshot reads with kit's PATH as its later runs will have it, those folders
+before the system's), a row its counts by part, and its questions, each with its answer
 suggested, its flag, and its answer kept in the record: the folders a new Mac brings back
 (`--restore`, as `kit restore add` declares them), apps' settings saved nightly (`--prefs`:
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`

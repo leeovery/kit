@@ -35,14 +35,14 @@ func TestUnlinked(t *testing.T) {
 	}
 }
 
-// Setup's snapshot looks for a program off kit's PATH in Homebrew's and the
-// system's folders first, as kit's runs would find it there, then along
-// the PATH setup was run with; and never declares a temporary folder, the
-// environment's among them.
+// Setup's snapshot looks for a program off kit's PATH along the PATH setup
+// was run with first, as it finds the program the person uses, then in
+// Homebrew's and the system's folders; and never declares a temporary
+// folder, the environment's among them.
 func TestTheFoldersOffKitsPath(t *testing.T) {
 	env := map[string]string{"PATH": "/Users/someone/.local/share/mise/shims:/opt/homebrew/bin:bin", "TMPDIR": "/var/tmp/someone/"}
 	getenv := func(name string) string { return env[name] }
-	want := slices.Concat(bootPath, []string{"/Users/someone/.local/share/mise/shims", "/opt/homebrew/bin", "bin"})
+	want := slices.Concat([]string{"/Users/someone/.local/share/mise/shims", "/opt/homebrew/bin", "bin"}, bootPath)
 	if got := offPath(getenv); !slices.Equal(got, want) {
 		t.Errorf("offPath() = %q, want %q", got, want)
 	}

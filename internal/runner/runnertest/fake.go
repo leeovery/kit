@@ -25,6 +25,9 @@ type Fake struct {
 	// Env is the environment its commands run in, as a real runner's: none
 	// unless a test sets it, before running anything.
 	Env []string
+	// Path is where Find looks for a program, as a real runner's PATH:
+	// none unless a test sets it, and only ever the test's own folders.
+	Path []string
 
 	mu      sync.Mutex
 	scripts []*Script
@@ -193,6 +196,11 @@ func (s *Script) Then() *Script {
 	defer s.mu.Unlock()
 	s.answers = append(s.answers, &answer{})
 	return s
+}
+
+// Find is where the program name is on Path, as a real runner finds it.
+func (f *Fake) Find(name string) (string, error) {
+	return runner.Exec{Path: f.Path}.Find(name)
 }
 
 // Has reports whether the program name is installed, as the test has it:

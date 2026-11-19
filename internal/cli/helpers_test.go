@@ -267,6 +267,9 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Runner: func(path, env []string) runner.Runner {
 			w.path, w.childEnv = path, env
 			w.fake.Env = slices.Concat(env, w.added)
+			// Programs are found on the world's own folders alone, never
+			// the real Mac's, as the system's.
+			w.fake.Path = slices.DeleteFunc(slices.Clone(path), func(dir string) bool { return !strings.HasPrefix(dir, w.home+"/") })
 			return w.fake
 		},
 		Self:      func() (string, error) { return cmp.Or(w.self, filepath.Join(w.home, kitPath)), nil },

@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/nightly"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -152,13 +153,16 @@ func TestLaunchKit(t *testing.T) {
 		{"none on PATH, in the temporary folder", at("tmp/built/kit"), nil, "", "this kit, " + at("tmp/built/kit") + ", is a build that won't last: the hourly launch is left for the kit on kit's PATH"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			kit, why := steps.LaunchKit(tt.self, tt.path, temp)
+			kit, why := steps.LaunchKit(tt.self, runner.Exec{Path: tt.path}, temp)
 			if kit != tt.kit || why != tt.why {
 				t.Errorf("LaunchKit() = %q, %q; want %q, %q", kit, why, tt.kit, tt.why)
 			}
 		})
 	}
-	if _, why := steps.LaunchKit(at("linked"), nil, at("Cellar")); why == "" {
+	if kit, why := steps.LaunchKit(at("elsewhere/kit"), runnertest.New(t), temp); kit != at("elsewhere/kit") || why != "" {
+		t.Errorf("LaunchKit() with no kit on the fake's PATH = %q, %q; want itself", kit, why)
+	}
+	if _, why := steps.LaunchKit(at("linked"), runner.Exec{}, at("Cellar")); why == "" {
 		t.Error("a link into the temporary folder: want it a build that won't last, its link followed")
 	}
 }

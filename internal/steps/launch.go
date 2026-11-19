@@ -59,15 +59,15 @@ type Launching struct {
 // LaunchKit is the kit the hourly launch is to run, self being the kit
 // running. A build that won't last (in temp, Go's build cache or a
 // worktree) names none, why saying so, so the hourly run never runs a kit
-// that may be gone. Any other kit names the kit on path, kit's PATH, the
-// one the person runs, as it's
-// found there, so Homebrew's link outlasts its upgrades, whichever kit is
-// applying; or, with none on path, self.
-func LaunchKit(self string, path []string, temp string) (kit, why string) {
+// that may be gone. Any other kit names the kit run finds on kit's PATH,
+// the one the person runs, as it's found there, so Homebrew's link
+// outlasts its upgrades, whichever kit is applying; or, with none there,
+// self.
+func LaunchKit(self string, run runner.Runner, temp string) (kit, why string) {
 	if passing(self, temp) {
 		return "", fmt.Sprintf("this kit, %s, is a build that won't last: the hourly launch is left for the kit on kit's PATH", self)
 	}
-	if onPath, err := (runner.Exec{Path: path}).Find("kit"); err == nil {
+	if onPath, err := runner.Find(run, "kit"); err == nil {
 		return onPath, ""
 	}
 	return self, ""

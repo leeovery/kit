@@ -53,7 +53,7 @@ one of kit-config's Macs, or a new one, a copy of another with --from.
 Then it declares everything on this Mac as it is, in its own file: every
 kind whose program is here, the macOS settings set now, git's settings, the
 features on and the backups set up. A program kit's PATH doesn't find, but
-Homebrew's folders or your shell's PATH do, has its folder declared in this
+your shell's PATH or Homebrew's folders do, has its folder declared in this
 Mac's [paths], as kit path add does. It asks:
   which folders a new Mac brings back from your backups (--restore,
   --no-restore), declared as kit restore add does;
@@ -162,12 +162,14 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 		Run: run, Sink: sink, GitHub: a.GitHub(), Now: a.Now,
 		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Homebrew: a.Homebrew, Given: given,
 		Snapshot: func(ctx context.Context, cfg *config.Config, mac string) (snapshot.Snapshot, snapshot.Mac, error) {
-			path, err := cfg.SearchPath(home, mac)
+			shellPath, err := cfg.ShellPath(home, mac)
 			if err != nil {
 				return snapshot.Snapshot{}, snapshot.Mac{}, err
 			}
+			// dirs come last in this Mac's [paths], so kit's PATH is as its
+			// later runs have it once they're declared.
 			runOn := func(dirs []string) runner.Runner {
-				p := distinct(slices.Concat(path, dirs))
+				p := config.SearchPathOf(slices.Concat(shellPath, dirs))
 				return a.commands(p, childEnv(a.Getenv, home, p), sink, noAsks)
 			}
 			m := snapshot.Mac{
@@ -252,27 +254,17 @@ func (a *app) applyAfterSetup(ctx context.Context, doc *built) error {
 }
 
 // offPath are the folders off kit's PATH setup's snapshot looks along for
-// a kind's program kit's PATH doesn't find, in order: Homebrew's and the
-// system's, then the PATH setup was run with, the person's shell's.
+// a kind's program kit's PATH doesn't find, in order: the PATH setup was
+// run with, the person's shell's, as it finds the program they use; then
+// Homebrew's and the system's, for a shell without them.
 func offPath(getenv func(string) string) []string {
-	return slices.Concat(bootPath, filepath.SplitList(getenv("PATH")))
+	return slices.Concat(filepath.SplitList(getenv("PATH")), bootPath)
 }
 
 // tempDirs are the temporary folders: the system's, and the one the
 // environment names.
 func tempDirs(getenv func(string) string) []string {
 	return []string{"/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders", getenv("TMPDIR")}
-}
-
-// distinct is dirs, each once, where it first comes.
-func distinct(dirs []string) []string {
-	var out []string
-	for _, d := range dirs {
-		if !slices.Contains(out, d) {
-			out = append(out, d)
-		}
-	}
-	return out
 }
 
 // declareSetup declares what kit setup's snapshot found in this Mac's
