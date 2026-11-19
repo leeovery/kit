@@ -134,12 +134,13 @@ func (p *Prefs) checkClone(ctx context.Context, remote string) error {
 }
 
 // checkUpstream refuses the store's clone unless its branch is set to track
-// origin's branch of the same name, or set to track nothing, which the
-// first push makes it track. A clone of kit-config whose main was renamed
-// prefs is still set to track main, which a pull would rebase the store
-// onto, and a push send it to. The settings are read, not git's upstream,
-// which git shows as none when no fetch refspec maps the branch set, and
-// for a branch with no commit. Push asks again all the same.
+// origin's branch of the same name, as every clone kit makes is
+// (cloneBranch). A clone of kit-config whose main was renamed prefs is
+// still set to track main, which a pull would rebase the store onto, and a
+// push send it to; one set to track nothing would be pushed whole as
+// prefs. The settings are read, not git's upstream, which git shows as
+// none when no fetch refspec maps the branch set, and for a branch with no
+// commit. Push asks again all the same.
 func (p *Prefs) checkUpstream(ctx context.Context) error {
 	remote, err := p.setting(ctx, "branch."+branch+".remote")
 	if err != nil {
@@ -149,7 +150,7 @@ func (p *Prefs) checkUpstream(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if remote == "" && merge == "" || remote == origin && (merge == "refs/heads/"+branch || merge == branch) {
+	if remote == origin && (merge == "refs/heads/"+branch || merge == branch) {
 		return nil
 	}
 	return fmt.Errorf("%s tracks %s on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there, or set it to track the branch (git -C %s config branch.%s.remote %s, then git -C %s config branch.%s.merge refs/heads/%s)",

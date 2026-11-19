@@ -1349,13 +1349,14 @@ that's on another branch, as one of the repository the store was in before, empt
 refused, naming the clone, where it points and where it should; nothing's captured into it,
 restored from it, read for history or an app's saved settings, or taken over, and kit moves
 nothing: the person moves it aside, for kit to clone the branch there, and the new clone fetches
-and pushes as kit-config does. One on the branch set to track another, as `git branch -m main
-prefs` leaves a clone of kit-config still set to track main, which a pull would rebase the store
-onto and a push send it to, is refused the same way: move it aside, or set both
-`branch.prefs.remote origin` and `branch.prefs.merge refs/heads/prefs`. Its settings are read,
-not git's upstream, which git shows as none when no fetch refspec maps the branch set (a push
-would then publish kit-config's history as prefs) and for a branch with no commit; the push
-reads them again. One set to track nothing is pushed to prefs, which it then tracks. One off
+and pushes as kit-config does. The store's branch must be set to track origin's prefs, as every
+clone kit makes is: one set to track another, as `git branch -m main prefs` leaves a clone of
+kit-config still set to track main, which a pull would rebase the store onto and a push send it
+to, or set to track nothing, which a push would publish whole as prefs, is refused the same way:
+move it aside, or set both `branch.prefs.remote origin` and `branch.prefs.merge
+refs/heads/prefs`. Its settings are read, not git's upstream, which git shows as none when no
+fetch refspec maps the branch set (a push would then publish kit-config's history as prefs) and
+for a branch with no commit; the push reads them again. One off
 its branch part way through a rebase, as one cut short, is refused as the rebase under way,
 since it holds commits not yet pushed, never as a clone to move aside. Removing an app with a
 refused clone uninstalls it all the same, deleting none of its saved settings and saying why.

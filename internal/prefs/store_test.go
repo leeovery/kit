@@ -542,14 +542,16 @@ func (w *world) refused(t *testing.T, name string, run func(context.Context, *pr
 // the store onto and a push send it to, reaching every Mac. It's what the
 // branch is set to track that's read, as git shows no upstream when the
 // clone fetches prefs alone, and a push would publish kit-config's history
-// as prefs. Kit names what it tracks, and says to move it aside, or to set
-// both settings. What git prints is what real git does.
+// as prefs. One set to track nothing is refused too: pushed, it would be
+// published whole as prefs. Kit names what it tracks, and says to move it
+// aside, or to set both settings. What git prints is what real git does.
 func TestACloneTrackingAnotherBranchIsRefused(t *testing.T) {
 	for _, c := range []struct{ name, remote, merge, says string }{
 		{"kit-config's main", "origin", "refs/heads/main", " tracks main on origin"},
 		{"a branch of its own", ".", "refs/heads/prefs", " tracks prefs on ."},
 		{"no branch set", "origin", "", " tracks no branch on origin"},
 		{"no remote set", "", "refs/heads/prefs", " tracks prefs on no remote"},
+		{"nothing set", "", "", " tracks no branch on no remote"},
 	} {
 		for _, do := range onTheStore {
 			w := refusedWorld(t)
@@ -562,13 +564,11 @@ func TestACloneTrackingAnotherBranchIsRefused(t *testing.T) {
 }
 
 // A clone on the prefs branch set to track origin's prefs, by its full name
-// or its short one, or set to track nothing, as the first push then sets
-// it, is the store's.
+// or its short one, is the store's.
 func TestACloneTrackingPrefsIsTheStores(t *testing.T) {
 	for _, c := range []struct{ name, remote, merge string }{
 		{"origin's prefs", "origin", "refs/heads/prefs"},
 		{"origin's prefs, by its short name", "origin", "prefs"},
-		{"nothing", "", ""},
 	} {
 		w := refusedWorld(t)
 		tracks(w.fake, w.clone, c.remote, c.merge)

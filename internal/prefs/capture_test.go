@@ -451,8 +451,9 @@ func TestCaptureNamesKitConfigHoldingThePush(t *testing.T) {
 
 // The store's branch is pushed only to the remote's branch of the same
 // name. One set to track another, kit-config's main, since the clone was
-// checked, is never pushed to it. One set to track nothing is pushed to
-// the branch, which it then tracks, as real git does.
+// checked, is never pushed to it. One set to track origin's prefs by its
+// short name, for which git shows no upstream, is pushed to the branch of
+// its own name, prefs, which it then tracks, as real git does.
 func TestCapturePushesOnlyToThePrefsBranch(t *testing.T) {
 	w := firstCapture(t)
 	_, merge := tracks(w.fake, w.clone, "origin", "refs/heads/prefs")
@@ -460,16 +461,16 @@ func TestCapturePushesOnlyToThePrefsBranch(t *testing.T) {
 	w.heldBack(t, "tracking kit-config's main", w.clone+" tracks main on origin, not kit-config's prefs branch: ")
 
 	w = firstCapture(t)
-	tracks(w.fake, w.clone, "", "")
+	tracks(w.fake, w.clone, "origin", "prefs")
 	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/prefs").Prints(" \n")
 	w.fake.On("git", "-C", w.clone, "push", "--quiet", "-u", "origin", "HEAD")
 	report, err := w.p.Capture(t.Context())
 	if err != nil || report.PushError != "" {
-		t.Errorf("tracking nothing: Capture() = %+v, %v; want it pushed", report, err)
+		t.Errorf("tracking prefs by its short name: Capture() = %+v, %v; want it pushed", report, err)
 	}
 	pushed := slices.DeleteFunc(w.fake.Calls(), func(call string) bool { return !strings.Contains(call, " push ") })
 	if want := "git -C " + w.clone + " push --quiet -u origin HEAD"; !slices.Equal(pushed, []string{want}) {
-		t.Errorf("tracking nothing: pushed %q; want %q alone", pushed, want)
+		t.Errorf("tracking prefs by its short name: pushed %q; want %q alone", pushed, want)
 	}
 }
 
