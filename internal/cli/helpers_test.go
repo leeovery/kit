@@ -466,7 +466,8 @@ func (w *world) waiting(times string) {
 // pulls scripts git's answers as a run brings in kit-config's remote
 // commits, as real git gives them, with nothing new on the remote: its git
 // folder, a folder of the test's own; nothing changed and not committed,
-// unless status (-z) says what is; the fetch.
+// unless status (-z) says what is; the fetch, the upstream still where it
+// was in the remote's history.
 func (w *world) pulls(t *testing.T, status string) {
 	git := func(args ...string) []string {
 		return append([]string{"-C", filepath.Join(w.home, ".config", "kit")}, args...)
@@ -474,6 +475,7 @@ func (w *world) pulls(t *testing.T, status string) {
 	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(t.TempDir() + "\n")
 	w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
 	w.fake.On("git", git("fetch", "--prune", "--quiet", "origin")...)
+	w.fake.On("git", git("merge-base", "--is-ancestor", head, "refs/remotes/origin/main")...)
 	w.fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints("0\n")
 }
 
@@ -486,7 +488,7 @@ func (w *world) pulled(call string) bool {
 		{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"},
 		{"symbolic-ref", "-q", "HEAD"}, {"for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main"},
 		{"fetch", "--prune", "--quiet", "origin"}, {"rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"},
-		{"rev-list", "--count", "HEAD..refs/remotes/origin/main"},
+		{"rev-list", "--count", "HEAD..refs/remotes/origin/main"}, {"merge-base", "--is-ancestor", head, "refs/remotes/origin/main"},
 	} {
 		if call == (runner.Command{Name: "git", Args: append([]string{"-C", dir}, args...)}).String() {
 			return true

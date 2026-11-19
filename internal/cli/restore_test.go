@@ -294,6 +294,9 @@ func TestApplyRestoresFromTheMacItStartedFrom(t *testing.T) {
 		t.Errorf("the pinned key's file = %q; want studio's key", got)
 	}
 	trusts := []string{"StrictHostKeyChecking=yes", "UserKnownHostsFile=" + pinned, "HostKeyAlias=studio"}
+	if fetches := slices.DeleteFunc(w.fake.Calls(), func(c string) bool { return !strings.Contains(c, " fetch ") }); len(fetches) != 1 || !w.pulled(fetches[0]) {
+		t.Errorf("fetched %q; want the run's own pull alone", fetches)
+	}
 	for _, c := range w.fake.Commands() {
 		said := strings.Join(c.Args, " ")
 		if c.Name == "git" && strings.Contains(said, " show ") {
@@ -371,20 +374,23 @@ func TestRestoreAfterTheSecretsOnlyFromTheOldMac(t *testing.T) {
 // --restore-from names a source kit knows, for the paths [restore] lists,
 // the old Mac only for a Mac started from one; and --at a date or a time,
 // with a backup's alone: anything else is an error naming the flag, before
-// anything runs but bringing in kit-config's remote commits.
+// anything runs. One the config decides is read against it as the run
+// reads it, once kit-config's remote commits are brought in (pulls); the
+// rest are refused before even that.
 func TestApplyRestoreFlags(t *testing.T) {
 	for _, tt := range []struct {
 		args  []string
 		lines string
 		want  string
+		pulls bool
 	}{
-		{[]string{"--restore-from", "dropbox"}, "", `invalid argument "dropbox" for "--restore-from" flag: "dropbox" isn't a source: mac, time-machine or arq`},
-		{[]string{"--restore-from", "time-machine", "--at", "yesterday"}, "", `invalid argument "yesterday" for "--at" flag: "yesterday" isn't a date, as 2026-11-08, or a time, as "2026-11-08 14:30"`},
-		{[]string{"--restore-from", "time-machine", "--at", "2026-11-08T14:30"}, "", `invalid argument "2026-11-08T14:30" for "--at" flag`},
-		{[]string{"--at", "2026-11-08"}, "", "--at picks a backup: give it with --restore-from time-machine or arq"},
-		{[]string{"--restore-from", "mac", "--at", "2026-11-08"}, "", "--at picks a backup: give it with --restore-from time-machine or arq"},
-		{[]string{"--restore-from", "time-machine"}, "", "--restore-from restores the paths [restore] lists, and none are listed for laptop"},
-		{[]string{"--restore-from", "mac"}, "~/Code\n", "--restore-from mac copies from the Mac laptop started from (from, in kit.toml), and it names none"},
+		{[]string{"--restore-from", "dropbox"}, "", `invalid argument "dropbox" for "--restore-from" flag: "dropbox" isn't a source: mac, time-machine or arq`, false},
+		{[]string{"--restore-from", "time-machine", "--at", "yesterday"}, "", `invalid argument "yesterday" for "--at" flag: "yesterday" isn't a date, as 2026-11-08, or a time, as "2026-11-08 14:30"`, false},
+		{[]string{"--restore-from", "time-machine", "--at", "2026-11-08T14:30"}, "", `invalid argument "2026-11-08T14:30" for "--at" flag`, false},
+		{[]string{"--at", "2026-11-08"}, "", "--at picks a backup: give it with --restore-from time-machine or arq", false},
+		{[]string{"--restore-from", "mac", "--at", "2026-11-08"}, "", "--at picks a backup: give it with --restore-from time-machine or arq", false},
+		{[]string{"--restore-from", "time-machine"}, "", "--restore-from restores the paths [restore] lists, and none are listed for laptop", true},
+		{[]string{"--restore-from", "mac"}, "~/Code\n", "--restore-from mac copies from the Mac laptop started from (from, in kit.toml), and it names none", true},
 	} {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
 			w := laptopWorld(t)
@@ -395,10 +401,12 @@ func TestApplyRestoreFlags(t *testing.T) {
 			if code != 2 || !strings.Contains(errOut, tt.want) {
 				t.Errorf("kit apply %s printed %q, exit %d; want exit 2 saying %q", strings.Join(tt.args, " "), errOut, code, tt.want)
 			}
-			// The flags are read against the config as the run reads it,
-			// once kit-config's remote commits are brought in.
-			if calls := w.fake.Calls(); slices.ContainsFunc(calls, func(c string) bool { return !strings.HasPrefix(c, "sudo -n") && !w.pulled(c) }) {
+			calls := w.fake.Calls()
+			if slices.ContainsFunc(calls, func(c string) bool { return !strings.HasPrefix(c, "sudo -n") && !w.pulled(c) }) {
 				t.Errorf("kit apply ran %q", calls)
+			}
+			if pulled := slices.ContainsFunc(calls, w.pulled); pulled != tt.pulls {
+				t.Errorf("kit apply brought in kit-config's remote commits: %v, want %v", pulled, tt.pulls)
 			}
 		})
 	}

@@ -158,19 +158,33 @@ Either way, kit links the file again. At a terminal, `kit reconcile` asks about 
 
 ## Your other Mac's changes don't come in
 
-`kit status` says so under CONFIG, with why:
+`kit status` shows a row under CONFIG that starts with this, then says why:
 
 ```text
 the remote's commits not brought in
-the remote's commits change what's not committed here, so nothing was touched or brought in: commit or undo the change to laptop/declarations first
 ```
 
 **Cause:** each run pulls kit-config before it reads it, and this pull couldn't happen. kit
 never touches an edit you haven't committed, so an edit to a file the other Mac changed stops
-it. Being offline stops it too.
+it. Being offline stops it too. The row stays grey for a day, then needs you.
 
-**Fix:** if the message names a file, commit it with `kit reconcile`, or undo it. If you're
-offline, do nothing: the next run tries again. The line stays grey for a day, then needs you.
+**Fix:** if you're offline, do nothing: the next run tries again. If the row names a file, you
+and the other Mac both changed it. To keep the other Mac's change, undo yours:
+
+```bash
+# Put the file back as last committed
+kit reconcile config:laptop/declarations --revert
+```
+
+To keep both changes, bring them together by hand. The commit's push stops on the conflict,
+and the pull leaves git's markers in the file for you to resolve:
+
+```bash
+# Commit your edit
+kit reconcile config:laptop/declarations --adopt
+# Bring theirs in, then resolve the file
+git -C ~/.config/kit pull --rebase --autostash
+```
 
 ## Related
 

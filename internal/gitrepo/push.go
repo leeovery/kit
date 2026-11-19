@@ -90,7 +90,9 @@ func (r Repo) Holding(ctx context.Context) error {
 	return r.holds(ctx, dirty, t.up)
 }
 
-// pull is Pull: the repository's remote, and the branch HEAD is on.
+// pull is Pull: the repository's remote, and the branch HEAD is on. It
+// holds the lock BringIn holds (lockPulls), waiting for another kit
+// pulling, so no two pulls rebase or fetch over each other.
 func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
 	if remote, err = r.remote(ctx); err != nil {
 		return "", tracking{}, err
@@ -99,6 +101,11 @@ func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
 	if err != nil {
 		return "", tracking{}, err
 	}
+	unlock, err := r.lockPulls(ctx, gitDir, pushed)
+	if err != nil {
+		return "", tracking{}, err
+	}
+	defer unlock()
 	dirty, err := r.settled(ctx, gitDir)
 	if err != nil {
 		return "", tracking{}, err
@@ -305,8 +312,9 @@ func keptBack(path, was string) error {
 // clashes is the refusal when up's commits, those HEAD hasn't, change what's
 // not committed here, dirty, staged or not, a nested repository's folder
 // by any path in it: put back after the rebase, it would conflict, leaving
-// git's markers in a file that may be linked into the home folder.
-// Nothing's touched.
+// git's markers in a file that may be linked into the home folder; or add
+// a file git ignores that's on disk here, which the rebase would overwrite
+// without a word. Nothing's touched.
 func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
 	return r.clashing(ctx, dirty, up, pushed)
 }
@@ -318,17 +326,34 @@ func (r Repo) clashing(ctx context.Context, dirty []entry, up, undone string) er
 	if err != nil {
 		return fmt.Errorf("couldn't read the remote's changes, so nothing was %s: %w", undone, err)
 	}
+	if hit := meeting(dirty, incoming); len(hit) > 0 {
+		return fmt.Errorf("the remote's commits change what's not committed here, so nothing was touched or %s: commit or undo the change to %s first", undone, strings.Join(hit, ", "))
+	}
+	res, err := r.git(ctx, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
+	if err != nil {
+		return fmt.Errorf("couldn't list the files git ignores, so nothing was %s: %w", undone, err)
+	}
+	var ignored []entry
+	for _, path := range names(res.Stdout) {
+		ignored = append(ignored, entry{code: "!!", path: path})
+	}
+	if hit := meeting(ignored, incoming); len(hit) > 0 {
+		return fmt.Errorf("the remote's commits add %s, which git ignores here, so nothing was touched or %s: move it aside first", strings.Join(hit, ", "), undone)
+	}
+	return nil
+}
+
+// meeting are the paths of entries that paths, the remote's commits',
+// change: each once, a nested repository's folder by any path in it.
+func meeting(entries []entry, paths []string) []string {
 	var hit []string
-	for _, e := range dirty {
+	for _, e := range entries {
 		meets := func(p string) bool { return p == e.path || e.nested() && strings.HasPrefix(p, e.path) }
-		if slices.ContainsFunc(incoming, meets) && !slices.Contains(hit, e.path) {
+		if slices.ContainsFunc(paths, meets) && !slices.Contains(hit, e.path) {
 			hit = append(hit, e.path)
 		}
 	}
-	if len(hit) == 0 {
-		return nil
-	}
-	return fmt.Errorf("the remote's commits change what's not committed here, so nothing was touched or %s: commit or undo the change to %s first", undone, strings.Join(hit, ", "))
+	return hit
 }
 
 // incoming are the paths up's commits change, those HEAD hasn't: since the

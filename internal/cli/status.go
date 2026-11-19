@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -47,6 +48,7 @@ func newStatusCommand(a *app) *cobra.Command {
 		Annotations: map[string]string{brief: "how this Mac stands against its config"},
 		Long: `Show how this Mac stands against its config: each step's check, and what needs
 attention, such as packages declared but missing, or installed but not declared.
+It brings in kit-config's remote commits first, leaving your edits as they are.
 
 Name steps, as kit status shows them (homebrew, brew, cask, config-private),
 to check only those, with what they need. A kind is checked only while the
@@ -304,7 +306,9 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	}
 	at, err := a.basis(dirs)
 	if err != nil {
-		return nil, err
+		if at, err = a.healing(dirs, err); err != nil {
+			return nil, err
+		}
 	}
 	now := a.Now()
 	if logName != "" {
@@ -319,7 +323,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	if a.pull {
 		pulled = a.pullConfig(ctx, dirs.Config, at, command, now, sink)
 	}
-	if pulled.Brought > 0 {
+	if at.cfg == nil || pulled.Brought > 0 {
 		if at, err = a.basis(dirs); err != nil {
 			return nil, err
 		}
@@ -589,11 +593,15 @@ type basis struct {
 }
 
 // basis reads what a run stands on, in dirs, refusing a Mac with no name,
-// or one the config doesn't know.
+// or one the config doesn't know. A config there that this kit can't read
+// is unread.
 func (a *app) basis(dirs config.Dirs) (basis, error) {
 	cfg, err := a.loadConfig(dirs)
-	if err != nil {
+	switch {
+	case errors.Is(err, config.ErrNoConfig):
 		return basis{}, err
+	case err != nil:
+		return basis{}, unread{err}
 	}
 	machine, err := config.ReadMachine(dirs.State)
 	if err != nil {
@@ -614,6 +622,30 @@ func (a *app) basis(dirs config.Dirs) (basis, error) {
 		return basis{}, err
 	}
 	return basis{cfg: cfg, machine: machine, home: home, path: path}, nil
+}
+
+// unread is basis's error for a config there that this kit can't read: a
+// newer kit's setting, or a bad edit from another Mac.
+type unread struct{ error }
+
+func (u unread) Unwrap() error { return u.error }
+
+// healing is what a run that pulls stands on when basis failed, as err,
+// for a config this kit can't read, which another Mac may have pushed the
+// fix for: this Mac's name and home, kit's base PATH (the system's folders
+// and Homebrew's), and no config, to bring in kit-config's remote commits
+// with, then read it again. Any other failure, a run that doesn't pull, or
+// a Mac with no name yet, is err.
+func (a *app) healing(dirs config.Dirs, err error) (basis, error) {
+	if _, ok := errors.AsType[unread](err); !ok || !a.pull {
+		return basis{}, err
+	}
+	machine, nameErr := config.ReadMachine(dirs.State)
+	home, homeErr := a.HomeDir()
+	if nameErr != nil || homeErr != nil || machine == "" {
+		return basis{}, err
+	}
+	return basis{machine: machine, home: home, path: config.SearchPathOf(a.Homebrew)}, nil
 }
 
 // schedulingSteps are the steps that have kit run by itself, on every Mac:

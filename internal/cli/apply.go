@@ -23,7 +23,8 @@ func newApplyCommand(a *app) *cobra.Command {
 		Annotations: map[string]string{brief: "install what's declared and missing"},
 		Long: `Make this Mac match its config: install what's declared and missing. Applying
 never removes and never adopts anything: kit reconcile does those, as you
-decide. --plan says what applying would do, and does nothing.
+decide. It brings in kit-config's remote commits first, leaving your edits as
+they are. --plan says what applying would do, and does nothing, not even that.
 
 Name steps to apply only those, with what they need. Some installs need an
 administrator's password (a cask that installs through a package, an App
@@ -58,7 +59,7 @@ kit apply reinstall tries those that failed again.`,
 				return err
 			}
 			a.named = args
-			a.pull, a.pullQuietly = true, len(args) > 0
+			a.pull, a.pullQuietly = !plan, len(args) > 0
 			command, logName := "apply", "apply"
 			if plan {
 				command, logName = "apply --plan", "apply-plan"

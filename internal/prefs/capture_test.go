@@ -342,6 +342,7 @@ func TestCaptureRefuses(t *testing.T) {
 		w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-THIS\nmodel Mac99,1\nsince 2026-09-28 17:00\n")
 		w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/prefs").Prints("1\n")
 		w.fake.On("git", "-C", w.clone, "diff", "--name-only", "-z", "--no-renames", "HEAD...refs/remotes/origin/prefs").Prints("laptop/owner\x00")
+		w.fake.On("git", "-C", w.clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
 		w.fake.On("git", "-C", w.clone, "stash", "create", "kit: your changes before pulling")
 		w.fake.On("git", "-C", w.clone, "rebase", "--no-fork-point", "--quiet", "refs/remotes/origin/prefs").Does(func() {
 			w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-NEW\nmodel Mac100,1\nsince 2026-10-05 09:00\n")
