@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-11-20
+
+✨ Added
+- Releases now ship a signed kit.app, which kit copies into place and `install.sh` installs alongside kit — Full Disk Access carries over across kit updates instead of being re-requested for each new build.
+
+🔧 Changed
+- `kit secret add` puts only the secret you add in place, rather than syncing every secret — no other secret is read from its store.
+- `kit secret add` shows progress steps as it stores, reads back, declares and puts the secret in place.
+- `kit secret add` refuses a multi-line variable value before storing it — declare it as a file instead.
+- `kit secret add --ref` reads the value from its store, so a file secret is placed as a file would hold it.
+
+🐛 Fixed
+- A link into the repository whose file has moved is now treated as fixable and relinked on apply, instead of being reported as a differing file.
+- Links whose target path runs through a non-directory are now recognised as dead links and cleaned up.
+
 ## [0.4.1] - 2026-11-20
 
 Keep folders out of Time Machine backups once Full Disk Access is in place, with a clear prompt to grant it when it isn't.
