@@ -34,10 +34,11 @@ var appAccessSteps = []string{
 // AppAccessing is what giving kit.app Full Disk Access needs.
 type AppAccessing struct {
 	Run runner.Runner
-	// App is kit.app's path, and Built the fingerprint of the kit.app
-	// there, "" when there's none (macapp.Built).
-	App   string
-	Built func() string
+	// App is kit.app's path, and Identity what macOS grants Full Disk
+	// Access to for the kit.app there, "" when there's none
+	// (macapp.Identity).
+	App      string
+	Identity func() string
 	// StateDir is kit's state, holding the scheduled runs' record.
 	StateDir string
 	// Raise raises its card, at a terminal: nil elsewhere, where no one's
@@ -49,8 +50,8 @@ type AppAccessing struct {
 // AppAccess is the step by hand giving kit.app Full Disk Access, which its
 // hourly run needs: done as the record of the scheduled runs last found it
 // for the kit.app there, by a run reading what only it shows, or as the
-// person said once they'd given it. One built from other files is another
-// app to macOS, which has none till it's given again. Applied at a
+// person said once they'd given it. One of another identity is another app
+// to macOS, which has none till it's given again. Applied at a
 // terminal, it opens System Settings at the list and Finder at kit.app,
 // raises its card, and records it given once the person says so, for the
 // next hourly run to find out.
@@ -63,7 +64,7 @@ func AppAccess(a AppAccessing) engine.Step {
 			if err != nil {
 				return failed(err)
 			}
-			said, ok := appAccess(rec.Access, a.Built(), a.Now().Location())
+			said, ok := appAccess(rec.Access, a.Identity(), a.Now().Location())
 			if ok {
 				return check.Result{State: check.OK, Summary: said}
 			}
@@ -76,8 +77,8 @@ func AppAccess(a AppAccessing) engine.Step {
 		return step
 	}
 	step.Apply = func(ctx context.Context, _ check.Result) error {
-		built := a.Built()
-		if built == "" {
+		identity := a.Identity()
+		if identity == "" {
 			return engine.NotYet("kit.app isn't built yet: the hourly launch's step builds it")
 		}
 		c := &ownCard{
@@ -95,20 +96,20 @@ func AppAccess(a AppAccessing) engine.Step {
 			return err
 		}
 		return nightly.Update(a.StateDir, func(r *nightly.Record) {
-			r.Access = nightly.Access{At: a.Now(), App: built, Granted: true, Given: true}
+			r.Access = nightly.Access{At: a.Now(), App: identity, Granted: true, Given: true}
 		})
 	}
 	return step
 }
 
 // appAccess says how kit.app's Full Disk Access stands, as last found, for
-// the kit.app built from the files whose fingerprint is built, its times in
-// loc, and whether that's done.
-func appAccess(last nightly.Access, built string, loc *time.Location) (said string, ok bool) {
+// the kit.app of identity (macapp.Identity), its times in loc, and whether
+// that's done.
+func appAccess(last nightly.Access, identity string, loc *time.Location) (said string, ok bool) {
 	switch {
-	case built == "" || last.App == "":
+	case identity == "" || last.App == "":
 		return "not given", false
-	case last.App != built:
+	case last.App != identity:
 		if last.Granted {
 			return "not given to this build of kit.app", false
 		}

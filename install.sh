@@ -8,7 +8,8 @@
 # boot has ended: the boot installs kit through Homebrew, which keeps it up
 # to date, and hands over to that kit. KIT_FROM names a build to use
 # instead: a path or an address, of kit itself or a release's archive. It's
-# put in ~/.local/bin, and the boot runs it throughout.
+# put in ~/.local/bin, the kit.app an archive carries in ~/.local/libexec,
+# and the boot runs it throughout.
 set -eu
 
 repo=leeovery/kit
@@ -52,23 +53,35 @@ else
 	checked="checksum ok"
 fi
 
+# kit goes in bin, and the kit.app a release ships beside it in libexec,
+# where kit looks for it.
+mkdir "$tmp/bin" "$tmp/libexec"
 if tar -tzf "$tmp/download" kit >/dev/null 2>&1; then
-	tar -xzf "$tmp/download" -C "$tmp" kit
+	tar -xzf "$tmp/download" -C "$tmp/bin" kit
+	if tar -tzf "$tmp/download" kit.app >/dev/null 2>&1; then
+		tar -xzf "$tmp/download" -C "$tmp/libexec" kit.app
+	fi
 else
-	mv "$tmp/download" "$tmp/kit"
+	mv "$tmp/download" "$tmp/bin/kit"
 fi
-chmod 755 "$tmp/kit"
+chmod 755 "$tmp/bin/kit"
 
-size=$(wc -c <"$tmp/kit" | awk '{ printf "%.1f", $1 / 1000000 }')
-version=$("$tmp/kit" --version | sed 's/^kit version /kit /')
+size=$(wc -c <"$tmp/bin/kit" | awk '{ printf "%.1f", $1 / 1000000 }')
+version=$("$tmp/bin/kit" --version | sed 's/^kit version /kit /')
 printf '%s for %s · %s MB · %s\n' "$version" "$arch" "$size" "$checked"
 if [ -n "${KIT_FROM-}" ]; then
 	# The boot reads KIT_FROM to run this build throughout.
 	export KIT_FROM
 	mkdir -p "$HOME/.local/bin"
-	mv "$tmp/kit" "$HOME/.local/bin/kit"
+	mv "$tmp/bin/kit" "$HOME/.local/bin/kit"
+	# Another build's kit.app goes, so this kit never takes it for its own.
+	rm -rf "$HOME/.local/libexec/kit.app"
+	if [ -d "$tmp/libexec/kit.app" ]; then
+		mkdir -p "$HOME/.local/libexec"
+		mv "$tmp/libexec/kit.app" "$HOME/.local/libexec/kit.app"
+	fi
 	rm -rf "$tmp"
 	exec "$HOME/.local/bin/kit" bootstrap
 fi
 # A child, not exec'd, so the trap removes the download once the boot ends.
-"$tmp/kit" bootstrap
+"$tmp/bin/kit" bootstrap

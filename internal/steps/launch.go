@@ -28,8 +28,9 @@ const LaunchName = "hourly-launch"
 const LaunchLabel = macapp.BundleID + ".nightly"
 
 // App is kit.app as the hourly launch opens it: where it is; whether it's
-// built from the files this kit embeds; and ready, built first when it
-// isn't, false when it can't be.
+// made as this kit makes it, copied from the app shipped beside it or built
+// from the files it embeds; and ready, made first when it isn't, false when
+// it can't be.
 type App interface {
 	Path() string
 	Current() bool
@@ -130,8 +131,8 @@ func agentKit(data []byte) string {
 const reloadWait = time.Second
 
 // HourlyLaunch checks kit's launch agent is in place, saying what
-// LaunchAgent says for the kit to run and kit.app, kit.app built from this
-// kit's files, and loaded; applying builds kit.app, writes the agent and
+// LaunchAgent says for the kit to run and kit.app, kit.app made as this kit
+// makes it, and loaded; applying makes kit.app, writes the agent and
 // loads it, loading it again when it's changed, and records when, so that
 // the check on the runs gives the first run its hour. With no kit to name
 // (Kit gives ""), the check looks at the agent as it stands, the kit it

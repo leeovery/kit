@@ -38,8 +38,8 @@ type Outcome struct {
 // they've given it.
 type Access struct {
 	At time.Time `json:"at"`
-	// App is the fingerprint of the kit.app it's about: one built from
-	// other files is another app to macOS, and has none till it's given.
+	// App is the identity of the kit.app it's about (macapp.Identity): one
+	// of another is another app to macOS, and has none till it's given.
 	App     string `json:"app"`
 	Granted bool   `json:"granted"`
 	// Given is whether it's the person's word, not a run's finding.

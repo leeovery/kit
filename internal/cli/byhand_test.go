@@ -172,6 +172,49 @@ func TestApplyNotifiesThroughKitsApp(t *testing.T) {
 	}
 }
 
+// With a release's kit.app beside the kit, in the libexec folder beside
+// its own, a run that raises cards copies that app into kit's data folder,
+// checks its signature, and posts through it, nothing compiled.
+func TestApplyNotifiesThroughTheShippedApp(t *testing.T) {
+	w := signInWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
+	kb := &keyboard{}
+	w.listen = kb.listen
+	w.write(t, kitPath, "")
+	shipped := filepath.Join(w.home, ".local", "libexec", "kit.app")
+	w.write(t, filepath.Join(".local", "libexec", "kit.app", "Contents", "MacOS", "kit"), "app")
+	data := filepath.Join(w.home, ".local", "share", "kit")
+	bundle := filepath.Join(data, ".kit.app-build", "kit.app")
+	copied := []runner.Command{
+		{Name: "ditto", Args: []string{shipped, bundle}},
+		{Name: "codesign", Args: []string{"--verify", "--strict", bundle}},
+	}
+	w.fake.On("ditto", copied[0].Args...).Does(func() {
+		if err := os.CopyFS(bundle, os.DirFS(shipped)); err != nil {
+			t.Error(err)
+		}
+	})
+	w.fake.On("codesign", copied[1].Args...)
+	at := w.now.UnixNano()
+	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", filepath.Join(data, "kit.app"), "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "The tool's commands need it.", "--at", strconv.FormatInt(at, 10)}}
+	clear := runner.Command{Name: "open", Args: []string{"-g", "-n", filepath.Join(data, "kit.app"), "--args", "clear", "--id", "card:sign-in:sign-in", "--at", strconv.FormatInt(at+1, 10)}}
+	w.fake.On("open", notify.Args...).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
+	w.fake.On("open", clear.Args...)
+
+	if _, errOut, code := w.run(t, "apply"); code != 1 {
+		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
+	}
+	var ran []string
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "xcode-select") || strings.HasPrefix(c, "swiftc") || strings.HasPrefix(c, "ditto") || strings.HasPrefix(c, "codesign") || strings.HasPrefix(c, "open -g") {
+			ran = append(ran, c)
+		}
+	}
+	if want := []string{copied[0].String(), copied[1].String(), notify.String(), clear.String()}; !slices.Equal(ran, want) {
+		t.Errorf("ran %q, want %q", ran, want)
+	}
+}
+
 // A run stopped while kit's app is still being built ends without waiting
 // for the build, which it stops, and posts no notification: none waiting
 // for the build goes through osascript in its place.

@@ -205,10 +205,15 @@ func (r *run) close() error {
 
 // notifier is kit's app, which posts the run's notifications: one a run, a
 // click on one bringing forward the terminal kit runs in, when macOS names
-// it.
-func (r *run) notifier(getenv func(string) string, now func() time.Time) *macapp.App {
+// it; copied from the kit.app a release ships beside this kit, when there's
+// one.
+func (r *run) notifier(a *app) *macapp.App {
 	if r.notices == nil {
-		r.notices = macapp.New(r.run, r.dataDir, getenv("__CFBundleIdentifier"), now)
+		var shipped string
+		if self, err := a.Self(); err == nil {
+			shipped = macapp.Shipped(self)
+		}
+		r.notices = macapp.New(r.run, r.dataDir, shipped, a.Getenv("__CFBundleIdentifier"), a.Now)
 	}
 	return r.notices
 }
@@ -504,7 +509,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	var raise *steps.Raise
 	if slices.Contains(applies, command) && atTerminal && len(a.named) == 0 {
 		desk := hand.New()
-		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk, After: a.After}
+		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a), Desk: desk, After: a.After}
 		r.raise = raise
 		if f, ok := face.(*render.Pretty); ok {
 			f.Hands(desk.Answer)
@@ -693,7 +698,7 @@ func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]e
 	if err != nil {
 		return nil, fmt.Errorf("find kit: %w", err)
 	}
-	app := r.notifier(a.Getenv, a.Now)
+	app := r.notifier(a)
 	launch := steps.HourlyLaunch(steps.Launching{
 		Run: r.run, Dir: filepath.Join(r.homeDir, "Library", "LaunchAgents"), Domain: fmt.Sprintf("gui/%d", os.Getuid()),
 		Kit: func() (string, string) { return steps.LaunchKit(self, r.run, cmp.Or(a.Getenv("TMPDIR"), "/tmp")) },
@@ -705,7 +710,7 @@ func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]e
 		launch.After = []string{brew.FormulaeDescriptor.Name}
 	}
 	access := steps.AppAccess(steps.AppAccessing{
-		Run: r.run, App: app.Path(), Built: func() string { return macapp.Built(dirs.Data) },
+		Run: r.run, App: app.Path(), Identity: func() string { return macapp.Identity(dirs.Data) },
 		StateDir: dirs.State, Raise: raise, Now: a.Now,
 	})
 	access.After = []string{steps.LaunchName}
@@ -720,10 +725,10 @@ func (a *app) start(r *run, face render.Face) {
 		r.askpass = a.askpass(face)
 	}
 	if r.raise != nil {
-		r.notifier(a.Getenv, a.Now).Prepare()
+		r.notifier(a).Prepare()
 	}
 	if a.WatchDialogs && a.pretty(a.Stdout) {
-		r.held, r.unwatch = watchDialogs(a.Runner(r.path, r.env), r.notifier(a.Getenv, a.Now), r.sink, a.Now)
+		r.held, r.unwatch = watchDialogs(a.Runner(r.path, r.env), r.notifier(a), r.sink, a.Now)
 	}
 	if asks := r.askpass; asks != nil {
 		dialogs := r.held

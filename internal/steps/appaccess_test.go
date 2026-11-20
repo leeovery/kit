@@ -29,7 +29,7 @@ func appAccess(t *testing.T, fake *runnertest.Fake, state, built string, last ni
 		t.Fatal(err)
 	}
 	return steps.AppAccess(steps.AppAccessing{
-		Run: fake, App: kitAppPath, Built: func() string { return built }, StateDir: state, Raise: raise,
+		Run: fake, App: kitAppPath, Identity: func() string { return built }, StateDir: state, Raise: raise,
 		Now: func() time.Time { return accessAt.Add(time.Hour) },
 	})
 }
