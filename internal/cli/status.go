@@ -381,10 +381,11 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		return nil, err
 	}
 	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups), AppDirs: a.appFolders(home).Dirs}
-	// granting is how what kit runs in is given Full Disk Access, which the
-	// kinds whose programs need it wait for (accessWaits).
+	// granting is how what kit runs in, access, is given Full Disk Access,
+	// which the kinds whose programs need it wait for (accessWaits), applied
+	// after the step telling whether it's given.
 	granting := steps.GrantingFor(a.Getenv, a.scheduled)
-	refusal := &steps.Refusal{}
+	access := &steps.Access{Home: home}
 	var accessWaits []string
 	for _, d := range kinds.All {
 		k := d.New(deps)
@@ -396,18 +397,17 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		r.kindsByName[d.Name], r.lists[d.Name] = k, list
 		accessor, needsAccess := k.(kind.FullDiskAccessor)
 		if needsAccess {
-			accessor.SetRefused(r.refused(&granting, refusal, a.scheduled))
+			accessor.SetAccess(held(&granting, access), r.refused(&granting, access, a.scheduled))
 		}
 		if !list.Declared && unread == nil {
 			continue
 		}
-		needs := d.Needs
+		step := kind.Placed(k, list, func(context.Context) kind.Placing { return r.placed(d.Name) }, d.Needs...)
+		step.Title, step.Area, step.Row, step.Tool, step.Verb = d.Label, steps.AreaDrift, d.Row, d.Tool, d.Installs().Done
 		if needsAccess {
-			needs = append(slices.Clone(needs), granting.Step)
+			step.After = append(step.After, granting.Step)
 			accessWaits = append(accessWaits, d.Name)
 		}
-		step := kind.Placed(k, list, func(context.Context) kind.Placing { return r.placed(d.Name) }, needs...)
-		step.Title, step.Area, step.Row, step.Tool, step.Verb = d.Label, steps.AreaDrift, d.Row, d.Tool, d.Installs().Done
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
@@ -479,14 +479,15 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		settings = []engine.Step{feature(steps.FeaturePrefs, saving)}
 	}
 	// The terminal's grant, or the SSH session's: kit-app-access looks
-	// after kit.app's.
-	granting = granting.Then(accessWaits)
+	// after kit.app's. Placed as [features] places prefs only while nothing
+	// else waits for it, as what holds prefs back mustn't hold that back.
+	granting = granting.For(accessWaits, features.on(steps.FeaturePrefs))
 	if !a.scheduled && (features.on(steps.FeaturePrefs) || len(accessWaits) > 0) {
-		access := steps.FullDiskAccess(home, granting, refusal)
-		if features.on(steps.FeaturePrefs) {
-			access = feature(steps.FeaturePrefs, access)
+		step := steps.FullDiskAccess(granting, access)
+		if features.on(steps.FeaturePrefs) && len(accessWaits) == 0 {
+			step = feature(steps.FeaturePrefs, step)
 		}
-		settings = append(settings, access)
+		settings = append(settings, step)
 	}
 	checks = append(checks, settings...)
 	// A step by hand that comes due while kit applies at a terminal is

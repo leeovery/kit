@@ -31,6 +31,7 @@ type Exclusions struct {
 	home      string
 	excluders []tool.Excluder
 	admin     func(ctx context.Context) bool
+	access    func(ctx context.Context) error
 	refused   func(ctx context.Context, program string) error
 	// matched are the paths a glob matched, by name: kept out where they
 	// are; declared every path declared, a glob by its matches.
@@ -173,9 +174,13 @@ func (x *Exclusions) globbed(name string) bool {
 
 // Install keeps each path out of every excluder's backups, one at a time so
 // one that fails leaves the rest: a glob's match where it is, first; a
-// plain path fixed. An excluder refusing for want of Full Disk Access
-// refuses every path alike, so that ends it, said once (refusal).
+// plain path fixed. Held while kit lacks Full Disk Access (SetAccess); an
+// excluder refusing for want of it all the same refuses every path alike,
+// so that ends it, said once (refusal), ahead of what failed before it.
 func (x *Exclusions) Install(ctx context.Context, names []string) error {
+	if err := x.held(ctx); err != nil {
+		return err
+	}
 	var here, fixed []string
 	for _, name := range names {
 		if x.matched[name] {
@@ -189,7 +194,7 @@ func (x *Exclusions) Install(ctx context.Context, names []string) error {
 		for _, name := range slices.Concat(here, fixed) {
 			err := kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, tilde.Expand(x.home, name), !x.matched[name]) })
 			if errors.Is(err, tool.ErrNoFullDiskAccess) {
-				return x.refusal(ctx, ex.Program())
+				return errors.Join(append([]error{x.refusal(ctx, ex.Program())}, errs...)...)
 			}
 			errs = append(errs, named(name, err))
 		}
@@ -198,8 +203,11 @@ func (x *Exclusions) Install(ctx context.Context, names []string) error {
 }
 
 // Remove stops keeping each path out, through the excluders keeping it
-// out, ended as Install is by a refusal for want of Full Disk Access.
+// out, held and ended as Install is for want of Full Disk Access.
 func (x *Exclusions) Remove(ctx context.Context, names []string) error {
+	if err := x.held(ctx); err != nil {
+		return err
+	}
 	var errs []error
 	for _, ex := range x.excluders {
 		kept, err := ex.Excluded(ctx, x.run, nil)
@@ -214,7 +222,7 @@ func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 			}
 			err := kind.AdminAgain(ctx, func() error { return ex.Include(ctx, x.run, path) })
 			if errors.Is(err, tool.ErrNoFullDiskAccess) {
-				return x.refusal(ctx, ex.Program())
+				return errors.Join(append([]error{x.refusal(ctx, ex.Program())}, errs...)...)
 			}
 			errs = append(errs, named(name, err))
 		}
@@ -222,14 +230,23 @@ func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 	return errors.Join(errs...)
 }
 
-// SetRefused is what Install and Remove return when an excluder's program
-// refuses for want of Full Disk Access.
-func (x *Exclusions) SetRefused(refused func(ctx context.Context, program string) error) {
-	x.refused = refused
+// SetAccess is how Install and Remove find out whether they're held for
+// want of Full Disk Access, and what they return when an excluder's program
+// refuses for want of it all the same.
+func (x *Exclusions) SetAccess(held func(ctx context.Context) error, refused func(ctx context.Context, program string) error) {
+	x.access, x.refused = held, refused
+}
+
+// held is why Install and Remove are held, nil when they aren't.
+func (x *Exclusions) held(ctx context.Context) error {
+	if x.access == nil {
+		return nil
+	}
+	return x.access(ctx)
 }
 
 // refusal is the error for program refusing for want of Full Disk Access:
-// what the kind was told to say (SetRefused), else held back, saying so.
+// what the kind was told to say (SetAccess), else held back, saying so.
 func (x *Exclusions) refusal(ctx context.Context, program string) error {
 	if x.refused != nil {
 		return x.refused(ctx, program)

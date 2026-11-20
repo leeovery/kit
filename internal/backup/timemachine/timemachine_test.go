@@ -247,13 +247,15 @@ func TestTimeMachineExcludes(t *testing.T) {
 	}
 }
 
-// noAccess is what tmutil prints on its standard error refusing for want
-// of Full Disk Access, exiting 80.
-const noAccess = `tmutil: addexclusion requires Full Disk Access privileges.
+// noAccess is what tmutil prints on its standard error refusing verb for
+// want of Full Disk Access, exiting 80.
+func noAccess(verb string) string {
+	return "tmutil: " + verb + ` requires Full Disk Access privileges.
 To allow this operation, select Full Disk Access in the Privacy
 tab of the Security & Privacy preference pane, and add Terminal
 to the list of applications which are allowed Full Disk Access.
 `
+}
 
 // tmutil refusing for want of Full Disk Access, fixed through sudo or where
 // it is, is tool.ErrNoFullDiskAccess, its own words kept; any other failure
@@ -272,11 +274,11 @@ func TestTimeMachineRefusesWithoutFullDiskAccess(t *testing.T) {
 		stderr string
 		access bool
 	}{
-		{"fixed, refused", fixed, 80, noAccess, true},
-		{"where it is, refused", here, 80, noAccess, true},
-		{"included, refused", include, 80, noAccess, true},
+		{"fixed, refused", fixed, 80, noAccess("addexclusion"), true},
+		{"where it is, refused", here, 80, noAccess("addexclusion"), true},
+		{"included, refused", include, 80, noAccess("removeexclusion"), true},
 		{"another failure", here, 1, "tmutil: something else went wrong\n", false},
-		{"another exit", here, 1, noAccess, false},
+		{"another exit", here, 1, noAccess("addexclusion"), false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)

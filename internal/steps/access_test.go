@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
@@ -39,34 +40,35 @@ func env(vars map[string]string) func(string) string {
 	return func(name string) string { return vars[name] }
 }
 
+// ssh is an SSH session's environment.
+var ssh = map[string]string{"TERM_PROGRAM": "ghostty", "SSH_CONNECTION": "192.0.2.1 50000 192.0.2.2 22"}
+
 // Each place kit runs from has its own way to give Full Disk Access: a
 // terminal, named as TERM_PROGRAM says when kit knows it, is given it in
-// System Settings and reopened, a to-do of the full-disk-access step's own;
-// an SSH session, by Remote Login's switch, which the config's own step by
-// hand covers, so kit names it alone; kit.app, run on a schedule, by the
-// step by hand kit-app-access raises.
+// System Settings and reopened; an SSH session, by Remote Login's switch;
+// kit.app, run on a schedule, by the step by hand kit-app-access raises,
+// what waits for it saying it's kit.app's.
 func TestGrantingFor(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
 		vars      map[string]string
 		scheduled bool
 		step      string
+		wait      string
 		title     string
 		first     string
-		raised    bool
 	}{
-		{"Ghostty", map[string]string{"TERM_PROGRAM": "ghostty"}, false, steps.FullDiskAccessName,
-			"Give Ghostty Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on Ghostty", true},
-		{"Terminal", map[string]string{"TERM_PROGRAM": "Apple_Terminal"}, false, steps.FullDiskAccessName,
-			"Give Terminal Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on Terminal", true},
-		{"iTerm", map[string]string{"TERM_PROGRAM": "iTerm.app"}, false, steps.FullDiskAccessName,
-			"Give iTerm Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on iTerm", true},
-		{"a terminal kit doesn't know", map[string]string{"TERM_PROGRAM": "vscode"}, false, steps.FullDiskAccessName,
-			"Give the terminal kit runs in Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on the terminal kit runs in", true},
-		{"over SSH", map[string]string{"TERM_PROGRAM": "ghostty", "SSH_CONNECTION": "192.0.2.1 50000 192.0.2.2 22"}, false, steps.FullDiskAccessName,
-			"Allow Full Disk Access for remote users", "System Settings › General › Sharing › Remote Login › ⓘ", false},
-		{"from kit.app", map[string]string{"TERM_PROGRAM": "ghostty", "SSH_CONNECTION": "192.0.2.1 50000 192.0.2.2 22"}, true, steps.AppAccessName,
-			"Give kit.app Full Disk Access", "", false},
+		{"Ghostty", map[string]string{"TERM_PROGRAM": "ghostty"}, false, steps.FullDiskAccessName, "needs Full Disk Access",
+			"Give Ghostty Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on Ghostty"},
+		{"Terminal", map[string]string{"TERM_PROGRAM": "Apple_Terminal"}, false, steps.FullDiskAccessName, "needs Full Disk Access",
+			"Give Terminal Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on Terminal"},
+		{"iTerm", map[string]string{"TERM_PROGRAM": "iTerm.app"}, false, steps.FullDiskAccessName, "needs Full Disk Access",
+			"Give iTerm Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on iTerm"},
+		{"a terminal kit doesn't know", map[string]string{"TERM_PROGRAM": "vscode"}, false, steps.FullDiskAccessName, "needs Full Disk Access",
+			"Give the terminal kit runs in Full Disk Access, then reopen it", "System Settings › Privacy & Security › Full Disk Access, turn on the terminal kit runs in"},
+		{"over SSH", ssh, false, steps.FullDiskAccessName, "needs Full Disk Access",
+			"Allow Full Disk Access for remote users", "System Settings › General › Sharing › Remote Login › ⓘ"},
+		{"from kit.app", ssh, true, steps.AppAccessName, "needs kit.app's Full Disk Access", "Give kit.app Full Disk Access", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			g := steps.GrantingFor(env(tt.vars), tt.scheduled)
@@ -74,75 +76,99 @@ func TestGrantingFor(t *testing.T) {
 			if len(g.Steps) > 0 {
 				first = g.Steps[0]
 			}
-			if g.Step != tt.step || g.Title != tt.title || first != tt.first || g.Raised != tt.raised || g.Do == "" {
-				t.Errorf("GrantingFor() = %+v; want step %s, %q, first %q, raised %v, and a line saying what to do", g, tt.step, tt.title, tt.first, tt.raised)
+			if g.Step != tt.step || g.Wait != tt.wait || g.Title != tt.title || first != tt.first || g.Do == "" {
+				t.Errorf("GrantingFor() = %+v; want step %s, %q, %q, first %q, and a line saying what to do", g, tt.step, tt.wait, tt.title, tt.first)
 			}
 		})
 	}
 }
 
-// The to-do giving Full Disk Access ends by applying the steps waiting for
-// it, when there are any; kit-app-access's, with no steps of its own here,
-// is left as it is.
-func TestGrantingThen(t *testing.T) {
+// For what waits for it: with the backup exclusions waiting, the to-do ends
+// by applying them, in its steps and its line, and at a terminal it's
+// raised; with apps' settings alone, it's named, never raised; its why says
+// what's declared. kit.app's is left as it is.
+func TestGrantingForWhatWaits(t *testing.T) {
 	terminal := steps.GrantingFor(env(map[string]string{"TERM_PROGRAM": "ghostty"}), false)
-	if got, want := terminal.Then([]string{"backup-exclusion"}).Steps, []string{
-		"System Settings › Privacy & Security › Full Disk Access, turn on Ghostty",
-		"Quit Ghostty and open it again",
-		"Run kit apply backup-exclusion",
-	}; !slices.Equal(got, want) {
-		t.Errorf("Then() = %q; want %q", got, want)
-	}
-	if got := terminal.Then(nil).Steps; len(got) != 2 {
-		t.Errorf("Then(none) = %q; want the steps as they were", got)
-	}
-	if got := steps.GrantingFor(env(nil), true).Then([]string{"backup-exclusion"}).Steps; len(got) != 0 {
-		t.Errorf("kit.app's Then() = %q; want none", got)
+	remote := steps.GrantingFor(env(ssh), false)
+	app := steps.GrantingFor(env(nil), true)
+	exclusions := []string{"backup-exclusion"}
+	for _, tt := range []struct {
+		name   string
+		g      steps.Granting
+		again  []string
+		prefs  bool
+		raised bool
+		last   string
+		why    string
+	}{
+		{"exclusions, at a terminal", terminal, exclusions, false, true, "Run kit apply backup-exclusion", "Only apps with Full Disk Access can keep folders out of backups. Ghostty takes it up only once it's reopened."},
+		{"both, at a terminal", terminal, exclusions, true, true, "Run kit apply backup-exclusion", "Only apps with Full Disk Access can keep folders out of backups or read apps' settings. Ghostty takes it up only once it's reopened."},
+		{"apps' settings alone, at a terminal", terminal, nil, true, false, "Quit Ghostty and open it again", "Only apps with Full Disk Access can read apps' settings. Ghostty takes it up only once it's reopened."},
+		{"exclusions, over SSH", remote, exclusions, false, false, "Run kit apply backup-exclusion", "SSH sessions here can't keep folders out of backups without Full Disk Access for remote users."},
+		{"kit.app's", app, exclusions, true, false, "", app.Why},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := tt.g.For(tt.again, tt.prefs)
+			last := ""
+			if len(g.Steps) > 0 {
+				last = g.Steps[len(g.Steps)-1]
+			}
+			if g.Raised != tt.raised || last != tt.last || g.Why != tt.why {
+				t.Errorf("For() = %+v; want raised %v, last step %q, why %q", g, tt.raised, tt.last, tt.why)
+			}
+			if again := strings.HasSuffix(g.Do, ", then run kit apply backup-exclusion"); again != (len(tt.again) > 0 && g.Step == steps.FullDiskAccessName) {
+				t.Errorf("Do = %q; want it to end applying the exclusions only when they wait", g.Do)
+			}
+		})
 	}
 }
 
 // The step finds what kit runs in has Full Disk Access when what only that
 // shows reads, or there's none of it to read, and no program kit ran has
 // refused for want of it; else not, the item the to-do giving it, raised
-// at a terminal, named over SSH.
+// as For has it. Access is granted, or not, as the step finds it.
 func TestFullDiskAccess(t *testing.T) {
-	terminal := steps.GrantingFor(env(map[string]string{"TERM_PROGRAM": "ghostty"}), false).Then([]string{"backup-exclusion"})
-	remote := steps.GrantingFor(env(map[string]string{"SSH_CONNECTION": "192.0.2.1 50000 192.0.2.2 22"}), false)
-	refused := &steps.Refusal{}
-	refused.Note("tmutil")
+	terminal := steps.GrantingFor(env(map[string]string{"TERM_PROGRAM": "ghostty"}), false)
+	waited := terminal.For([]string{"backup-exclusion"}, false)
+	prefsAlone := terminal.For(nil, true)
+	remote := steps.GrantingFor(env(ssh), false).For([]string{"backup-exclusion"}, false)
 	for _, tt := range []struct {
 		name    string
 		home    string
 		g       steps.Granting
-		refused *steps.Refusal
+		refused bool
 		state   check.State
 		summary string
-		raised  bool
 	}{
-		{"readable", protected(t, true), terminal, nil, check.OK, "granted", false},
-		{"nothing to read", t.TempDir(), terminal, nil, check.OK, "nothing protected to read", false},
-		{"denied at a terminal", protected(t, false), terminal, nil, check.Attention, "not granted", true},
-		{"denied over SSH", protected(t, false), remote, nil, check.Attention, "not granted", false},
-		{"readable, tmutil refused", protected(t, true), terminal, refused, check.Attention, "not granted: tmutil needs it", true},
-		{"nothing to read, tmutil refused", t.TempDir(), terminal, refused, check.Attention, "not granted: tmutil needs it", true},
+		{"readable", protected(t, true), waited, false, check.OK, "granted"},
+		{"nothing to read", t.TempDir(), waited, false, check.OK, "nothing protected to read"},
+		{"denied, the exclusions waiting", protected(t, false), waited, false, check.Attention, "not granted"},
+		{"denied, apps' settings alone", protected(t, false), prefsAlone, false, check.Attention, "not granted"},
+		{"denied over SSH", protected(t, false), remote, false, check.Attention, "not granted"},
+		{"readable, tmutil refused", protected(t, true), waited, true, check.Attention, "not granted: tmutil needs it"},
+		{"nothing to read, tmutil refused", t.TempDir(), waited, true, check.Attention, "not granted: tmutil needs it"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			state, summary, ids := checked(t, steps.FullDiskAccess(tt.home, tt.g, tt.refused))
-			if state != tt.state || summary != tt.summary {
-				t.Fatalf("check = %s %q; want %s %q", state, summary, tt.state, tt.summary)
+			access := &steps.Access{Home: tt.home}
+			if tt.refused {
+				access.Refused("tmutil")
+			}
+			step := steps.FullDiskAccess(tt.g, access)
+			state, summary, ids := checked(t, step)
+			if state != tt.state || summary != tt.summary || access.Granted() != (state == check.OK) {
+				t.Fatalf("check = %s %q, granted %v; want %s %q", state, summary, access.Granted(), tt.state, tt.summary)
 			}
 			if state == check.OK {
 				return
 			}
-			res := steps.FullDiskAccess(tt.home, tt.g, tt.refused).Check(t.Context())
-			it := res.Items[0]
+			it := step.Check(t.Context()).Items[0]
 			if !slices.Equal(ids, []string{"full-disk-access:denied"}) || it.Name != tt.g.Title || it.Detail != tt.g.Do {
-				t.Errorf("items = %+v; want the one, titled %q, saying %q", res.Items, tt.g.Title, tt.g.Do)
+				t.Errorf("item = %+v; want the one, titled %q, saying %q", it, tt.g.Title, tt.g.Do)
 			}
-			if raised := it.ToDo != nil; raised != tt.raised {
-				t.Fatalf("to-do = %+v; want one raised %v", it.ToDo, tt.raised)
+			if raised := it.ToDo != nil; raised != tt.g.Raised {
+				t.Fatalf("to-do = %+v; want one raised %v", it.ToDo, tt.g.Raised)
 			}
-			if tt.raised && (it.ToDo.Title != tt.g.Title || !slices.Equal(it.ToDo.Steps, tt.g.Steps) || it.ToDo.Why == "") {
+			if tt.g.Raised && (it.ToDo.Title != tt.g.Title || !slices.Equal(it.ToDo.Steps, tt.g.Steps) || it.ToDo.Why != tt.g.Why) {
 				t.Errorf("to-do = %+v; want %q, its why, then its steps %q", it.ToDo, tt.g.Title, tt.g.Steps)
 			}
 		})

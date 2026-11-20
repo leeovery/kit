@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/logs"
-	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
 )
 
@@ -132,9 +130,10 @@ func TestBackupExclusionsRefusedFullDiskAccess(t *testing.T) {
 		step    string
 		summary string
 		item    string
+		waits   string
 	}{
-		{"kit apply", []string{"apply"}, "full-disk-access", "not granted: tmutil needs it", "Give Ghostty Full Disk Access, then reopen it"},
-		{"the hourly run", []string{"nightly", "--scheduled"}, "kit-app-access", "not granted: the hourly run at 03:04 couldn't read what it protects", "Give kit.app Full Disk Access"},
+		{"kit apply", []string{"apply"}, "full-disk-access", "not granted: tmutil needs it", "Give Ghostty Full Disk Access, then reopen it", "needs Full Disk Access"},
+		{"the hourly run", []string{"nightly", "--scheduled"}, "kit-app-access", "not granted: the hourly run at 03:04 couldn't read what it protects", "Give kit.app Full Disk Access", "needs kit.app's Full Disk Access"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := exclusionsWorld(t)
@@ -142,7 +141,7 @@ func TestBackupExclusionsRefusedFullDiskAccess(t *testing.T) {
 			w.fake.OnMatch("tmutil", func(args []string) bool { return args[0] == "addexclusion" }).Exits(80).PrintsToStderr(tmutilNoAccess)
 			w.fake.OnMatch("sudo", func(args []string) bool { return len(args) > 2 && args[2] == "addexclusion" }).Exits(80).PrintsToStderr(tmutilNoAccess)
 			out, errOut, _ := w.run(t, tt.args...)
-			if want := "backup-exclusion deferred needs " + map[bool]string{true: "kit-app-access", false: "Full Disk Access"}[tt.step == "kit-app-access"] + "\n"; !strings.Contains(out, want) {
+			if want := "backup-exclusion deferred " + tt.waits + "\n"; !strings.Contains(out, want) {
 				t.Errorf("kit %s printed\n%s%s\nwant %q", strings.Join(tt.args, " "), out, errOut, want)
 			}
 			res := lastResult(t, w, tt.step)
@@ -157,20 +156,73 @@ func TestBackupExclusionsRefusedFullDiskAccess(t *testing.T) {
 }
 
 // From kit.app, on the hour, the exclusions wait for kit.app's Full Disk
-// Access, as last found: not granted, tmutil's asked nothing.
+// Access, as this run, its child, finds it: not granted, tmutil's asked
+// nothing; nothing there to tell, and nothing recorded, they go ahead, as
+// tmutil would say otherwise.
 func TestTheHourlyRunsExclusionsWaitForKitApp(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		denied   bool
+		excluded int
+	}{
+		{"not granted", true, 0},
+		{"nothing to tell", false, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := exclusionsWorld(t)
+			if tt.denied {
+				w.unreadable(t)
+			}
+			if err := nightly.Update(w.stateDir(), func(r *nightly.Record) { r.Access = nightly.Access{} }); err != nil {
+				t.Fatal(err)
+			}
+			w.fake.On("tmutil", "addexclusion", filepath.Join(w.home, "Library/Caches/one"))
+			out, errOut, _ := w.run(t, "nightly", "--scheduled")
+			if held := strings.Contains(out, "backup-exclusion deferred needs kit.app's Full Disk Access\n"); held != tt.denied {
+				t.Errorf("kit nightly --scheduled printed\n%s%s\nwant the exclusions held %v", out, errOut, tt.denied)
+			}
+			if got := excluded(w); len(got) != tt.excluded {
+				t.Errorf("ran %q; want tmutil asked %d times", got, tt.excluded)
+			}
+		})
+	}
+}
+
+// Without Full Disk Access, the exclusions' check still looks, as reading
+// them needs none: kit status says what's missing, or that they're all
+// in place.
+func TestBackupExclusionsCheckedWithoutFullDiskAccess(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		skip  string
+		match string
+		want  string
+	}{
+		{"missing", "", "[Included]", "backup-exclusion attention 2 declared, 0 excluded\n"},
+		{"all in place", "<string>/Applications</string>", "[Excluded]", "backup-exclusion ok 2 declared, all excluded\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := exclusionsWorld(t)
+			w.unreadable(t)
+			match := filepath.Join(w.home, "Library/Caches/one")
+			w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array>" + tt.skip + "</array></dict></plist>")
+			w.fake.On("tmutil", "isexcluded", match).Prints(tt.match + "  " + match + "\n")
+			if out, errOut, _ := w.run(t, "status"); !strings.Contains(out, tt.want) {
+				t.Errorf("kit status printed\n%s%s\nwant %q", out, errOut, tt.want)
+			}
+		})
+	}
+}
+
+// What holds apps' settings back, as a wait in [features --after] for what
+// isn't a step, never holds back the step the exclusions wait for: Full
+// Disk Access is checked all the same.
+func TestPrefsWaitNeverHoldsTheExclusionsAccess(t *testing.T) {
 	w := exclusionsWorld(t)
-	if err := nightly.Update(w.stateDir(), func(r *nightly.Record) {
-		r.Access = nightly.Access{At: w.now.Add(-time.Hour), App: macapp.Fingerprint(), Granted: false}
-	}); err != nil {
-		t.Fatal(err)
-	}
-	out, errOut, _ := w.run(t, "nightly", "--scheduled")
-	if want := "backup-exclusion deferred needs kit-app-access\n"; !strings.Contains(out, want) {
-		t.Errorf("kit nightly --scheduled printed\n%s%s\nwant %q", out, errOut, want)
-	}
-	if got := excluded(w); len(got) != 0 {
-		t.Errorf("ran %q; want tmutil asked nothing", got)
+	w.writeSection(t, "laptop", "features --after nosuch", "prefs\n")
+	out, errOut, _ := w.run(t, "status")
+	if !strings.Contains(out, "full-disk-access ok nothing protected to read\n") {
+		t.Errorf("kit status printed\n%s%s\nwant Full Disk Access checked, not held with prefs", out, errOut)
 	}
 }
 
@@ -189,7 +241,7 @@ func TestApplyRaisesFullDiskAccessAtATerminal(t *testing.T) {
 	w.fake.On("tmutil", "isexcluded", match).Prints("[Included]  " + match + "\n")
 	w.expectPassword()
 	title := "Give Ghostty Full Disk Access, then reopen it"
-	notified(t, w, kb, title, "Only apps with Full Disk Access can keep folders out of backups or read apps' settings.", ask.Key{Text: "s"})
+	notified(t, w, kb, title, "Only apps with Full Disk Access can keep folders out of backups.", ask.Key{Text: "s"})
 
 	out, errOut, code := w.run(t, "apply")
 	if code == 2 {

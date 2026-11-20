@@ -26,16 +26,19 @@ const (
 
 // Granting is how Full Disk Access is given to what kit runs in, each place
 // kit runs from having its own way: Step is the step telling whether it's
-// given; Title, Why and Steps the to-do giving it, and Do that in a line,
-// for kit status. Raised is whether the to-do is the full-disk-access
-// step's own, raised at the run's end: at a terminal. Over SSH the switch
-// is the config's own step by hand, when it declares one, and kit only
-// names it; from kit.app, AppAccess raises kit.app's.
+// given, and Wait what's held for it says; Title, Why and Steps the to-do
+// giving it, and Do that in a line, for kit status. Raised is whether the
+// to-do is the full-disk-access step's own, raised at the run's end: at a
+// terminal, with steps waiting for it (For). Over SSH the switch is the
+// config's own step by hand, when it declares one, and kit only names it;
+// from kit.app, AppAccess raises kit.app's.
 type Granting struct {
-	Step           string
+	Step, Wait     string
 	Title, Why, Do string
 	Steps          []string
 	Raised         bool
+	// app is the terminal it's given to, "" for an SSH session or kit.app.
+	app string
 }
 
 // GrantingFor is Granting where kit runs: kit.app's, scheduled; else, as
@@ -44,11 +47,10 @@ type Granting struct {
 func GrantingFor(getenv func(string) string, scheduled bool) Granting {
 	switch {
 	case scheduled:
-		return Granting{Step: AppAccessName, Title: appAccessTitle, Why: appAccessWhy, Do: appAccessDo}
+		return Granting{Step: AppAccessName, Wait: "needs kit.app's Full Disk Access", Title: appAccessTitle, Why: appAccessWhy, Do: appAccessDo}
 	case getenv("SSH_CONNECTION") != "":
 		return Granting{
-			Step: FullDiskAccessName, Title: remoteAccessTitle,
-			Why:   "SSH sessions here can't read what only Full Disk Access shows, which keeping folders out of backups and reading apps' settings need.",
+			Step: FullDiskAccessName, Wait: "needs Full Disk Access", Title: remoteAccessTitle,
 			Do:    remoteAccessSetting + ": turn on Allow full disk access for remote users",
 			Steps: []string{remoteAccessSetting, "Turn on Allow full disk access for remote users"},
 		}
@@ -58,20 +60,42 @@ func GrantingFor(getenv func(string) string, scheduled bool) Granting {
 		app = unnamedTerminal
 	}
 	return Granting{
-		Step: FullDiskAccessName, Raised: true,
+		Step: FullDiskAccessName, Wait: "needs Full Disk Access", app: app,
 		Title: "Give " + app + " Full Disk Access, then reopen it",
-		Why:   "Only apps with Full Disk Access can keep folders out of backups or read apps' settings. " + strings.ToUpper(app[:1]) + app[1:] + " takes it up only once it's reopened.",
 		Do:    "System Settings › Privacy & Security › Full Disk Access: turn on " + app + ", then quit it and open it again",
 		Steps: []string{"System Settings › Privacy & Security › Full Disk Access, turn on " + app, "Quit " + app + " and open it again"},
 	}
 }
 
-// Then is g ending by applying the steps that wait for it, steps, as its
-// last step: g as it is, with none.
-func (g Granting) Then(steps []string) Granting {
-	if len(steps) > 0 && len(g.Steps) > 0 {
-		g.Steps = append(slices.Clone(g.Steps), "Run kit apply "+strings.Join(steps, " "))
+// For is the full-disk-access step's g, for what needs it here: again, the
+// steps waiting for it, the backup exclusions', so keeping folders out of
+// backups; and prefs, whether apps' settings are saved here. With steps
+// waiting, it ends by applying them, and, at a terminal, is raised; with
+// none, it's named alone, as apps' settings need it only when a capture or
+// restore runs there. kit.app's is as it is.
+func (g Granting) For(again []string, prefs bool) Granting {
+	if g.Step != FullDiskAccessName {
+		return g
 	}
+	var uses []string
+	if len(again) > 0 {
+		uses = append(uses, "keep folders out of backups")
+	}
+	if prefs {
+		uses = append(uses, "read apps' settings")
+	}
+	if g.app != "" {
+		g.Why = "Only apps with Full Disk Access can " + strings.Join(uses, " or ") + ". " + strings.ToUpper(g.app[:1]) + g.app[1:] + " takes it up only once it's reopened."
+	} else {
+		g.Why = "SSH sessions here can't " + strings.Join(uses, " or ") + " without Full Disk Access for remote users."
+	}
+	if len(again) == 0 {
+		return g
+	}
+	run := "kit apply " + strings.Join(again, " ")
+	g.Steps = append(slices.Clone(g.Steps), "Run "+run)
+	g.Do += ", then run " + run
+	g.Raised = g.app != ""
 	return g
 }
 
@@ -85,44 +109,49 @@ func (g Granting) denied(summary string) check.Result {
 	return yours(FullDiskAccessName, summary, "denied", g.Do, check.ToDo{Title: g.Title, Why: g.Why, Steps: g.Steps, Group: groupBackups})
 }
 
-// Refusal is a program kit ran refusing for want of Full Disk Access, the
-// probe having read: the full-disk-access step finds it not granted once
-// one has, as it isn't, whatever the probe says.
-type Refusal struct {
+// Access is whether what kit runs in has Full Disk Access, in Home: as far
+// as the probe can tell, and unless a program kit ran has refused for want
+// of it all the same (Refused).
+type Access struct {
+	Home string
+
 	mu sync.Mutex
 	by string
 }
 
-// Note notes program refused.
-func (r *Refusal) Note(program string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.by = program
+// Refused notes program refused for want of Full Disk Access: from then on
+// it isn't granted, whatever the probe says.
+func (a *Access) Refused(program string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.by = program
 }
 
-// program is the program that refused, "" while none has.
-func (r *Refusal) program() string {
-	if r == nil {
-		return ""
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.by
+// refusedBy is the program that refused, "" while none has.
+func (a *Access) refusedBy() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.by
 }
 
-// FullDiskAccess checks what kit runs in can read what only Full Disk Access
-// shows, as keeping folders out of backups and a capture or restore of apps'
-// settings run there need, and that no program kit ran has refused for want
-// of it (refused, nil for none to note). Without it, it's what g says to do.
-// Not in the hourly launch's runs: kit.app's grant is AppAccess's.
-func FullDiskAccess(home string, g Granting, refused *Refusal) engine.Step {
+// Granted reports whether it's granted: so with nothing there for the
+// probe to read, a program's refusal left to say otherwise.
+func (a *Access) Granted() bool {
+	return a.refusedBy() == "" && HasFullDiskAccess(a.Home)
+}
+
+// FullDiskAccess checks what kit runs in has Full Disk Access, as a, as
+// keeping folders out of backups and a capture or restore of apps' settings
+// run there need. Without it, it's what g says to do. Not in the hourly
+// launch's runs: kit.app's grant is AppAccess's.
+func FullDiskAccess(g Granting, a *Access) engine.Step {
 	return engine.Step{
 		Name: FullDiskAccessName, Title: "Full Disk Access", Area: AreaBackups,
 		Check: func(context.Context) check.Result {
-			if by := refused.program(); by != "" {
+			if by := a.refusedBy(); by != "" {
 				return g.denied("not granted: " + by + " needs it")
 			}
-			switch granted, found := ProbeFullDiskAccess(home); {
+			switch granted, found := ProbeFullDiskAccess(a.Home); {
 			case granted:
 				return check.Result{State: check.OK, Summary: "granted"}
 			case !found:

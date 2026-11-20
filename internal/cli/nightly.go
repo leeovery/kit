@@ -98,21 +98,33 @@ func (r *run) recordAccess(granted bool) {
 	}
 }
 
+// held is why a kind's installs and removals are held: while access isn't
+// granted, as g's wait says; nil once it is. In the hourly run, access is
+// kit.app's, as this run, its child, is.
+func held(g *steps.Granting, access *steps.Access) func(ctx context.Context) error {
+	return func(context.Context) error {
+		if access.Granted() {
+			return nil
+		}
+		return engine.NotYet(g.Wait)
+	}
+}
+
 // refused is what a kind returns once one of its programs refuses for want
-// of Full Disk Access, the step telling whether it's given, g's, having
-// found it was: noted where that step looks (kit.app's record, scheduled,
-// else refusal), and that step checked again, so the run says it isn't
-// given, and what to do, once; held back behind it, as its wait says; and,
-// outside a run, saying what to do.
-func (r *run) refused(g *steps.Granting, refusal *steps.Refusal, scheduled bool) func(ctx context.Context, program string) error {
+// of Full Disk Access, access having seemed granted: noted, in access, and,
+// in the hourly run, kit.app's record, where g's step looks; that step
+// checked again, so the run says once it isn't given, and what to do, the
+// kind held behind it, as g's wait says. Outside a run, or should that step
+// still stand ok, as when the record couldn't be written, what to do is the
+// kind's own to say.
+func (r *run) refused(g *steps.Granting, access *steps.Access, scheduled bool) func(ctx context.Context, program string) error {
 	return func(ctx context.Context, program string) error {
+		access.Refused(program)
 		if scheduled {
 			r.recordAccess(false)
-		} else {
-			refusal.Note(program)
 		}
-		if _, ok := engine.Recheck(ctx, g.Step); ok {
-			return engine.NotYet("needs " + engine.Title(ctx, g.Step))
+		if res, ok := engine.Recheck(ctx, g.Step); ok && res.State != check.OK {
+			return engine.NotYet(g.Wait)
 		}
 		return engine.NotYet(program + " needs Full Disk Access: " + g.Title)
 	}

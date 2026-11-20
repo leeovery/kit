@@ -24,11 +24,12 @@ import (
 
 // fakeExcluder keeps paths out of a tool's backups: fixed, those in fixed;
 // where they are, those in here. Keeping one out fixed needs the password;
-// one in fail fails. It notes what it's asked to do.
+// one in fail fails; one in refuse is refused for want of Full Disk Access.
+// It notes what it's asked to do.
 type fakeExcluder struct {
-	fixed, here []string
-	fail        string
-	did         []string
+	fixed, here  []string
+	fail, refuse string
+	did          []string
 }
 
 func (f *fakeExcluder) Program() string { return "keeper" }
@@ -45,8 +46,11 @@ func (f *fakeExcluder) Excluded(_ context.Context, _ runner.Runner, here []strin
 
 func (f *fakeExcluder) Exclude(_ context.Context, _ runner.Runner, path string, fixed bool) error {
 	f.did = append(f.did, map[bool]string{true: "fixed ", false: "here "}[fixed]+path)
-	if path == f.fail {
+	switch path {
+	case f.fail:
 		return errors.New("refused")
+	case f.refuse:
+		return tool.ErrNoFullDiskAccess
 	}
 	return nil
 }
@@ -222,13 +226,24 @@ func TestExclusionsThroughTheTools(t *testing.T) {
 	}
 }
 
-// noAccess is what tmutil prints on its standard error refusing for want
-// of Full Disk Access, exiting 80.
-const noAccess = `tmutil: addexclusion requires Full Disk Access privileges.
+// noAccess is what tmutil prints on its standard error refusing verb for
+// want of Full Disk Access, exiting 80.
+func noAccess(verb string) string {
+	return "tmutil: " + verb + ` requires Full Disk Access privileges.
 To allow this operation, select Full Disk Access in the Privacy
 tab of the Security & Privacy preference pane, and add Terminal
 to the list of applications which are allowed Full Disk Access.
 `
+}
+
+// refusesAll has fake's tmutil refuse every exclusion added or removed, as
+// it does without Full Disk Access, through sudo or not.
+func refusesAll(fake *runnertest.Fake) {
+	for _, verb := range []string{"addexclusion", "removeexclusion"} {
+		fake.OnMatch("tmutil", func(args []string) bool { return args[0] == verb }).Exits(80).PrintsToStderr(noAccess(verb))
+		fake.OnMatch("sudo", func(args []string) bool { return slices.Contains(args, verb) }).Exits(80).PrintsToStderr(noAccess(verb))
+	}
+}
 
 // tmutil refusing for want of Full Disk Access refuses every path alike: the
 // first refusal ends the install, or the removal, said once, as the kind was
@@ -252,7 +267,7 @@ func TestExclusionsRefusedFullDiskAccess(t *testing.T) {
 			fake := runnertest.New(t)
 			x := exclusion.New(fake, h, backup.Excluders([]string{timemachine.ID}))
 			if tt.told {
-				x.SetRefused(func(_ context.Context, program string) error { return fmt.Errorf("%w %s", told, program) })
+				x.SetAccess(nil, func(_ context.Context, program string) error { return fmt.Errorf("%w %s", told, program) })
 			}
 			list, err := x.Expand(declared)
 			if err != nil {
@@ -260,8 +275,7 @@ func TestExclusionsRefusedFullDiskAccess(t *testing.T) {
 			}
 			fake.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>SkipPaths</key><array><string>/Volumes/Old</string><string>/Volumes/Older</string></array></dict></plist>")
 			fake.OnMatch("tmutil", func(args []string) bool { return args[0] == "isexcluded" })
-			fake.OnMatch("tmutil", func(args []string) bool { return args[0] == "addexclusion" }).Exits(80).PrintsToStderr(noAccess)
-			fake.OnMatch("sudo", func([]string) bool { return true }).Exits(80).PrintsToStderr(noAccess)
+			refusesAll(fake)
 			var names []string
 			for _, e := range list.Entries {
 				names = append(names, e.Name)
@@ -284,5 +298,46 @@ func TestExclusionsRefusedFullDiskAccess(t *testing.T) {
 				t.Errorf("ran %q; want tmutil asked once, the rest left", fake.Calls())
 			}
 		})
+	}
+}
+
+// Held for want of Full Disk Access, the kind changes nothing, saying why,
+// though its check still looks, finding what's missing.
+func TestExclusionsHeldForFullDiskAccess(t *testing.T) {
+	h := home(t)
+	keeper := &fakeExcluder{fixed: []string{h + "/.cache", h + "/Movies"}}
+	x := exclusion.New(runnertest.New(t), h, []tool.Excluder{keeper})
+	x.SetAccess(func(context.Context) error { return engine.NotYet("needs Full Disk Access") }, nil)
+	if got := compared(t, x); len(got) == 0 {
+		t.Errorf("items = %q; want the check to look all the same", got)
+	}
+	for name, err := range map[string]error{
+		"Install": x.Install(t.Context(), []string{"/Applications"}),
+		"Remove":  x.Remove(t.Context(), []string{"~/Movies"}),
+	} {
+		if !engine.IsNotYet(err) || err.Error() != "needs Full Disk Access" {
+			t.Errorf("%s() = %v; want it held, saying why", name, err)
+		}
+	}
+	if len(keeper.did) != 0 {
+		t.Errorf("did %q; want nothing", keeper.did)
+	}
+}
+
+// A refusal for want of Full Disk Access ends the install, said first, the
+// failures before it kept after it.
+func TestExclusionsRefusalKeepsEarlierFailures(t *testing.T) {
+	h := home(t)
+	keeper := &fakeExcluder{fail: "/Applications", refuse: h + "/.cache"}
+	x := exclusion.New(runnertest.New(t), h, []tool.Excluder{keeper})
+	if _, err := x.Expand(declared); err != nil {
+		t.Fatal(err)
+	}
+	err := x.Install(t.Context(), []string{"/Applications", "~/.cache", "/Volumes/Later"})
+	if !engine.IsNotYet(err) || !strings.HasPrefix(err.Error(), "keeper needs Full Disk Access\n") || !strings.Contains(err.Error(), "/Applications: refused") {
+		t.Errorf("Install() = %q; want the refusal, then the failure before it", err)
+	}
+	if want := []string{"fixed /Applications", "fixed " + h + "/.cache"}; !slices.Equal(keeper.did, want) {
+		t.Errorf("did %q, want %q: nothing after the refusal", keeper.did, want)
 	}
 }
