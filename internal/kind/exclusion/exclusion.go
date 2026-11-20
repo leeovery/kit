@@ -31,8 +31,7 @@ type Exclusions struct {
 	home      string
 	excluders []tool.Excluder
 	admin     func(ctx context.Context) bool
-	access    func(ctx context.Context) error
-	refused   func(ctx context.Context, program string) error
+	access    kind.Access
 	// matched are the paths a glob matched, by name: kept out where they
 	// are; declared every path declared, a glob by its matches.
 	matched, declared map[string]bool
@@ -230,26 +229,34 @@ func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 	return errors.Join(errs...)
 }
 
-// SetAccess is how Install and Remove find out whether they're held for
-// want of Full Disk Access, and what they return when an excluder's program
-// refuses for want of it all the same.
-func (x *Exclusions) SetAccess(held func(ctx context.Context) error, refused func(ctx context.Context, program string) error) {
-	x.access, x.refused = held, refused
+// SetAccess is how the kind finds out whether its changes are held for want
+// of Full Disk Access, and what they return when held, or when an
+// excluder's program refuses for want of it all the same.
+func (x *Exclusions) SetAccess(a kind.Access) { x.access = a }
+
+// granted reports whether nothing holds its changes for want of Full Disk
+// Access, only looking.
+func (x *Exclusions) granted(ctx context.Context) bool {
+	return x.access.Granted == nil || x.access.Granted(ctx)
 }
 
-// held is why Install and Remove are held, nil when they aren't.
+// held is why Install and Remove are held, nil when they aren't: what the
+// kind was told to say (SetAccess), telling that they're held.
 func (x *Exclusions) held(ctx context.Context) error {
-	if x.access == nil {
+	switch {
+	case x.granted(ctx):
 		return nil
+	case x.access.Held != nil:
+		return x.access.Held(ctx)
 	}
-	return x.access(ctx)
+	return engine.NotYet("needs Full Disk Access")
 }
 
 // refusal is the error for program refusing for want of Full Disk Access:
 // what the kind was told to say (SetAccess), else held back, saying so.
 func (x *Exclusions) refusal(ctx context.Context, program string) error {
-	if x.refused != nil {
-		return x.refused(ctx, program)
+	if x.access.Refused != nil {
+		return x.access.Refused(ctx, program)
 	}
 	return engine.NotYet(program + " needs Full Disk Access")
 }
@@ -283,8 +290,12 @@ func (x *Exclusions) Unattended(names []string) []string {
 }
 
 // NeedsAdmin is those of names that need an administrator's password to
-// keep out.
-func (x *Exclusions) NeedsAdmin(_ context.Context, names []string) ([]string, error) {
+// keep out: none while Full Disk Access holds them, as none will be kept
+// out.
+func (x *Exclusions) NeedsAdmin(ctx context.Context, names []string) ([]string, error) {
+	if !x.granted(ctx) {
+		return nil, nil
+	}
 	var out []string
 	for _, name := range names {
 		if x.asAdmin(name) {
@@ -299,10 +310,11 @@ func (x *Exclusions) NeedsAdmin(_ context.Context, names []string) ([]string, er
 func (x *Exclusions) SetAdmin(held func(ctx context.Context) bool) { x.admin = held }
 
 // Blocked holds up every path missing that needs an administrator's
-// password while kit has none.
+// password while kit has none: none while Full Disk Access holds them all,
+// what they truly wait for.
 func (x *Exclusions) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
 	blocked := map[string]kind.Block{}
-	if x.admin == nil || x.admin(ctx) {
+	if x.admin == nil || x.admin(ctx) || !x.granted(ctx) {
 		return blocked, nil
 	}
 	for name := range missing {

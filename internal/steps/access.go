@@ -28,8 +28,9 @@ const (
 // kit runs from having its own way: Step is the step telling whether it's
 // given, and Wait what's held for it says; Title, Why and Steps the to-do
 // giving it, and Do that in a line, for kit status. Raised is whether the
-// to-do is the full-disk-access step's own, raised at the run's end: at a
-// terminal, with steps waiting for it (For). Over SSH the switch is the
+// to-do can be the full-disk-access step's own, raised at the run's end once
+// something's held for it (Access.Held): at a terminal, with steps waiting
+// for it (For). Over SSH the switch is the
 // config's own step by hand, when it declares one, and kit only names it;
 // from kit.app, AppAccess raises kit.app's.
 type Granting struct {
@@ -70,7 +71,7 @@ func GrantingFor(getenv func(string) string, scheduled bool) Granting {
 // For is the full-disk-access step's g, for what needs it here: again, the
 // steps waiting for it, the backup exclusions', so keeping folders out of
 // backups; and prefs, whether apps' settings are saved here. With steps
-// waiting, it ends by applying them, and, at a terminal, is raised; with
+// waiting, it ends by applying them, and, at a terminal, can be raised; with
 // none, it's named alone, as apps' settings need it only when a capture or
 // restore runs there. kit.app's is as it is.
 func (g Granting) For(again []string, prefs bool) Granting {
@@ -100,10 +101,10 @@ func (g Granting) For(again []string, prefs bool) Granting {
 }
 
 // denied is how the full-disk-access step stands without it, as summary
-// says: the to-do giving it, raised as the run ends when it's the step's
-// own, else named.
-func (g Granting) denied(summary string) check.Result {
-	if !g.Raised {
+// says: the to-do giving it, raised as the run ends when it can be the
+// step's own and something's been held for it (held), else named.
+func (g Granting) denied(summary string, held bool) check.Result {
+	if !g.Raised || !held {
 		return problem(FullDiskAccessName, summary, [3]string{"denied", g.Title, g.Do})
 	}
 	return yours(FullDiskAccessName, summary, "denied", g.Do, check.ToDo{Title: g.Title, Why: g.Why, Steps: g.Steps, Group: groupBackups})
@@ -111,12 +112,29 @@ func (g Granting) denied(summary string) check.Result {
 
 // Access is whether what kit runs in has Full Disk Access, in Home: as far
 // as the probe can tell, and unless a program kit ran has refused for want
-// of it all the same (Refused).
+// of it all the same (Refused); and whether anything's been held for want
+// of it (Held).
 type Access struct {
 	Home string
 
-	mu sync.Mutex
-	by string
+	mu   sync.Mutex
+	by   string
+	held bool
+}
+
+// Held notes something was held for want of Full Disk Access, as an
+// exclusion to apply: from then on its to-do is raised, when it can be.
+func (a *Access) Held() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.held = true
+}
+
+// holding reports whether anything's been held for want of it.
+func (a *Access) holding() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.held
 }
 
 // Refused notes program refused for want of Full Disk Access: from then on
@@ -142,14 +160,16 @@ func (a *Access) Granted() bool {
 
 // FullDiskAccess checks what kit runs in has Full Disk Access, as a, as
 // keeping folders out of backups and a capture or restore of apps' settings
-// run there need. Without it, it's what g says to do. Not in the hourly
-// launch's runs: kit.app's grant is AppAccess's.
+// run there need. Without it, it's what g says to do: raised, when it can
+// be, only once something's been held for it, as with nothing to exclude
+// there's nothing waiting. Not in the hourly launch's runs: kit.app's grant
+// is AppAccess's.
 func FullDiskAccess(g Granting, a *Access) engine.Step {
 	return engine.Step{
 		Name: FullDiskAccessName, Title: "Full Disk Access", Area: AreaBackups,
 		Check: func(context.Context) check.Result {
 			if by := a.refusedBy(); by != "" {
-				return g.denied("not granted: " + by + " needs it")
+				return g.denied("not granted: "+by+" needs it", a.holding())
 			}
 			switch granted, found := ProbeFullDiskAccess(a.Home); {
 			case granted:
@@ -157,7 +177,7 @@ func FullDiskAccess(g Granting, a *Access) engine.Step {
 			case !found:
 				return check.Result{State: check.OK, Summary: "nothing protected to read"}
 			}
-			return g.denied("not granted")
+			return g.denied("not granted", a.holding())
 		},
 	}
 }

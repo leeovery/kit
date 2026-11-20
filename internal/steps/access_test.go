@@ -126,7 +126,9 @@ func TestGrantingForWhatWaits(t *testing.T) {
 // The step finds what kit runs in has Full Disk Access when what only that
 // shows reads, or there's none of it to read, and no program kit ran has
 // refused for want of it; else not, the item the to-do giving it, raised
-// as For has it. Access is granted, or not, as the step finds it.
+// as For has it once something's been held for it, else named, as with
+// nothing to exclude nothing waits. Access is granted, or not, as the step
+// finds it.
 func TestFullDiskAccess(t *testing.T) {
 	terminal := steps.GrantingFor(env(map[string]string{"TERM_PROGRAM": "ghostty"}), false)
 	waited := terminal.For([]string{"backup-exclusion"}, false)
@@ -137,21 +139,27 @@ func TestFullDiskAccess(t *testing.T) {
 		home    string
 		g       steps.Granting
 		refused bool
+		held    bool
 		state   check.State
 		summary string
+		raised  bool
 	}{
-		{"readable", protected(t, true), waited, false, check.OK, "granted"},
-		{"nothing to read", t.TempDir(), waited, false, check.OK, "nothing protected to read"},
-		{"denied, the exclusions waiting", protected(t, false), waited, false, check.Attention, "not granted"},
-		{"denied, apps' settings alone", protected(t, false), prefsAlone, false, check.Attention, "not granted"},
-		{"denied over SSH", protected(t, false), remote, false, check.Attention, "not granted"},
-		{"readable, tmutil refused", protected(t, true), waited, true, check.Attention, "not granted: tmutil needs it"},
-		{"nothing to read, tmutil refused", t.TempDir(), waited, true, check.Attention, "not granted: tmutil needs it"},
+		{"readable", protected(t, true), waited, false, false, check.OK, "granted", false},
+		{"nothing to read", t.TempDir(), waited, false, false, check.OK, "nothing protected to read", false},
+		{"denied, nothing held", protected(t, false), waited, false, false, check.Attention, "not granted", false},
+		{"denied, an exclusion held", protected(t, false), waited, false, true, check.Attention, "not granted", true},
+		{"denied, apps' settings alone", protected(t, false), prefsAlone, false, true, check.Attention, "not granted", false},
+		{"denied over SSH", protected(t, false), remote, false, true, check.Attention, "not granted", false},
+		{"readable, tmutil refused", protected(t, true), waited, true, true, check.Attention, "not granted: tmutil needs it", true},
+		{"nothing to read, tmutil refused", t.TempDir(), waited, true, true, check.Attention, "not granted: tmutil needs it", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			access := &steps.Access{Home: tt.home}
 			if tt.refused {
 				access.Refused("tmutil")
+			}
+			if tt.held {
+				access.Held()
 			}
 			step := steps.FullDiskAccess(tt.g, access)
 			state, summary, ids := checked(t, step)
@@ -165,10 +173,10 @@ func TestFullDiskAccess(t *testing.T) {
 			if !slices.Equal(ids, []string{"full-disk-access:denied"}) || it.Name != tt.g.Title || it.Detail != tt.g.Do {
 				t.Errorf("item = %+v; want the one, titled %q, saying %q", it, tt.g.Title, tt.g.Do)
 			}
-			if raised := it.ToDo != nil; raised != tt.g.Raised {
-				t.Fatalf("to-do = %+v; want one raised %v", it.ToDo, tt.g.Raised)
+			if raised := it.ToDo != nil; raised != tt.raised {
+				t.Fatalf("to-do = %+v; want one raised %v", it.ToDo, tt.raised)
 			}
-			if tt.g.Raised && (it.ToDo.Title != tt.g.Title || !slices.Equal(it.ToDo.Steps, tt.g.Steps) || it.ToDo.Why != tt.g.Why) {
+			if tt.raised && (it.ToDo.Title != tt.g.Title || !slices.Equal(it.ToDo.Steps, tt.g.Steps) || it.ToDo.Why != tt.g.Why) {
 				t.Errorf("to-do = %+v; want %q, its why, then its steps %q", it.ToDo, tt.g.Title, tt.g.Steps)
 			}
 		})

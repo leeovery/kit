@@ -82,8 +82,8 @@ Matches of a pattern need none, so the hourly run keeps a new match out within t
 
 ## Exclusions wait for Full Disk Access
 
-`tmutil` changes the list only for an app with Full Disk Access. Without it, kit holds the
-exclusions and asks for the access once:
+`tmutil` changes the list only for an app with Full Disk Access. Without it, kit holds any
+exclusion still to add or remove, and asks for the access once:
 
 | Where kit runs | What kit asks |
 |---|---|

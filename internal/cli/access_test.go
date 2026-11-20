@@ -132,7 +132,7 @@ func TestBackupExclusionsRefusedFullDiskAccess(t *testing.T) {
 		item    string
 		waits   string
 	}{
-		{"kit apply", []string{"apply"}, "full-disk-access", "not granted: tmutil needs it", "Give Ghostty Full Disk Access, then reopen it", "needs Full Disk Access"},
+		{"kit apply", []string{"apply"}, "full-disk-access", "not granted: tmutil needs it", "Give Ghostty Full Disk Access, then reopen it", "needs Full Disk Access\n"},
 		{"the hourly run", []string{"nightly", "--scheduled"}, "kit-app-access", "not granted: the hourly run at 03:04 couldn't read what it protects", "Give kit.app Full Disk Access", "needs kit.app's Full Disk Access"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -141,7 +141,7 @@ func TestBackupExclusionsRefusedFullDiskAccess(t *testing.T) {
 			w.fake.OnMatch("tmutil", func(args []string) bool { return args[0] == "addexclusion" }).Exits(80).PrintsToStderr(tmutilNoAccess)
 			w.fake.OnMatch("sudo", func(args []string) bool { return len(args) > 2 && args[2] == "addexclusion" }).Exits(80).PrintsToStderr(tmutilNoAccess)
 			out, errOut, _ := w.run(t, tt.args...)
-			if want := "backup-exclusion deferred " + tt.waits + "\n"; !strings.Contains(out, want) {
+			if want := "backup-exclusion deferred " + tt.waits; !strings.Contains(out, want) {
 				t.Errorf("kit %s printed\n%s%s\nwant %q", strings.Join(tt.args, " "), out, errOut, want)
 			}
 			res := lastResult(t, w, tt.step)
@@ -178,11 +178,16 @@ func TestTheHourlyRunsExclusionsWaitForKitApp(t *testing.T) {
 			}
 			w.fake.On("tmutil", "addexclusion", filepath.Join(w.home, "Library/Caches/one"))
 			out, errOut, _ := w.run(t, "nightly", "--scheduled")
-			if held := strings.Contains(out, "backup-exclusion deferred needs kit.app's Full Disk Access\n"); held != tt.denied {
+			if held := strings.Contains(out, "backup-exclusion deferred needs kit.app's Full Disk Access"); held != tt.denied {
 				t.Errorf("kit nightly --scheduled printed\n%s%s\nwant the exclusions held %v", out, errOut, tt.denied)
 			}
 			if got := excluded(w); len(got) != tt.excluded {
 				t.Errorf("ran %q; want tmutil asked %d times", got, tt.excluded)
+			}
+			for _, s := range runStarted(t, w).Steps {
+				if s.Name == "backup-exclusion" && slices.Contains(s.Waits, "kit-app-access") {
+					t.Errorf("the exclusions wait for %q; want them never after kit-app-access, which comes after Homebrew", s.Waits)
+				}
 			}
 		})
 	}
@@ -239,7 +244,6 @@ func TestApplyRaisesFullDiskAccessAtATerminal(t *testing.T) {
 	w.writeSection(t, "laptop", "backup exclusions", "~/Library/Caches/*\n/Applications\n")
 	match := filepath.Join(w.home, "Library/Caches/one")
 	w.fake.On("tmutil", "isexcluded", match).Prints("[Included]  " + match + "\n")
-	w.expectPassword()
 	title := "Give Ghostty Full Disk Access, then reopen it"
 	notified(t, w, kb, title, "Only apps with Full Disk Access can keep folders out of backups.", ask.Key{Text: "s"})
 
@@ -271,6 +275,65 @@ func TestApplyRaisesFullDiskAccessAtATerminal(t *testing.T) {
 		"       → Run kit apply backup-exclusion\n"
 	if !strings.Contains(record, want) {
 		t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
+	}
+	if got := excluded(w); len(got) != 0 {
+		t.Errorf("ran %q; want tmutil asked nothing", got)
+	}
+	if asked := askedForPassword(w); len(asked) != 0 {
+		t.Errorf("ran %q; want no password asked for what's held", asked)
+	}
+}
+
+// askedForPassword are the commands kit ran asking sudo for a password.
+func askedForPassword(w *world) []string {
+	var out []string
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "sudo -S") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// At a terminal without Full Disk Access, with every exclusion in place,
+// nothing's held, so nothing's raised: the step names what to do, and the
+// run ends with nothing for the person.
+func TestApplyRaisesNothingWithNothingToExclude(t *testing.T) {
+	w, _ := toDoWorld(t, false)
+	w.unreadable(t)
+	w.env["TERM_PROGRAM"] = "ghostty"
+	w.write(t, "Library/Caches/one/.keep", "")
+	w.writeSection(t, "laptop", "backup exclusions", "~/Library/Caches/*\n/Applications\n")
+	match := filepath.Join(w.home, "Library/Caches/one")
+	w.fake.On("tmutil", "isexcluded", match).Prints("[Excluded]  " + match + "\n")
+	tm := w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-")
+	tm.Prints(strings.Replace(timeMachinePrefs, "<dict>\n", "<dict>\n<key>SkipPaths</key><array><string>/Applications</string></array>\n", 1))
+
+	if _, errOut, code := w.run(t, "apply"); code == 2 {
+		t.Fatalf("kit apply exit 2: %s", errOut)
+	}
+	records := w.lastLog(t)
+	if up := cards(records); len(up) != 0 {
+		t.Errorf("cards went up %+v; want none", up)
+	}
+	res := lastResult(t, w, "full-disk-access")
+	if res.State != check.Attention || len(res.Items) != 1 || res.Items[0].ToDo != nil || res.Items[0].Name != "Give Ghostty Full Disk Access, then reopen it" {
+		t.Errorf("full-disk-access stands %+v; want it named, not raised", res)
+	}
+	if res := lastResult(t, w, "backup-exclusion"); res.State != check.OK {
+		t.Errorf("the exclusions stand %+v; want them all in place", res)
+	}
+}
+
+// A run naming the exclusions alone has no step checking Full Disk Access to
+// raise, so what holds them says what to do.
+func TestNamedExclusionsSayWhatToDo(t *testing.T) {
+	w := exclusionsWorld(t)
+	w.unreadable(t)
+	w.env["TERM_PROGRAM"] = "ghostty"
+	out, errOut, _ := w.run(t, "apply", "backup-exclusion")
+	if want := "backup-exclusion deferred needs Full Disk Access: Give Ghostty Full Disk Access, then reopen it\n"; !strings.Contains(out, want) {
+		t.Errorf("kit apply backup-exclusion printed\n%s%s\nwant %q", out, errOut, want)
 	}
 	if got := excluded(w); len(got) != 0 {
 		t.Errorf("ran %q; want tmutil asked nothing", got)

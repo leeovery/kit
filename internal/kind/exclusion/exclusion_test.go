@@ -267,7 +267,7 @@ func TestExclusionsRefusedFullDiskAccess(t *testing.T) {
 			fake := runnertest.New(t)
 			x := exclusion.New(fake, h, backup.Excluders([]string{timemachine.ID}))
 			if tt.told {
-				x.SetAccess(nil, func(_ context.Context, program string) error { return fmt.Errorf("%w %s", told, program) })
+				x.SetAccess(kind.Access{Refused: func(_ context.Context, program string) error { return fmt.Errorf("%w %s", told, program) }})
 			}
 			list, err := x.Expand(declared)
 			if err != nil {
@@ -302,13 +302,20 @@ func TestExclusionsRefusedFullDiskAccess(t *testing.T) {
 }
 
 // Held for want of Full Disk Access, the kind changes nothing, saying why,
-// though its check still looks, finding what's missing.
+// each held told, though its check still looks, finding what's missing; it
+// needs no password and holds nothing for one, as access is what it waits
+// for. Granted, it does both again.
 func TestExclusionsHeldForFullDiskAccess(t *testing.T) {
 	h := home(t)
 	keeper := &fakeExcluder{fixed: []string{h + "/.cache", h + "/Movies"}}
 	x := exclusion.New(runnertest.New(t), h, []tool.Excluder{keeper})
-	x.SetAccess(func(context.Context) error { return engine.NotYet("needs Full Disk Access") }, nil)
-	if got := compared(t, x); len(got) == 0 {
+	granted, told := false, 0
+	x.SetAccess(kind.Access{
+		Granted: func(context.Context) bool { return granted },
+		Held:    func(context.Context) error { told++; return engine.NotYet("needs Full Disk Access") },
+	})
+	x.SetAdmin(func(context.Context) bool { return false })
+	if got := compared(t, x); !slices.Contains(got, "/Applications missing") {
 		t.Errorf("items = %q; want the check to look all the same", got)
 	}
 	for name, err := range map[string]error{
@@ -319,8 +326,20 @@ func TestExclusionsHeldForFullDiskAccess(t *testing.T) {
 			t.Errorf("%s() = %v; want it held, saying why", name, err)
 		}
 	}
-	if len(keeper.did) != 0 {
-		t.Errorf("did %q; want nothing", keeper.did)
+	if len(keeper.did) != 0 || told != 2 {
+		t.Errorf("did %q, told held %d times; want nothing done, each told", keeper.did, told)
+	}
+	missing := map[string]string{"/Applications": "/Applications"}
+	admin, _ := x.NeedsAdmin(t.Context(), []string{"/Applications"})
+	blocked, _ := x.Blocked(t.Context(), missing, nil)
+	if len(admin) != 0 || len(blocked) != 0 {
+		t.Errorf("held, NeedsAdmin() = %q, Blocked() = %+v; want neither", admin, blocked)
+	}
+	granted = true
+	admin, _ = x.NeedsAdmin(t.Context(), []string{"/Applications"})
+	blocked, _ = x.Blocked(t.Context(), missing, nil)
+	if len(admin) != 1 || len(blocked) != 1 {
+		t.Errorf("granted, NeedsAdmin() = %q, Blocked() = %+v; want the password needed, and waited for", admin, blocked)
 	}
 }
 

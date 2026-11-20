@@ -382,8 +382,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	}
 	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups), AppDirs: a.appFolders(home).Dirs}
 	// granting is how what kit runs in, access, is given Full Disk Access,
-	// which the kinds whose programs need it wait for (accessWaits), applied
-	// after the step telling whether it's given.
+	// which the kinds whose programs need it wait for (accessWaits).
 	granting := steps.GrantingFor(a.Getenv, a.scheduled)
 	access := &steps.Access{Home: home}
 	var accessWaits []string
@@ -397,7 +396,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		r.kindsByName[d.Name], r.lists[d.Name] = k, list
 		accessor, needsAccess := k.(kind.FullDiskAccessor)
 		if needsAccess {
-			accessor.SetAccess(held(&granting, access), r.refused(&granting, access, a.scheduled))
+			accessor.SetAccess(r.access(&granting, access, a.scheduled))
 		}
 		if !list.Declared && unread == nil {
 			continue
@@ -405,7 +404,12 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		step := kind.Placed(k, list, func(context.Context) kind.Placing { return r.placed(d.Name) }, d.Needs...)
 		step.Title, step.Area, step.Row, step.Tool, step.Verb = d.Label, steps.AreaDrift, d.Row, d.Tool, d.Installs().Done
 		if needsAccess {
-			step.After = append(step.After, granting.Step)
+			// At a terminal, after the step whose card it waits behind; the
+			// hourly run's probes for itself, and kit-app-access comes after
+			// Homebrew's formulae.
+			if !a.scheduled {
+				step.After = append(step.After, granting.Step)
+			}
 			accessWaits = append(accessWaits, d.Name)
 		}
 		if unread != nil {

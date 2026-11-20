@@ -98,36 +98,39 @@ func (r *run) recordAccess(granted bool) {
 	}
 }
 
-// held is why a kind's installs and removals are held: while access isn't
-// granted, as g's wait says; nil once it is. In the hourly run, access is
-// kit.app's, as this run, its child, is.
-func held(g *steps.Granting, access *steps.Access) func(ctx context.Context) error {
-	return func(context.Context) error {
-		if access.Granted() {
-			return nil
-		}
-		return engine.NotYet(g.Wait)
+// access is how a kind's changes are held while access, what kit runs in,
+// lacks Full Disk Access, as g gives it: in the hourly run, kit.app's, as
+// this run, its child, is. One held, or a program's refusal, is noted in
+// access, a refusal in the hourly run in kit.app's record too, where g's
+// step looks; then held, as held says.
+func (r *run) access(g *steps.Granting, access *steps.Access, scheduled bool) kind.Access {
+	return kind.Access{
+		Granted: func(context.Context) bool { return access.Granted() },
+		Held: func(ctx context.Context) error {
+			access.Held()
+			return held(ctx, g)
+		},
+		Refused: func(ctx context.Context, program string) error {
+			access.Refused(program)
+			access.Held()
+			if scheduled {
+				r.recordAccess(false)
+			}
+			return held(ctx, g)
+		},
 	}
 }
 
-// refused is what a kind returns once one of its programs refuses for want
-// of Full Disk Access, access having seemed granted: noted, in access, and,
-// in the hourly run, kit.app's record, where g's step looks; that step
-// checked again, so the run says once it isn't given, and what to do, the
-// kind held behind it, as g's wait says. Outside a run, or should that step
-// still stand ok, as when the record couldn't be written, what to do is the
-// kind's own to say.
-func (r *run) refused(g *steps.Granting, access *steps.Access, scheduled bool) func(ctx context.Context, program string) error {
-	return func(ctx context.Context, program string) error {
-		access.Refused(program)
-		if scheduled {
-			r.recordAccess(false)
-		}
-		if res, ok := engine.Recheck(ctx, g.Step); ok && res.State != check.OK {
-			return engine.NotYet(g.Wait)
-		}
-		return engine.NotYet(program + " needs Full Disk Access: " + g.Title)
+// held is what a kind's change returns, held for want of Full Disk Access,
+// as g's wait says: g's step checked again, so the run says once it isn't
+// given and raises what to do; and, should that step not be in the run, or
+// still stand ok, as when kit.app's record couldn't be written, saying what
+// to do itself.
+func held(ctx context.Context, g *steps.Granting) error {
+	if res, ok := engine.Recheck(ctx, g.Step); ok && res.State != check.OK {
+		return engine.NotYet(g.Wait)
 	}
+	return engine.NotYet(g.Wait + ": " + g.Title)
 }
 
 // nightly runs the jobs due, or those named, then every check. A run of

@@ -162,13 +162,20 @@ type Admin interface {
 // backups, though not to look: its installs and removals are held till it's
 // granted, its check never.
 type FullDiskAccessor interface {
-	// SetAccess is how the kind's installs and removals find out whether
-	// they're held: held's error, nil when they aren't. refused is what
-	// they return, once, for every thing, when one of its programs refuses
-	// for want of Full Disk Access all the same, given the program. Unset,
-	// nothing's held, and a refusal holds them back (engine.NotYet), saying
-	// so.
-	SetAccess(held func(ctx context.Context) error, refused func(ctx context.Context, program string) error)
+	// SetAccess is how the kind finds out whether its changes are held.
+	SetAccess(a Access)
+}
+
+// Access is how a FullDiskAccessor's changes are held for want of Full Disk
+// Access: Granted reports whether they aren't, only looking; Held is what an
+// install or removal held returns, telling that it's held; Refused, what one
+// returns, once, for every thing, when one of its programs refuses for want
+// of it all the same, given the program. Unset, nothing's held, and a
+// refusal holds the change back (engine.NotYet), saying so.
+type Access struct {
+	Granted func(ctx context.Context) bool
+	Held    func(ctx context.Context) error
+	Refused func(ctx context.Context, program string) error
 }
 
 // Dependents is a kind that knows what installed needs a thing.
