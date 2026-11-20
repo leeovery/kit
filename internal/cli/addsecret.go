@@ -49,15 +49,17 @@ func (r *run) secrets() (*secret.Secrets, error) {
 }
 
 // addSecret keeps a secret's value in its store (unless it's there
-// already, --ref), reads it back to compare, declares the secret, and
-// syncs, a file from --from compared with the file synced, byte for byte,
-// values never shown: one secret at a time. A new value goes where
+// already, --ref, when it reads that one value), reads it back to compare,
+// declares the secret, and puts that secret alone in place, from the value
+// in hand, a file from --from compared with the file put in place, byte for
+// byte, values never shown: one secret at a time. A new value goes where
 // it's told, the block named (--in) or the item (--item), and its line in
 // the file's block for that item, made when there's none; a reference in an
 // item a block of the file is for goes in that block, short, and any other
 // in the plain [secrets], in full. Declared for every Mac, it comes out of
 // the Macs' files that had it, in the same edit. Everything's checked before
-// the value's asked for, or read (secretTarget).
+// the value's asked for, or read (secretTarget), and a variable's value of
+// many lines is refused before it's stored.
 func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOptions) error {
 	so := opts.secret
 	k, err := r.secrets()
@@ -68,38 +70,23 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	if err != nil {
 		return err
 	}
-	value, err := a.secretValue(ctx, r, at.entry.Name, so)
+	value, err := a.secretValue(ctx, r, k, at, so)
 	if err != nil {
+		return err
+	}
+	if err := secret.OneLine(at.entry.Name, value); err != nil {
 		return err
 	}
 	d, item := at.store, at.entry.Item
 	c := startChanges(r, []string{at.entry.Name})
 	c.step(ctx, at.entry.Name, func(ctx context.Context) check.Result {
-		kept := at.short
-		var err error
-		switch {
-		case so.ref != "":
-		case so.from != "":
-			kept, err = k.Attach(ctx, d, item, at.short, so.from)
-		default:
-			kept, err = k.Store(ctx, d, item, at.short, value)
-		}
-		switch {
-		case err != nil:
-			return check.Result{State: check.Failed, Reason: err.Error()}
-		case kept != at.short:
-			return check.Result{State: check.Failed, Reason: fmt.Sprintf("kept in %s, but as %s, not %s, where kit checked it could go: nothing declared", d.About().Name, d.Join(item, kept), d.Join(item, at.short))}
-		}
 		if so.ref == "" {
-			readBack := k.ReadBack
-			if so.from != "" {
-				readBack = k.ReadBackFile
-			}
-			if err := readBack(ctx, d, d.Join(item, at.short), value); err != nil {
-				return check.Result{State: check.Failed, Reason: "stored, but reading it back failed: " + err.Error()}
+			if why := keepValue(ctx, k, at, so, value); why != "" {
+				return check.Result{State: check.Failed, Reason: why}
 			}
 		}
 		e := at.entry
+		event.Say(ctx, event.Doing{Says: "declaring"})
 		said, err := c.declare(secretKind, at.scope, e)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: "kept in " + d.About().Name + ", but couldn't declare: " + err.Error()}
@@ -111,21 +98,16 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: "declared, but its line doesn't read: " + err.Error()}
 		}
-		report, err := k.Sync(ctx)
-		switch {
-		case err != nil:
-			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync: " + err.Error()}
-		case report.Failed[e.Name] != "":
-			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it: " + report.Failed[e.Name]}
-		case report.Held[e.Name] != "":
-			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it yet: " + report.Held[e.Name]}
+		event.Say(ctx, event.Doing{Says: "putting it in place"})
+		if err := k.Put(e.Name, value); err != nil {
+			return check.Result{State: check.Failed, Reason: "declared, but couldn't put it in place: " + err.Error()}
 		}
 		if so.from != "" && (secret.Secret{Name: e.Name}).IsFile() {
 			if err := k.FileHolds(e.Name, value); err != nil {
 				return check.Result{State: check.Failed, Reason: "stored and declared, but checked against " + so.from + ": " + err.Error()}
 			}
 		}
-		summary := "declared in " + at.scope + said + ", synced"
+		summary := "declared in " + at.scope + said + ", put in place"
 		if so.ref == "" {
 			summary = "kept in " + d.About().Name + " (" + d.Join(item, at.short) + ") and read back; " + summary
 		}
@@ -133,6 +115,31 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	})
 	c.sync(ctx, commitMessage("add", secretKind, []string{at.entry.Name}, r.machine, opts.note))
 	return c.finish()
+}
+
+// keepValue keeps a new value in at's store, attached from --from or as a
+// field, then reads it back to compare, the step saying which it's doing:
+// why not, when either fails, else "".
+func keepValue(ctx context.Context, k *secret.Secrets, at secretTarget, so secretOptions, value string) string {
+	d, item := at.store, at.entry.Item
+	event.Say(ctx, event.Doing{Says: "storing in " + d.About().Name})
+	keep, readBack := k.Store, k.ReadBack
+	what := value
+	if so.from != "" {
+		keep, readBack, what = k.Attach, k.ReadBackFile, so.from
+	}
+	kept, err := keep(ctx, d, item, at.short, what)
+	switch {
+	case err != nil:
+		return err.Error()
+	case kept != at.short:
+		return fmt.Sprintf("kept in %s, but as %s, not %s, where kit checked it could go: nothing declared", d.About().Name, d.Join(item, kept), d.Join(item, at.short))
+	}
+	event.Say(ctx, event.Doing{Says: "reading it back"})
+	if err := readBack(ctx, d, d.Join(item, at.short), value); err != nil {
+		return "stored, but reading it back failed: " + err.Error()
+	}
+	return ""
 }
 
 // secretTarget is where kit secret add puts a secret: the file, by its
@@ -149,8 +156,8 @@ type secretTarget struct {
 // value, or reads one, or stores one: where the value comes from and where
 // it goes (--in, --item or --ref), where in its item (--field, by the
 // store's form), the line as it'll be declared, as the config would read
-// with it, the store answering, and --ref reading, or nothing kept where a
-// new value goes.
+// with it, the store answering, and, for a new value, nothing kept where it
+// goes. --ref's reading is secretValue's.
 func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name string, opts addOptions) (secretTarget, error) {
 	so := opts.secret
 	if err := checkSources(so, a.pretty(a.Stdout)); err != nil {
@@ -189,7 +196,7 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 		return at, err
 	}
 	if so.ref != "" {
-		return at, k.Reads(ctx, at.store, so.ref)
+		return at, nil
 	}
 	return at, k.Free(ctx, at.store, item, at.short)
 }
@@ -254,14 +261,15 @@ func checkSources(so secretOptions, terminal bool) error {
 	return nil
 }
 
-// secretValue is a new secret's value, as so says where it comes from:
-// none for a reference; a file's; standard input's; else typed, unshown, at
-// the terminal (checkSources).
-func (a *app) secretValue(ctx context.Context, r *run, name string, so secretOptions) (string, error) {
+// secretValue is the value of the secret at, as so says where it comes
+// from: read from its store for a reference, or why it doesn't read; a
+// file's; standard input's; else typed, unshown, at the terminal
+// (checkSources).
+func (a *app) secretValue(ctx context.Context, r *run, k *secret.Secrets, at secretTarget, so secretOptions) (string, error) {
 	var value string
 	switch {
 	case so.ref != "":
-		return "", nil
+		return k.Fetch(ctx, at.store, at.entry.Name, so.ref)
 	case so.from != "":
 		data, err := os.ReadFile(so.from)
 		if err != nil {
@@ -278,7 +286,7 @@ func (a *app) secretValue(ctx context.Context, r *run, name string, so secretOpt
 	default:
 		// The run's heading first, then the field under it.
 		r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine})
-		typed, err := a.ReadSecret(ctx, look.Row{State: look.NeedsYou, Name: name, Says: look.Orange("needs its value")})
+		typed, err := a.ReadSecret(ctx, look.Row{State: look.NeedsYou, Name: at.entry.Name, Says: look.Orange("needs its value")})
 		if errors.Is(err, ask.ErrCancelled) {
 			return "", fmt.Errorf("%w: nothing was stored or declared", ask.ErrCancelled)
 		}

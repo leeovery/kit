@@ -212,7 +212,7 @@ func (s *Secrets) FileHolds(name, want string) error {
 		return err
 	}
 	if string(got) != want {
-		return errors.New("the file synced differs from it")
+		return errors.New("the file put in place differs from it")
 	}
 	return nil
 }
@@ -232,12 +232,7 @@ func (s *Secrets) envLines() (map[string]string, []string, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(sc.Text()), "export ")
-		if !ok {
-			continue
-		}
-		name, _, ok := strings.Cut(rest, "=")
-		if ok {
+		if name, ok := exported(sc.Text()); ok {
 			if _, seen := lines[name]; !seen {
 				order = append(order, name)
 			}
@@ -245,6 +240,17 @@ func (s *Secrets) envLines() (map[string]string, []string, error) {
 		}
 	}
 	return lines, order, sc.Err()
+}
+
+// exported is the variable a line of ~/.secrets.zsh exports: false when it
+// exports none.
+func exported(line string) (string, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "export ")
+	if !ok {
+		return "", false
+	}
+	name, _, ok := strings.Cut(rest, "=")
+	return name, ok
 }
 
 // Installed lists the secrets in place: each variable ~/.secrets.zsh
@@ -352,10 +358,8 @@ func (s *Secrets) dropEnv(drop map[string]bool) error {
 	}
 	var kept []string
 	for line := range strings.Lines(string(data)) {
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "export "); ok {
-			if name, _, _ := strings.Cut(rest, "="); drop[name] {
-				continue
-			}
+		if name, ok := exported(line); ok && drop[name] {
+			continue
 		}
 		kept = append(kept, line)
 	}

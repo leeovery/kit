@@ -14,9 +14,11 @@ hides the values it sets from what it logs.
 
 ## Adding one
 
-`kit secret add <name>` keeps a value in its store, declares it, syncs it,
-and reads it back to compare. `<name>` is what it fills: a variable's name,
-as in API_TOKEN, or a file's path, from ~ or /.
+`kit secret add <name>` keeps a value in its store, reads it back to
+compare, declares it, and puts that one secret in place, reading no other
+from its store. `<name>` is what it fills: a variable's name, as in
+API_TOKEN, or a file's path, from ~ or /. A variable's value of many lines
+is refused: declare it as a file.
 
 - The value comes typed at a terminal, on standard input (`--stdin`), from
   a file (`--from`, kept as an attachment), or is in a store already

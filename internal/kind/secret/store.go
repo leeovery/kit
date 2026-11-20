@@ -32,18 +32,23 @@ func (s *Secrets) Free(ctx context.Context, d store.Driver, item, short string) 
 	return d.Free(ctx, s.run, item, short)
 }
 
-// Reads is nil when ref, in full, reads from d: else why not, the value
-// never shown.
-func (s *Secrets) Reads(ctx context.Context, d store.Driver, ref string) error {
-	_, err := d.Read(ctx, s.run, ref)
+// Fetch reads ref, in full, from d, for the secret that fills name: as a
+// file holds it for a file's (store.Driver.ReadFile), else as a variable's.
+// When it doesn't read, it says why, the value never shown.
+func (s *Secrets) Fetch(ctx context.Context, d store.Driver, name, ref string) (string, error) {
+	read := d.Read
+	if (Secret{Name: name}).IsFile() {
+		read = d.ReadFile
+	}
+	value, err := read(ctx, s.run, ref)
 	if err == nil {
-		return nil
+		return value, nil
 	}
 	why := err.Error()
 	if unread, ok := errors.AsType[store.Unread](err); ok {
 		why = unread[ref]
 	}
-	return fmt.Errorf("%s doesn't read from %s: %s", ref, d.About().Name, why)
+	return "", fmt.Errorf("%s doesn't read from %s: %s", ref, d.About().Name, why)
 }
 
 // Store keeps value in d's item, where field says, in d's words: its

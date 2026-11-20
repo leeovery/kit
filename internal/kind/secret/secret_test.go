@@ -460,16 +460,16 @@ func TestSyncLeavesOutAReferenceOpNames(t *testing.T) {
 	}
 }
 
-// A reference that doesn't read, as kit secret add --ref checks it, says so
+// A reference that doesn't read, as kit secret add --ref reads it, says so
 // in op's words, the reference once before them.
-func TestReadsSaysWhyInOpsWords(t *testing.T) {
+func TestFetchSaysWhyInOpsWords(t *testing.T) {
 	ref := item + "/Section/missing"
 	said := "[ERROR] could not read secret '" + ref + "': no such field"
 	fake := runnertest.New(t)
 	fake.On("op", "read", ref).Exits(1).PrintsToStderr(said)
-	err := secret.New(fake, t.TempDir()).Reads(t.Context(), onepassword.Driver{}, ref)
+	_, err := secret.New(fake, t.TempDir()).Fetch(t.Context(), onepassword.Driver{}, "TOKEN", ref)
 	if want := ref + " doesn't read from 1Password: " + said; err == nil || err.Error() != want {
-		t.Errorf("Reads() = %v, want %q", err, want)
+		t.Errorf("Fetch() = %v, want %q", err, want)
 	}
 }
 

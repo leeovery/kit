@@ -12,6 +12,7 @@ import (
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
+	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // itemSection is the header of the secrets section for the item the tests'
@@ -102,8 +103,11 @@ func TestAddASecretKeepsItInOnePassword(t *testing.T) {
 	optest.Holds(f, map[string]string{"op://vault/Item/Section/new": "new value", "op://vault/Item/Section/token": "the value"})
 	w.expectSync(t, []string{"laptop/declarations"}, "kit secret add NEW_ONE (laptop): a new one")
 	out, _, code := w.run(t, "secret", "add", "NEW_ONE", "--item", "op://vault/Item", "--field", "Section/new", "--stdin", "--note", "a new one")
-	if code != 0 || !strings.Contains(out, "kept in 1Password (op://vault/Item/Section/new) and read back; declared in laptop, synced") {
+	if code != 0 || !strings.Contains(out, "kept in 1Password (op://vault/Item/Section/new) and read back; declared in laptop, put in place") {
 		t.Errorf("kit secret add printed\n%s exit %d", out, code)
+	}
+	if got := opReads(f); !slices.Equal(got, []string{"op://vault/Item/Section/new"}) {
+		t.Errorf("read %q from 1Password, want the new value alone, read back: no other secret", got)
 	}
 	for _, c := range f.Commands() {
 		if strings.Contains(strings.Join(c.Args, " "), "new value") {
@@ -121,8 +125,73 @@ func TestAddASecretKeepsItInOnePassword(t *testing.T) {
 	}
 }
 
+// opReads are the references fake's op read, in turn.
+func opReads(f *runnertest.Fake) []string {
+	var refs []string
+	for _, c := range f.Commands() {
+		if c.Name == "op" && len(c.Args) > 1 && c.Args[0] == "read" {
+			refs = append(refs, c.Args[len(c.Args)-1])
+		}
+	}
+	return refs
+}
+
+// While kit secret add works, its row says what it's doing, in turn:
+// storing in the store, by its name, reading it back, declaring, and
+// putting it in place.
+func TestAddASecretSaysWhatItsDoing(t *testing.T) {
+	w := secretsWorld(t)
+	w.terminal, w.stdin = true, "new value"
+	f := w.fake
+	f.On("op", "whoami")
+	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[]}`)
+	f.On("op", "item", "edit", "Item", "--vault", "vault")
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/new": "new value"})
+	w.expectSync(t, []string{"laptop/declarations"}, "kit secret add NEW_ONE (laptop)")
+	out, _, code := w.run(t, "secret", "add", "NEW_ONE", "--item", "op://vault/Item", "--field", "Section/new", "--stdin")
+	out = ansi.Strip(out)
+	at := 0
+	for _, says := range []string{"storing in 1Password", "reading it back", "declaring", "putting it in place"} {
+		i := strings.Index(out[at:], says)
+		if i < 0 {
+			t.Fatalf("kit secret add printed\n%s\nexit %d: want it to say %q, after what came before", out, code, says)
+		}
+		at += i + len(says)
+	}
+}
+
+// A variable whose value holds a line break is refused, as a sync refuses
+// it: before anything's stored or declared, given or read by --ref.
+func TestAddASecretOfManyLinesIsRefused(t *testing.T) {
+	for name, args := range map[string][]string{
+		"given":  {"NEW_ONE", "--item", "op://vault/Item", "--field", "Section/new", "--stdin"},
+		"by ref": {"NEW_ONE", "--ref", "op://vault/Item/Section/many"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := secretsWorld(t)
+			before := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations"))
+			w.stdin = "line one\nline two\n"
+			f := w.fake
+			f.On("op", "whoami")
+			f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","fields":[]}`)
+			optest.Holds(f, map[string]string{"op://vault/Item/Section/many": "line one\nline two"})
+			_, errOut, code := w.run(t, append([]string{"secret", "add"}, args...)...)
+			if code != 2 || !strings.Contains(errOut, "a variable is one line: declare it as a file") {
+				t.Errorf("printed %q, exit %d; want it refused", errOut, code)
+			}
+			if slices.ContainsFunc(f.Calls(), func(call string) bool { return strings.HasPrefix(call, "op item edit") }) {
+				t.Errorf("ran %q: want nothing stored", f.Calls())
+			}
+			if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); got != before {
+				t.Errorf("laptop's declarations = %q, want nothing declared", got)
+			}
+		})
+	}
+}
+
 // A reference goes in the section of its item, short, when there's one;
-// else in the plain [secrets], in full. Nothing is stored.
+// else in the plain [secrets], in full. Nothing is stored, and that one
+// reference alone is read, once, and put in place.
 func TestAddASecretByItsReference(t *testing.T) {
 	w := secretsWorld(t)
 	f := w.fake
@@ -146,6 +215,40 @@ func TestAddASecretByItsReference(t *testing.T) {
 		if c.Name == "op" && c.Args[0] == "item" {
 			t.Errorf("ran %s: a reference stores nothing", c)
 		}
+	}
+	if got, want := opReads(f), []string{"op://vault/Item/Section/other", "op://vault/Elsewhere/key"}; !slices.Equal(got, want) {
+		t.Errorf("read %q from 1Password, want %q: each reference given, once", got, want)
+	}
+	if got := w.read(t, ".secrets.zsh"); !strings.Contains(got, "export OTHER='other'\n") || !strings.Contains(got, "export KEY='key'\n") || strings.Contains(got, "TOKEN") {
+		t.Errorf("~/.secrets.zsh = %q, want OTHER and KEY alone put in place", got)
+	}
+}
+
+// A file by --ref is read as a file holds it, that reference alone, and
+// written alone: ~/.secrets.zsh isn't touched.
+func TestAddASecretFileByItsReference(t *testing.T) {
+	w := secretsWorld(t)
+	f := w.fake
+	f.On("op", "whoami")
+	optest.Holds(f, map[string]string{"op://vault/Item/key.pem": "key\n\n", "op://vault/Item/Section/token": "the value"})
+	optest.Attaches(f, "op://vault/Item", "key.pem")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit secret add ~/.ssh/key.pem (laptop)")
+	if out, _, code := w.run(t, "secret", "add", "~/.ssh/key.pem", "--ref", "op://vault/Item/key.pem", "--mode", "400"); code != 0 {
+		t.Fatalf("kit secret add printed\n%s exit %d", out, code)
+	}
+	if got := w.read(t, ".ssh/key.pem"); got != "key\n\n" {
+		t.Errorf("the file holds %q, want the attachment byte for byte", got)
+	}
+	if info, err := os.Stat(filepath.Join(w.home, ".ssh", "key.pem")); err != nil || info.Mode().Perm() != 0o400 {
+		t.Errorf("the file is %v, %v; want 400", info, err)
+	}
+	for _, ref := range opReads(f) {
+		if ref != "op://vault/Item/key.pem" {
+			t.Errorf("read %s: want the file's reference alone", ref)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(w.home, ".secrets.zsh")); err == nil {
+		t.Error("~/.secrets.zsh was written: want the file alone")
 	}
 }
 
@@ -377,7 +480,7 @@ func TestAddASecretSharedTakesItOutOfTheMacs(t *testing.T) {
 	optest.Holds(f, map[string]string{"op://vault/Item/Section/foo": "foo", "op://vault/Item/Section/token": "the value"})
 	w.expectSync(t, []string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit secret add FOO (laptop)")
 	out, _, code := w.run(t, "secret", "add", "FOO", "--shared", "--ref", "op://vault/Item/Section/foo")
-	if code != 0 || !strings.Contains(out, "declared in shared, out of laptop and studio, synced") {
+	if code != 0 || !strings.Contains(out, "declared in shared, out of laptop and studio, put in place") {
 		t.Fatalf("kit secret add --shared printed\n%s exit %d", out, code)
 	}
 	if got := w.readSection(t, "shared", "secrets op://vault/Item --as mac-secrets"); got != "FOO Section/foo   # a token\nTOKEN Section/token\n" {
@@ -591,10 +694,10 @@ func TestASecretFileInASection(t *testing.T) {
 }
 
 // A file kept from --from lands as it was, byte for byte, bytes that aren't
-// UTF-8 and the newlines it ends with too, and add checks it does: a file
-// synced otherwise, its attachment taken for a field's text once read back,
-// fails the add.
-func TestASecretFromAFileSyncsByteForByte(t *testing.T) {
+// UTF-8 and the newlines it ends with too, that file alone written and its
+// reference alone read: its attachment taken for a field's text once read
+// back fails the add, nothing declared or put in place.
+func TestASecretFromAFileLandsByteForByte(t *testing.T) {
 	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
 	for name, attached := range map[string]bool{"attached": true, "taken for a field": false} {
 		t.Run(name, func(t *testing.T) {
@@ -606,22 +709,34 @@ func TestASecretFromAFileSyncsByteForByte(t *testing.T) {
 			f := w.fake
 			f.On("op", "whoami")
 			get := f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","files":[]}`)
-			get.Then().Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"blob"}]}`)
-			if !attached {
-				get.Then().Prints(`{"id":"abc","title":"Item","files":[]}`)
+			if attached {
+				get.Then().Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"blob"}]}`)
 			}
 			f.On("op", "item", "edit", "Item", "--vault", "vault", "blob[file]="+from)
 			optest.Holds(f, map[string]string{"op://vault/Item/blob": blob, "op://vault/Item/Section/token": "the value"})
-			w.expectSync(t, []string{"laptop/declarations"}, "kit secret add ~/.config/tool/blob (laptop)")
+			if attached {
+				w.expectSync(t, []string{"laptop/declarations"}, "kit secret add ~/.config/tool/blob (laptop)")
+			}
 			out, _, code := w.run(t, "secret", "add", "~/.config/tool/blob", "--from", from, "--item", "op://vault/Item")
+			for _, ref := range opReads(f) {
+				if ref != "op://vault/Item/blob" {
+					t.Errorf("read %s: want the file's reference alone", ref)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(w.home, ".secrets.zsh")); err == nil {
+				t.Error("~/.secrets.zsh was written: want the file alone")
+			}
 			if attached {
 				if code != 0 || w.read(t, ".config/tool/blob") != blob {
-					t.Errorf("kit secret add printed\n%s exit %d; want the file synced byte for byte", out, code)
+					t.Errorf("kit secret add printed\n%s exit %d; want the file put in place byte for byte", out, code)
 				}
 				return
 			}
-			if want := "stored and declared, but checked against " + from + ": the file synced differs from it"; code == 0 || !strings.Contains(out, want) {
+			if want := "stored, but reading it back failed: 1Password gave back a different value"; code == 0 || !strings.Contains(out, want) {
 				t.Errorf("kit secret add printed\n%s exit %d; want it failed, saying %q", out, code, want)
+			}
+			if _, err := os.Stat(filepath.Join(w.home, ".config", "tool", "blob")); err == nil {
+				t.Error("the file was put in place: want nothing, as it didn't read back")
 			}
 		})
 	}
