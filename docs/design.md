@@ -262,15 +262,20 @@ many it holds). `--field` says where in the item, in its store's words (1Passwor
 there's none, going by the name `--in` gave. Everything's checked before the value's asked
 for: where it goes, the line as the config would read with it, the store answering, and
 nothing kept there already. The value's kept through its store's driver (1Password's edits the
-item with its JSON on op's standard input), then read back and compared, declared, and synced,
-never shown. `--mode` as on the line. `--shared` declares it in the shared file, in the block
-`--in` or `--item` names, or, with `--ref`, as above (the shared file having no block for its
-item, in one made for the item of the Mac's block holding it, going by that block's name), and
-takes it out of each Mac's own file, by the rule for moving a line (below): a Mac's line
-written otherwise is refused before anything's stored; one the shared file has already is
-refused. `kit secret remove <name>` takes it off the Mac, undeclares it, and
-keeps or deletes its value in its store (`--keep-value`, `--delete-value`; asked at a terminal);
-a value given in full, outside the items' blocks, is left where it is.
+item with its JSON on op's standard input), then read back and compared, declared, and put in
+place, never shown: that secret alone, as its store gave it back, no other read from its store
+(`--ref`'s read once; a file's value kept as a field read again in a file's form, as a sync
+reads it). A file's written alone; a variable's line takes its place in `~/.secrets.zsh`, or
+goes where a sync would write it, every other line kept byte for byte, the file made with its
+header and that line when there's none (the rest come with the next sync). A variable's value
+of many lines is refused before it's stored. `--mode` as on the line. `--shared` declares it in
+the shared file, in the block `--in` or `--item` names, or, with `--ref`, as above (the shared
+file having no block for its item, in one made for the item of the Mac's block holding it,
+going by that block's name), and takes it out of each Mac's own file, by the rule for moving a
+line (below): a Mac's line written otherwise is refused before anything's stored; one the
+shared file has already is refused. `kit secret remove <name>` takes it off the Mac,
+undeclares it, and keeps or deletes its value in its store (`--keep-value`, `--delete-value`;
+asked at a terminal); a value given in full, outside the items' blocks, is left where it is.
 
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, then
 `--after` and `--before` (as on any line), `--group <name>` (the group it's in, one word or
@@ -616,7 +621,7 @@ kit backup add|remove <tool> The backup tools this Mac uses, each checked   [--a
 kit file add|remove <path>...    Files linked into the home folder from kit-config
 kit path add|remove <dir>...     Directories on the PATH
 kit restore add <path>; kit restore remove <path>...  The person's data a new Mac carries across   [--skip] [--note] [--shared]
-kit secret add <name>        Keep a secret in its store, declare it, sync it   [--stdin] [--from] [--ref] [--in] [--item] [--field] [--mode] [--shared]
+kit secret add <name>        Keep a secret in its store, declare it, put it in place   [--stdin] [--from] [--ref] [--in] [--item] [--field] [--mode] [--shared]
 kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value] [--delete-value] [--shared]
 kit secret sync              Read every secret from its store, and put each in place
 kit secret places            The blocks secrets are declared in: name, store, item, file, count

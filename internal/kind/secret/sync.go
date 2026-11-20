@@ -259,7 +259,7 @@ const oneLine = "a variable is one line: declare it as a file"
 // those it ends with, out of what's been read, as one its store couldn't.
 func (sy *syncing) refuseLines() {
 	for ref, v := range sy.values {
-		if strings.Contains(strings.TrimRight(v, "\n"), "\n") {
+		if manyLines(v) {
 			delete(sy.values, ref)
 			sy.unread[ref] = oneLine
 		}
@@ -373,10 +373,7 @@ func (sy *syncing) put(ctx context.Context) error {
 		case sec.IsFile():
 			sy.putFile(sec, v)
 		default:
-			line := "export " + sec.Name + "=" + quote(strings.TrimRight(v, "\n"))
-			if sec.Note != "" {
-				line += "   # " + sec.Note
-			}
+			line := envLine(sec, v)
 			if !sy.placed[sec.Name] {
 				sy.placed[sec.Name] = true
 				sy.report.Synced++

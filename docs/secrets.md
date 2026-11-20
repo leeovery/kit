@@ -13,7 +13,7 @@ kit secret add API_TOKEN \
 ```
 
 kit stores the value in the item and reads it back to compare. Then it declares the secret,
-syncs it, and commits and pushes kit-config:
+puts it in place, and commits and pushes kit-config:
 
 ```text
 [secrets op://vault/item]
@@ -98,7 +98,7 @@ waits until the token has synced.
 
 | Command or flag | What it does |
 |---|---|
-| `kit secret add <name>` | Stores, declares and syncs it |
+| `kit secret add <name>` | Stores, declares and puts it in place |
 | `add --stdin` | Reads the value on standard input |
 | `add --from <file>` | Keeps a file as an attachment |
 | `add --ref <reference>` | Declares a value kept already |
