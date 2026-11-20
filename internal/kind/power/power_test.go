@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/power"
@@ -136,9 +137,9 @@ func TestDisableSleepIsReadFromTheSystemWideSettings(t *testing.T) {
 		{"set, declared for the charger", []config.Entry{{Name: "charger:disablesleep", Value: "1"}}, "System-wide power settings:\n SleepDisabled\t\t1\n" + inUse, nil},
 		{"set, declared for the battery", []config.Entry{{Name: "battery:disablesleep", Value: "1"}}, "System-wide power settings:\n SleepDisabled\t\t1\n" + inUse, nil},
 		{"not set", []config.Entry{{Name: "all:disablesleep", Value: "1"}}, "System-wide power settings:\n SleepDisabled\t\t0\n" + inUse, []string{"all:disablesleep changed set to 0 install"}},
-		{"never set, so not shown", []config.Entry{{Name: "all:disablesleep", Value: "1"}}, inUse, []string{"all:disablesleep changed set to 0 install"}},
-		{"never set, declared off", []config.Entry{{Name: "all:disablesleep", Value: "0"}}, inUse, nil},
-		{"shown only as in use", []config.Entry{{Name: "all:disablesleep", Value: "1"}}, "Currently in use:\n SleepDisabled\t\t1\n sleep                0 (sleep prevented by powerd)\n", []string{"all:disablesleep changed set to 0 install"}},
+		{"not shown", []config.Entry{{Name: "all:disablesleep", Value: "1"}}, inUse, []string{"all:disablesleep missing install"}},
+		{"not shown, declared off", []config.Entry{{Name: "all:disablesleep", Value: "0"}}, inUse, []string{"all:disablesleep missing install"}},
+		{"shown only as in use", []config.Entry{{Name: "all:disablesleep", Value: "1"}}, "Currently in use:\n SleepDisabled\t\t1\n sleep                0 (sleep prevented by powerd)\n", []string{"all:disablesleep missing install"}},
 		{"beside a setting pmset -g custom shows", []config.Entry{{Name: "all:disablesleep", Value: "1"}, {Name: "all:sleep", Value: "0"}}, "System-wide power settings:\n SleepDisabled\t\t1\n" + inUse, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,5 +185,60 @@ func TestDisableSleepsValueIsTheSystemWideOne(t *testing.T) {
 		if v, err := p.Value(t.Context(), name); err != nil || v != "1" {
 			t.Errorf("Value(%q) = %q, %v; want 1", name, v, err)
 		}
+	}
+}
+
+// disablesleep set to 1 by kit and turned off since, or no longer shown, was
+// changed on the Mac.
+func TestDisableSleepChangedSinceKitSawItSetDiverged(t *testing.T) {
+	for _, tc := range []struct{ name, g, want string }{
+		{"set to 0", "System-wide power settings:\n SleepDisabled\t\t0\n" + inUse, "all:disablesleep diverged set to 0"},
+		{"not shown", inUse, "all:disablesleep diverged not shown by pmset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			p := power.New(fake, t.TempDir())
+			list, err := p.Values(config.List{Entries: []config.Entry{{Name: "all:disablesleep", Value: "1"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake.On("pmset", "-g", "custom").Prints(custom)
+			fake.On("pmset", "-g").Prints("System-wide power settings:\n SleepDisabled\t\t1\n" + inUse)
+			if got := items(t, p, list); len(got) != 0 {
+				t.Fatalf("items = %q, want none", got)
+			}
+			fake.On("pmset", "-g").Prints(tc.g)
+			if got, want := items(t, p, list), []string{tc.want}; !slices.Equal(got, want) {
+				t.Errorf("items = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestPmsetGFailingFailsTheCheck(t *testing.T) {
+	fake := runnertest.New(t)
+	p := power.New(fake, t.TempDir())
+	list, err := p.Values(config.List{Entries: []config.Entry{{Name: "all:disablesleep", Value: "1"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.On("pmset", "-g", "custom").Prints(custom)
+	fake.On("pmset", "-g").Exits(1)
+	if got := kind.Compare(t.Context(), p, list); got.State != check.Failed || got.Reason != "pmset -g: pmset exited 1" {
+		t.Errorf("Compare() = %v, %q; want it failed, pmset -g's error its reason", got.State, got.Reason)
+	}
+}
+
+// disablesleep is one value for every source, so kit sets it with -a,
+// whichever source it's declared for.
+func TestDisableSleepIsSetForEverySource(t *testing.T) {
+	fake := runnertest.New(t)
+	p := power.New(fake, t.TempDir())
+	if _, err := p.Values(config.List{Entries: []config.Entry{{Name: "charger:disablesleep", Value: "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	fake.On("sudo", "-n", "pmset", "-a", "disablesleep", "1")
+	if err := p.Install(t.Context(), []string{"charger:disablesleep"}); err != nil {
+		t.Errorf("Install() = %v, ran %q; want sudo -n pmset -a disablesleep 1", err, fake.Calls())
 	}
 }

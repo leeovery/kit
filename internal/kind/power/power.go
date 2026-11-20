@@ -30,8 +30,9 @@ type record struct {
 // sections are pmset -g custom's headings, by the source they're for.
 var sections = map[string]string{"AC Power:": "charger", "Battery Power:": "battery", "UPS Power:": "ups"}
 
-// disableSleep is the one setting pmset -g custom leaves out: pmset -g shows
-// it, as sleepDisabled, under systemWide, one value for every source.
+// disablesleep is the one setting pmset -g custom leaves out: pmset -g shows
+// it as SleepDisabled, under "System-wide power settings:", one value for
+// every source.
 const (
 	disableSleep  = "disablesleep"
 	sleepDisabled = "SleepDisabled"
@@ -120,11 +121,13 @@ func (p *Power) settings(ctx context.Context, names []string) (map[string]string
 	if !slices.ContainsFunc(names, isDisableSleep) {
 		return out, nil
 	}
-	v, err := p.sleepDisabled(ctx)
+	v, ok, err := p.sleepDisabled(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out["system:"+disableSleep] = v
+	if ok {
+		out["system:"+disableSleep] = v
+	}
 	return out, nil
 }
 
@@ -135,12 +138,12 @@ func isDisableSleep(name string) bool {
 
 // sleepDisabled is disablesleep's value, from pmset -g's system-wide
 // section alone: the sections after it hold the settings in use, with notes
-// such as "(sleep prevented by powerd)". macOS shows SleepDisabled only once
-// it has been set, so a Mac without the line has the default, 0.
-func (p *Power) sleepDisabled(ctx context.Context) (string, error) {
+// such as "(sleep prevented by powerd)". macOS shows the line set or not, so
+// without it pmset's output isn't as kit knows it, and the value isn't found.
+func (p *Power) sleepDisabled(ctx context.Context) (string, bool, error) {
 	res, err := p.run.Run(ctx, runner.Command{Name: "pmset", Args: []string{"-g"}})
 	if err != nil {
-		return "", err
+		return "", false, fmt.Errorf("pmset -g: %w", err)
 	}
 	in := false
 	for line := range strings.Lines(string(res.Stdout)) {
@@ -149,10 +152,10 @@ func (p *Power) sleepDisabled(ctx context.Context) (string, error) {
 			continue
 		}
 		if fields := strings.Fields(line); in && len(fields) == 2 && fields[0] == sleepDisabled {
-			return fields[1], nil
+			return fields[1], true, nil
 		}
 	}
-	return "0", nil
+	return "", false, nil
 }
 
 // actual is a declared setting's value: for every source, its value when
@@ -240,8 +243,12 @@ func (p *Power) Value(ctx context.Context, name string) (string, error) {
 	return v, nil
 }
 
-// flag is pmset's flag for a setting's source.
+// flag is pmset's flag for a setting's source: -a for disablesleep, one
+// value for every source.
 func flag(name string) string {
+	if isDisableSleep(name) {
+		return "-a"
+	}
 	source, _, _ := strings.Cut(name, ":")
 	for f, s := range config.PowerSources {
 		if s == source {
