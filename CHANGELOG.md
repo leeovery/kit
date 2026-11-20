@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-11-20
+
+Keep folders out of Time Machine backups once Full Disk Access is in place, with a clear prompt to grant it when it isn't.
+
+✨ Added
+- Full Disk Access step for the terminal or SSH session kit runs in — it tells you exactly what to turn on in System Settings, and over SSH names the Remote Login switch.
+- `disablesleep` is now a supported power setting — set it once and it applies to every power source.
+
+🔧 Changed
+- Backup exclusions wait until Full Disk Access is granted, then apply with `kit apply` — kit no longer tries and fails folder by folder.
+- Apps are named when kit asks for access, including iTerm, instead of "your terminal".
+- Rows waiting on Full Disk Access show what they are waiting for on the apply screen.
+
+🐛 Fixed
+- A refusal from Time Machine for lack of Full Disk Access is reported once, instead of as a separate failure for every excluded folder.
+
 ## [0.4.0] - 2026-11-20
 
 Raise a directory on one Mac's PATH ahead of every Mac's, by adding it to that Mac too.
