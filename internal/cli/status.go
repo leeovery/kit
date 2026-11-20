@@ -381,6 +381,11 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		return nil, err
 	}
 	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups), AppDirs: a.appFolders(home).Dirs}
+	// granting is how what kit runs in, access, is given Full Disk Access,
+	// which the kinds whose programs need it wait for (accessWaits).
+	granting := steps.GrantingFor(a.Getenv, a.scheduled)
+	access := &steps.Access{Home: home}
+	var accessWaits []string
 	for _, d := range kinds.All {
 		k := d.New(deps)
 		list, unread, err := kind.Declared(cfg, k, machine)
@@ -389,11 +394,24 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		}
 		r.allKinds = append(r.allKinds, d.Name)
 		r.kindsByName[d.Name], r.lists[d.Name] = k, list
+		accessor, needsAccess := k.(kind.FullDiskAccessor)
+		if needsAccess {
+			accessor.SetAccess(r.access(&granting, access, a.scheduled))
+		}
 		if !list.Declared && unread == nil {
 			continue
 		}
 		step := kind.Placed(k, list, func(context.Context) kind.Placing { return r.placed(d.Name) }, d.Needs...)
 		step.Title, step.Area, step.Row, step.Tool, step.Verb = d.Label, steps.AreaDrift, d.Row, d.Tool, d.Installs().Done
+		if needsAccess {
+			// At a terminal, after the step whose card it waits behind; the
+			// hourly run's probes for itself, and kit-app-access comes after
+			// Homebrew's formulae.
+			if !a.scheduled {
+				step.After = append(step.After, granting.Step)
+			}
+			accessWaits = append(accessWaits, d.Name)
+		}
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
@@ -463,10 +481,17 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 			}
 		}
 		settings = []engine.Step{feature(steps.FeaturePrefs, saving)}
-		// The terminal's grant: kit-app-access looks after kit.app's.
-		if !a.scheduled {
-			settings = append(settings, feature(steps.FeaturePrefs, steps.FullDiskAccess(home)))
+	}
+	// The terminal's grant, or the SSH session's: kit-app-access looks
+	// after kit.app's. Placed as [features] places prefs only while nothing
+	// else waits for it, as what holds prefs back mustn't hold that back.
+	granting = granting.For(accessWaits, features.on(steps.FeaturePrefs))
+	if !a.scheduled && (features.on(steps.FeaturePrefs) || len(accessWaits) > 0) {
+		step := steps.FullDiskAccess(granting, access)
+		if features.on(steps.FeaturePrefs) && len(accessWaits) == 0 {
+			step = feature(steps.FeaturePrefs, step)
 		}
+		settings = append(settings, step)
 	}
 	checks = append(checks, settings...)
 	// A step by hand that comes due while kit applies at a terminal is

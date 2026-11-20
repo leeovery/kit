@@ -70,12 +70,13 @@ func TestRunning(t *testing.T) {
 }
 
 // The app kit's running in is named as macOS names it: macOS's own
-// Terminal, one kit knows by its title, and any other as Unnamed.
+// Terminal, iTerm, one kit knows by its title, and any other as Unnamed.
 func TestRunningIn(t *testing.T) {
 	for _, tt := range []struct {
 		program, want string
 	}{
 		{"Apple_Terminal", "Terminal"},
+		{"iTerm.app", "iTerm"},
 		{"ghostty", "Ghostty"},
 		{"vscode", apps.Unnamed},
 		{"", apps.Unnamed},

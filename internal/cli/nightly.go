@@ -83,14 +83,54 @@ named add, remove or at).`,
 // shows: nothing, with none of that on the Mac to read. Unrecorded, the run
 // goes on, its log saying why.
 func recordAccess(r *run) {
-	granted, found := steps.ProbeFullDiskAccess(r.homeDir)
-	if !found {
-		return
+	if granted, found := steps.ProbeFullDiskAccess(r.homeDir); found {
+		r.recordAccess(granted)
 	}
+}
+
+// recordAccess records whether the kit.app in kit's data folder has Full
+// Disk Access, as granted says. Unrecorded, the run goes on, its log saying
+// why.
+func (r *run) recordAccess(granted bool) {
 	access := nightly.Access{At: r.now, App: macapp.Built(r.dataDir), Granted: granted}
 	if err := nightly.Update(r.stateDir, func(rec *nightly.Record) { rec.Access = access }); err != nil {
 		r.sink.Emit(event.Logged{Time: r.now, Line: "kit.app's Full Disk Access went unrecorded: " + err.Error(), Alert: true})
 	}
+}
+
+// access is how a kind's changes are held while access, what kit runs in,
+// lacks Full Disk Access, as g gives it: in the hourly run, kit.app's, as
+// this run, its child, is. One held, or a program's refusal, is noted in
+// access, a refusal in the hourly run in kit.app's record too, where g's
+// step looks; then held, as held says.
+func (r *run) access(g *steps.Granting, access *steps.Access, scheduled bool) kind.Access {
+	return kind.Access{
+		Granted: func(context.Context) bool { return access.Granted() },
+		Held: func(ctx context.Context) error {
+			access.Held()
+			return held(ctx, g)
+		},
+		Refused: func(ctx context.Context, program string) error {
+			access.Refused(program)
+			access.Held()
+			if scheduled {
+				r.recordAccess(false)
+			}
+			return held(ctx, g)
+		},
+	}
+}
+
+// held is what a kind's change returns, held for want of Full Disk Access,
+// as g's wait says: g's step checked again, so the run says once it isn't
+// given and raises what to do; and, should that step not be in the run, or
+// still stand ok, as when kit.app's record couldn't be written, saying what
+// to do itself.
+func held(ctx context.Context, g *steps.Granting) error {
+	if res, ok := engine.Recheck(ctx, g.Step); ok && res.State != check.OK {
+		return engine.NotYet(g.Wait)
+	}
+	return engine.NotYet(g.Wait + ": " + g.Title)
 }
 
 // nightly runs the jobs due, or those named, then every check. A run of

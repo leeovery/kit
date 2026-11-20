@@ -151,11 +151,12 @@ func (p *Pretty) heldRow(name string, seen map[string]bool) string {
 // what went wrong, or how many did; a card up for a step by hand holding
 // one of them up, or one of them needing you, orange; one at work, what
 // it's doing; some waiting, what for; all finished, how many things
-// they've left to do at the end (laterState), or that they didn't run,
-// or, all well, what's done.
+// they've left to do at the end (laterState), what one held behind
+// another's to-dos waits for, or that they didn't run, or, all well,
+// what's done.
 func (p *Pretty) rowLook(r applyRow) look.Row {
 	row := look.Row{Name: r.name}
-	var failed, unwell, skipped []event.Step
+	var failed, unwell, held, skipped []event.Step
 	finished, toDo := 0, 0
 	for _, s := range r.steps {
 		f, ok := p.results[s.Name]
@@ -170,6 +171,9 @@ func (p *Pretty) rowLook(r applyRow) look.Row {
 			unwell = append(unwell, s)
 		case look.ToDo:
 			toDo += len(f.Result.Items)
+			if len(f.Result.Items) == 0 {
+				held = append(held, s)
+			}
 		case look.Skipped:
 			skipped = append(skipped, s)
 		}
@@ -194,6 +198,11 @@ func (p *Pretty) rowLook(r applyRow) look.Row {
 	case toDo > 0:
 		row.State = p.laterState()
 		row.Says = look.Words(row.State, fmt.Sprintf("%d to do at the end", toDo))
+	case len(held) > 0:
+		// The wait alone, without its step's title, which would have a
+		// narrow screen cut it.
+		row.State = p.laterState()
+		row.Says = look.Words(row.State, p.results[held[0].Name].Result.Reason)
 	case len(skipped) > 0:
 		row.State, row.Says = look.Skipped, p.listRow(skipped[0]).Says
 	default:

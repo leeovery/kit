@@ -135,6 +135,24 @@ Disk Access, and Finder at kit.app. Then:
 
 The next hourly run checks the grant.
 
+## Backup exclusions wait for Full Disk Access
+
+The Mac settings row of `kit apply` says `needs Full Disk Access`. Its To do lists "Give
+Ghostty Full Disk Access, then reopen it", with your terminal's name.
+
+**Cause:** `tmutil` changes Time Machine's list only for an app with Full Disk Access. The
+terminal kit runs in doesn't have it, and a terminal takes up the access only once it's
+reopened.
+
+**Fix:** follow the to-do's steps:
+
+1. In System Settings › Privacy & Security › Full Disk Access, turn on your terminal.
+2. Quit the terminal and open it again.
+3. Run `kit apply backup-exclusion`.
+
+Over SSH, the to-do is "Allow Full Disk Access for remote users" instead. You find that switch
+in System Settings › General › Sharing › Remote Login › ⓘ.
+
 ## A linked file differs
 
 `kit apply` leaves the file as it is, and says so under Files and shell in its record:

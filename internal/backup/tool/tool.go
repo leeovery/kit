@@ -9,6 +9,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/leeovery/kit/internal/runner"
@@ -93,6 +94,10 @@ type Problem struct {
 	Key, What, Do string
 }
 
+// ErrNoFullDiskAccess is an Excluder's program refusing for want of Full
+// Disk Access, as it would for any other path it was given.
+var ErrNoFullDiskAccess = errors.New("needs Full Disk Access")
+
 // Excluder keeps paths out of a tool's backups, each a full path: one kept
 // out fixed, wherever it is, so before its folder exists, as a path
 // declared plainly is; or where it is now, as a glob's match is.
@@ -102,9 +107,11 @@ type Excluder interface {
 	// Excluded are the paths it keeps out: every one fixed, and those of
 	// here it keeps out where they are.
 	Excluded(ctx context.Context, run runner.Runner, here []string) ([]string, error)
-	// Exclude keeps path out, fixed or where it is.
+	// Exclude keeps path out, fixed or where it is: ErrNoFullDiskAccess
+	// when its program refuses for want of Full Disk Access.
 	Exclude(ctx context.Context, run runner.Runner, path string, fixed bool) error
-	// Include stops keeping out path, kept out fixed.
+	// Include stops keeping out path, kept out fixed: ErrNoFullDiskAccess,
+	// as Exclude.
 	Include(ctx context.Context, run runner.Runner, path string) error
 	// NeedsAdmin is whether keeping a path out, fixed or where it is, needs
 	// an administrator's password.

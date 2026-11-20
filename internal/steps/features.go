@@ -1,14 +1,10 @@
 package steps
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
-
-	"github.com/leeovery/kit/internal/check"
-	"github.com/leeovery/kit/internal/engine"
 )
 
 // FeaturePrefs is the feature of apps' settings, saved and brought back,
@@ -22,26 +18,12 @@ var Features = []string{FeatureFileSharing, FeaturePrefs, FeatureRemoteLogin, Fe
 // Access, relative to the home.
 var fullDiskAccessProbes = []string{"Library/Safari", "Library/Mail", "Library/Messages"}
 
-// FullDiskAccessName names the step checking the terminal's Full Disk
-// Access.
-const FullDiskAccessName = "full-disk-access"
-
-// FullDiskAccess checks the terminal kit runs in can read what only Full
-// Disk Access shows, as a capture or a restore of apps' settings run there
-// needs. Not in the hourly launch's runs: kit.app's grant is AppAccess's.
-func FullDiskAccess(home string) engine.Step {
-	return engine.Step{
-		Name: FullDiskAccessName, Title: "Full Disk Access", Area: AreaBackups,
-		Check: func(context.Context) check.Result {
-			switch granted, found := ProbeFullDiskAccess(home); {
-			case granted:
-				return check.Result{State: check.OK, Summary: "granted"}
-			case !found:
-				return check.Result{State: check.OK, Summary: "nothing protected to read"}
-			}
-			return problem(FullDiskAccessName, "not granted", [3]string{"denied", "the terminal kit runs in can't read what only Full Disk Access shows, so a capture or restore of apps' settings here fails", "System Settings › Privacy & Security › Full Disk Access: add the terminal kit runs in"})
-		},
-	}
+// HasFullDiskAccess reports whether what kit runs in reads what only Full
+// Disk Access shows, in home, as far as can be told: so, with none of it
+// there to read.
+func HasFullDiskAccess(home string) bool {
+	granted, found := ProbeFullDiskAccess(home)
+	return granted || !found
 }
 
 // ProbeFullDiskAccess reports whether what only Full Disk Access shows, in
