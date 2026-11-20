@@ -21,17 +21,19 @@ diff_exclude = [
 
 [release.hooks]
 # CI is off until kit is ready, and no CI job builds a release: both happen
-# on this Mac, before the notes and the irreversible tag and push.
-# scripts/gates runs every gate, the personal-data scan included; then
-# scripts/release-build builds the binaries and keeps them, so a failure
-# building or checking them stops the release before its tag, with nothing
-# public yet.
-pre_tag = ['scripts/gates', 'scripts/release-build']
-# Once the tag and the release are up: scripts/release-upload uploads the
-# kept binaries to the release and moves the Homebrew formula on to them.
-# mint only warns when it fails, so scripts/release-upload <version>, run by
-# hand, finishes the release.
-post_release = ['scripts/release-upload']
+# on this Mac, before the notes and the irreversible tag and push. press check
+# (preflight) fails in seconds where the signing keychain won't open or the
+# notary login has lapsed, before mint writes notes. scripts/gates runs every
+# gate, the personal-data scan included; then press prepare builds what
+# .press.toml names, kit.app and kit, signed with this Mac's Developer ID and
+# notarised, and keeps them, so a failure building or checking them stops the
+# release before its tag, with nothing public yet.
+preflight = ['press check']
+pre_tag = ['scripts/gates', 'press prepare']
+# Once the tag and the release are up: press upload uploads the kept binaries
+# to the release and moves the Homebrew formula on to them. mint only warns
+# when it fails, so press upload <version>, run by hand, finishes the release.
+post_release = ['press upload']
 
 [release]
-diff_exclude = [".gitignore", "art/", "cmd/capturetool/", "cmd/kitapp/", "demo/", "internal/capture/", "internal/boot/boottest/", "internal/render/rendertest/", "internal/runner/runnertest/", "internal/testguard/"]
+diff_exclude = [".gitignore", "art/", "cmd/capturetool/", "cmd/kitapp/", "demo/", "internal/capture/", "internal/boot/boottest/", "internal/render/rendertest/", "internal/runner/runnertest/", "internal/testguard/", ".press.toml"]

@@ -1,0 +1,35 @@
+# How press builds, signs and ships kit: `press prepare` before mint tags a
+# release, `press upload` after (.mint.toml's hooks).
+name = "kit"
+
+# kit.app: posts kit's notifications and holds its Full Disk Access. Laid out
+# by cmd/kitapp, its executable compiled for both chips and joined, then
+# signed and notarised by press, its ticket stapled. It ships in each archive
+# beside kit, for install.sh and the formula to put in libexec. Each slice is
+# compiled to a file named kit-<arch>, no Swift identifier, so its module is
+# main, as every release's has been: the module names its classes.
+[[app]]
+path = "kit.app"
+identifier = "com.leeovery.kit"
+build = [
+  "go run ./cmd/kitapp {out} {version} {team}",
+  "swiftc -O -target arm64-apple-macos12 -o {temp}/kit-arm64 internal/macapp/kit.swift",
+  "swiftc -O -target x86_64-apple-macos12 -o {temp}/kit-x86_64 internal/macapp/kit.swift",
+  "lipo -create -output {out}/Contents/MacOS/kit {temp}/kit-arm64 {temp}/kit-x86_64",
+]
+
+# kit itself, signed and notarised beside kit.app.
+[binary]
+identifier = "com.leeovery.kit.cli"
+targets = ["darwin/arm64", "darwin/amd64"]
+build = 'go build -trimpath -ldflags "-s -w -X main.version={version}" -o {out} ./cmd/kit'
+version = "kit version {version}"
+
+[package]
+name = "kit_{version}_{os}_{arch}.tar.gz"
+checksums = "kit_{version}_checksums.txt"
+
+# The formula in leeovery/homebrew-tools, moved on to each release that is
+# the latest and no pre-release.
+[tap]
+kind = "formula"
