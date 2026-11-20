@@ -224,14 +224,14 @@ func (exclusions) Excluded(ctx context.Context, run runner.Runner, here []string
 	return out, nil
 }
 
-// Exclude excludes path: fixed, through sudo, which needs Full Disk Access
-// for the terminal kit runs in; else where it is.
+// Exclude excludes path: fixed, through sudo; else where it is. Either
+// needs Full Disk Access for the program kit runs in.
 func (exclusions) Exclude(ctx context.Context, run runner.Runner, path string, fixed bool) error {
 	if fixed {
 		return sudoTmutil(ctx, run, "addexclusion", path)
 	}
 	_, err := run.Run(ctx, runner.Command{Name: "tmutil", Args: []string{"addexclusion", path}})
-	return err
+	return refused(err)
 }
 
 // Include stops excluding path's fixed-path exclusion.
@@ -245,6 +245,19 @@ func (exclusions) NeedsAdmin(fixed bool) bool { return fixed }
 
 func sudoTmutil(ctx context.Context, run runner.Runner, verb, path string) error {
 	_, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "tmutil", verb, "-p", path}})
+	return refused(err)
+}
+
+// noAccessExit is the status tmutil exits with refusing for want of Full
+// Disk Access, saying so on its standard error.
+const noAccessExit = 80
+
+// refused is err, and tool.ErrNoFullDiskAccess too when it's tmutil
+// refusing for want of Full Disk Access.
+func refused(err error) error {
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == noAccessExit && strings.Contains(exit.FullStderr, "requires Full Disk Access") {
+		return fmt.Errorf("%w: %w", tool.ErrNoFullDiskAccess, err)
+	}
 	return err
 }
 

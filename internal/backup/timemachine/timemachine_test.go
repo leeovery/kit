@@ -2,6 +2,7 @@ package timemachine_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -9,7 +10,9 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/backup/timemachine"
+	"github.com/leeovery/kit/internal/backup/tool"
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -241,5 +244,50 @@ func TestTimeMachineExcludes(t *testing.T) {
 	}
 	if !ex.NeedsAdmin(true) || ex.NeedsAdmin(false) || ex.Program() != "tmutil" {
 		t.Errorf("NeedsAdmin(fixed) = %v, NeedsAdmin(where it is) = %v, Program() = %q; want the password for fixed alone, through tmutil", ex.NeedsAdmin(true), ex.NeedsAdmin(false), ex.Program())
+	}
+}
+
+// noAccess is what tmutil prints on its standard error refusing for want
+// of Full Disk Access, exiting 80.
+const noAccess = `tmutil: addexclusion requires Full Disk Access privileges.
+To allow this operation, select Full Disk Access in the Privacy
+tab of the Security & Privacy preference pane, and add Terminal
+to the list of applications which are allowed Full Disk Access.
+`
+
+// tmutil refusing for want of Full Disk Access, fixed through sudo or where
+// it is, is tool.ErrNoFullDiskAccess, its own words kept; any other failure
+// isn't, its words said, and nor is another exit saying the same.
+func TestTimeMachineRefusesWithoutFullDiskAccess(t *testing.T) {
+	ex := timemachine.Driver{}.Excluder()
+	fixed := func(ctx context.Context, run runner.Runner) error { return ex.Exclude(ctx, run, "/Applications", true) }
+	here := func(ctx context.Context, run runner.Runner) error {
+		return ex.Exclude(ctx, run, "/Applications", false)
+	}
+	include := func(ctx context.Context, run runner.Runner) error { return ex.Include(ctx, run, "/Applications") }
+	for _, tt := range []struct {
+		name   string
+		do     func(context.Context, runner.Runner) error
+		exit   int
+		stderr string
+		access bool
+	}{
+		{"fixed, refused", fixed, 80, noAccess, true},
+		{"where it is, refused", here, 80, noAccess, true},
+		{"included, refused", include, 80, noAccess, true},
+		{"another failure", here, 1, "tmutil: something else went wrong\n", false},
+		{"another exit", here, 1, noAccess, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("sudo", "-n", "tmutil", "addexclusion", "-p", "/Applications").Exits(tt.exit).PrintsToStderr(tt.stderr)
+			fake.On("sudo", "-n", "tmutil", "removeexclusion", "-p", "/Applications").Exits(tt.exit).PrintsToStderr(tt.stderr)
+			fake.On("tmutil", "addexclusion", "/Applications").Exits(tt.exit).PrintsToStderr(tt.stderr)
+			err := tt.do(t.Context(), fake)
+			exit, kept := errors.AsType[*runner.ExitError](err)
+			if errors.Is(err, tool.ErrNoFullDiskAccess) != tt.access || !kept || exit.FullStderr != tt.stderr {
+				t.Errorf("err = %v; want Full Disk Access refused %v, tmutil's failure kept", err, tt.access)
+			}
+		})
 	}
 }

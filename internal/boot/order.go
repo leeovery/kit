@@ -591,7 +591,7 @@ func (b *Boot) accessStep(t apps.Terminal) engine.Step {
 		Name: AccessStep, Title: "Full Disk Access", Waiting: "for " + t.Title,
 		Check: func(ctx context.Context) check.Result {
 			if b.in(t) {
-				if steps.FullDiskAccess(b.Home).Check(ctx).State == check.OK {
+				if steps.HasFullDiskAccess(b.Home) {
 					return check.Result{State: check.OK, Summary: "granted to " + t.Title}
 				}
 				return check.Result{State: check.Attention, Summary: "not granted to " + t.Title, Reason: fmt.Sprintf(

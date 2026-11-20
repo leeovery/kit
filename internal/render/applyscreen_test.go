@@ -1739,3 +1739,27 @@ func TestApplyingStepsWaitingForEachOther(t *testing.T) {
 		t.Errorf("a3, behind x, deferred for its own reasons, is to do:\n%s", strings.Join(log, "\n"))
 	}
 }
+
+// A row whose step is held behind another row's to-do, as the backup
+// exclusions are behind Full Disk Access, says what it waits for, in full
+// on a narrow screen too, never that all's done.
+func TestApplyingRowHeldBehindAToDo(t *testing.T) {
+	access := check.Result{State: check.Attention, Summary: "not granted", Items: []check.Item{{ID: "full-disk-access:denied", Name: "Give Ghostty Full Disk Access, then reopen it", State: check.Problem}}}
+	held := check.Result{State: check.Deferred, Reason: "needs Full Disk Access"}
+	steps := []event.Step{
+		{Name: "full-disk-access", Title: "Full Disk Access", Area: "Backups"},
+		{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings"},
+		{Name: "backup-exclusion", Title: "Backup exclusions", Area: "Drift", Row: "Mac settings", Waits: []string{"full-disk-access"}},
+	}
+	for _, size := range [][2]int{{100, 30}, {160, 64}} {
+		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+			face, out, _ := applyIn(colorprofile.TrueColor, size[0], size[1], time.Minute, rowsRun(steps,
+				finished(1, "full-disk-access", access), fine(2, "defaults", "3 declared, all set"), finished(3, "backup-exclusion", held)))
+			defer func() { _ = face.Close() }()
+			got := screen(uncoloured(out.String()))
+			if line, want := rowLine(t, got, size[0], "Mac settings"), "  ● Mac settings  needs Full Disk Access"; strings.TrimRight(line, " ") != want {
+				t.Errorf("the row is %q; want %q", line, want)
+			}
+		})
+	}
+}

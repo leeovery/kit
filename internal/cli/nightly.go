@@ -83,13 +83,38 @@ named add, remove or at).`,
 // shows: nothing, with none of that on the Mac to read. Unrecorded, the run
 // goes on, its log saying why.
 func recordAccess(r *run) {
-	granted, found := steps.ProbeFullDiskAccess(r.homeDir)
-	if !found {
-		return
+	if granted, found := steps.ProbeFullDiskAccess(r.homeDir); found {
+		r.recordAccess(granted)
 	}
+}
+
+// recordAccess records whether the kit.app in kit's data folder has Full
+// Disk Access, as granted says. Unrecorded, the run goes on, its log saying
+// why.
+func (r *run) recordAccess(granted bool) {
 	access := nightly.Access{At: r.now, App: macapp.Built(r.dataDir), Granted: granted}
 	if err := nightly.Update(r.stateDir, func(rec *nightly.Record) { rec.Access = access }); err != nil {
 		r.sink.Emit(event.Logged{Time: r.now, Line: "kit.app's Full Disk Access went unrecorded: " + err.Error(), Alert: true})
+	}
+}
+
+// refused is what a kind returns once one of its programs refuses for want
+// of Full Disk Access, the step telling whether it's given, g's, having
+// found it was: noted where that step looks (kit.app's record, scheduled,
+// else refusal), and that step checked again, so the run says it isn't
+// given, and what to do, once; held back behind it, as its wait says; and,
+// outside a run, saying what to do.
+func (r *run) refused(g *steps.Granting, refusal *steps.Refusal, scheduled bool) func(ctx context.Context, program string) error {
+	return func(ctx context.Context, program string) error {
+		if scheduled {
+			r.recordAccess(false)
+		} else {
+			refusal.Note(program)
+		}
+		if _, ok := engine.Recheck(ctx, g.Step); ok {
+			return engine.NotYet("needs " + engine.Title(ctx, g.Step))
+		}
+		return engine.NotYet(program + " needs Full Disk Access: " + g.Title)
 	}
 }
 

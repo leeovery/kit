@@ -80,6 +80,20 @@ A line is a path or a pattern:
 A plain path needs your administrator's password, which `kit apply` asks for at a terminal.
 Matches of a pattern need none, so the hourly run keeps a new match out within the hour.
 
+## Exclusions wait for Full Disk Access
+
+`tmutil` changes the list only for an app with Full Disk Access. Without it, kit holds the
+exclusions and asks for the access once:
+
+| Where kit runs | What kit asks |
+|---|---|
+| A terminal | Give it Full Disk Access, then reopen it |
+| Over SSH | Allow Full Disk Access for remote users |
+| The hourly run | Give kit.app Full Disk Access |
+
+At a terminal, the step's last line is `kit apply backup-exclusion`. Run it in the reopened
+terminal.
+
 ## Good to know
 
 - **Exclusions need a tool.** If `[backups]` names none, the exclusions fail, saying so.

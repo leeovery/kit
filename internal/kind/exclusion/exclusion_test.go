@@ -3,6 +3,7 @@ package exclusion_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/backup/timemachine"
 	"github.com/leeovery/kit/internal/backup/tool"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/exclusion"
 	"github.com/leeovery/kit/internal/runner"
@@ -215,6 +217,71 @@ func TestExclusionsThroughTheTools(t *testing.T) {
 			}
 			if calls := fake.Calls(); !slices.Contains(calls, "sudo -n tmutil addexclusion -p /Applications") || len(calls) != 2 {
 				t.Errorf("ran %q; want it excluded once, through Time Machine", calls)
+			}
+		})
+	}
+}
+
+// noAccess is what tmutil prints on its standard error refusing for want
+// of Full Disk Access, exiting 80.
+const noAccess = `tmutil: addexclusion requires Full Disk Access privileges.
+To allow this operation, select Full Disk Access in the Privacy
+tab of the Security & Privacy preference pane, and add Terminal
+to the list of applications which are allowed Full Disk Access.
+`
+
+// tmutil refusing for want of Full Disk Access refuses every path alike: the
+// first refusal ends the install, or the removal, said once, as the kind was
+// told to say it, given the program; told nothing, it's held back (not
+// failed), saying so.
+func TestExclusionsRefusedFullDiskAccess(t *testing.T) {
+	told := errors.New("told")
+	for _, tt := range []struct {
+		name   string
+		told   bool
+		remove bool
+		want   string
+	}{
+		{"install, told", true, false, "told tmutil"},
+		{"install, held back", false, false, "tmutil needs Full Disk Access"},
+		{"remove, told", true, true, "told tmutil"},
+		{"remove, held back", false, true, "tmutil needs Full Disk Access"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := home(t)
+			fake := runnertest.New(t)
+			x := exclusion.New(fake, h, backup.Excluders([]string{timemachine.ID}))
+			if tt.told {
+				x.SetRefused(func(_ context.Context, program string) error { return fmt.Errorf("%w %s", told, program) })
+			}
+			list, err := x.Expand(declared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>SkipPaths</key><array><string>/Volumes/Old</string><string>/Volumes/Older</string></array></dict></plist>")
+			fake.OnMatch("tmutil", func(args []string) bool { return args[0] == "isexcluded" })
+			fake.OnMatch("tmutil", func(args []string) bool { return args[0] == "addexclusion" }).Exits(80).PrintsToStderr(noAccess)
+			fake.OnMatch("sudo", func([]string) bool { return true }).Exits(80).PrintsToStderr(noAccess)
+			var names []string
+			for _, e := range list.Entries {
+				names = append(names, e.Name)
+			}
+			if tt.remove {
+				err = x.Remove(t.Context(), []string{"/Volumes/Old", "/Volumes/Older"})
+			} else {
+				err = x.Install(t.Context(), names)
+			}
+			if err == nil || err.Error() != tt.want || errors.Is(err, told) != tt.told || engine.IsNotYet(err) == tt.told {
+				t.Errorf("err = %v; want %q, once", err, tt.want)
+			}
+			var tried int
+			for _, call := range fake.Calls() {
+				if strings.Contains(call, "addexclusion") || strings.Contains(call, "removeexclusion") {
+					tried++
+				}
+			}
+			if tried != 1 {
+				t.Errorf("ran %q; want tmutil asked once, the rest left", fake.Calls())
 			}
 		})
 	}

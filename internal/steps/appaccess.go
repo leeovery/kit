@@ -22,6 +22,7 @@ const AccessSettings = "x-apple.systempreferences:com.apple.settings.PrivacySecu
 const (
 	appAccessTitle = "Give kit.app Full Disk Access"
 	appAccessWhy   = "kit's hourly run goes through kit.app, which needs Full Disk Access to save apps' settings and read Time Machine's state."
+	appAccessDo    = "a whole kit apply at a terminal asks for it"
 )
 
 var appAccessSteps = []string{
@@ -67,7 +68,7 @@ func AppAccess(a AppAccessing) engine.Step {
 				return check.Result{State: check.OK, Summary: said}
 			}
 			return check.Result{State: check.Attention, Summary: said, Items: []check.Item{{
-				ID: AppAccessName + ":" + AppAccessName, Name: appAccessTitle, State: check.ByHand, Detail: "a whole kit apply at a terminal asks for it",
+				ID: AppAccessName + ":" + AppAccessName, Name: appAccessTitle, State: check.ByHand, Detail: appAccessDo,
 			}}}
 		},
 	}

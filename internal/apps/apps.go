@@ -69,14 +69,18 @@ func Running(getenv func(string) string) (Terminal, bool) {
 // Unnamed is the app kit's running in, said when RunningIn can't name it.
 const Unnamed = "your terminal"
 
+// named are the terminals RunningIn names that aren't among Terminals, by
+// what they set TERM_PROGRAM to.
+var named = map[string]string{"Apple_Terminal": "Terminal", "iTerm.app": "iTerm"}
+
 // RunningIn is the app kit's running in, by its name, as macOS names it
 // asking for what it may do, as what getenv says TERM_PROGRAM is: Unnamed
 // for one kit doesn't know. macOS's own Terminal, where every boot starts,
-// isn't among Terminals: those are what kit.toml can name to hand over to,
-// which macOS's never is.
+// and iTerm aren't among Terminals: those are what kit.toml can name to
+// hand over to, which they never are.
 func RunningIn(getenv func(string) string) string {
-	if getenv("TERM_PROGRAM") == "Apple_Terminal" {
-		return "Terminal"
+	if name, ok := named[getenv("TERM_PROGRAM")]; ok {
+		return name
 	}
 	if t, ok := Running(getenv); ok {
 		return t.Title

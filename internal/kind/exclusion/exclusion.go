@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/backup"
 	"github.com/leeovery/kit/internal/backup/tool"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/tilde"
@@ -30,6 +31,7 @@ type Exclusions struct {
 	home      string
 	excluders []tool.Excluder
 	admin     func(ctx context.Context) bool
+	refused   func(ctx context.Context, program string) error
 	// matched are the paths a glob matched, by name: kept out where they
 	// are; declared every path declared, a glob by its matches.
 	matched, declared map[string]bool
@@ -171,7 +173,8 @@ func (x *Exclusions) globbed(name string) bool {
 
 // Install keeps each path out of every excluder's backups, one at a time so
 // one that fails leaves the rest: a glob's match where it is, first; a
-// plain path fixed.
+// plain path fixed. An excluder refusing for want of Full Disk Access
+// refuses every path alike, so that ends it, said once (refusal).
 func (x *Exclusions) Install(ctx context.Context, names []string) error {
 	var here, fixed []string
 	for _, name := range names {
@@ -183,18 +186,19 @@ func (x *Exclusions) Install(ctx context.Context, names []string) error {
 	}
 	var errs []error
 	for _, ex := range x.excluders {
-		for _, name := range here {
-			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, tilde.Expand(x.home, name), false) })))
-		}
-		for _, name := range fixed {
-			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, tilde.Expand(x.home, name), true) })))
+		for _, name := range slices.Concat(here, fixed) {
+			err := kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, tilde.Expand(x.home, name), !x.matched[name]) })
+			if errors.Is(err, tool.ErrNoFullDiskAccess) {
+				return x.refusal(ctx, ex.Program())
+			}
+			errs = append(errs, named(name, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
 // Remove stops keeping each path out, through the excluders keeping it
-// out.
+// out, ended as Install is by a refusal for want of Full Disk Access.
 func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 	var errs []error
 	for _, ex := range x.excluders {
@@ -204,12 +208,33 @@ func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 			continue
 		}
 		for _, name := range names {
-			if path := tilde.Expand(x.home, name); slices.Contains(kept, path) {
-				errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Include(ctx, x.run, path) })))
+			path := tilde.Expand(x.home, name)
+			if !slices.Contains(kept, path) {
+				continue
 			}
+			err := kind.AdminAgain(ctx, func() error { return ex.Include(ctx, x.run, path) })
+			if errors.Is(err, tool.ErrNoFullDiskAccess) {
+				return x.refusal(ctx, ex.Program())
+			}
+			errs = append(errs, named(name, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// SetRefused is what Install and Remove return when an excluder's program
+// refuses for want of Full Disk Access.
+func (x *Exclusions) SetRefused(refused func(ctx context.Context, program string) error) {
+	x.refused = refused
+}
+
+// refusal is the error for program refusing for want of Full Disk Access:
+// what the kind was told to say (SetRefused), else held back, saying so.
+func (x *Exclusions) refusal(ctx context.Context, program string) error {
+	if x.refused != nil {
+		return x.refused(ctx, program)
+	}
+	return engine.NotYet(program + " needs Full Disk Access")
 }
 
 // named is err, keeping the path called name out or no longer, saying
@@ -278,4 +303,5 @@ var _ interface {
 	kind.Unattended
 	kind.Admin
 	kind.Blocker
+	kind.FullDiskAccessor
 } = (*Exclusions)(nil)

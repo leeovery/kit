@@ -157,6 +157,18 @@ type Admin interface {
 	SetAdmin(held func(ctx context.Context) bool)
 }
 
+// FullDiskAccessor is a kind whose programs need Full Disk Access for what
+// kit runs in, as tmutil does to keep folders out of backups: its step
+// needs the step telling whether that has it, so it's held till it's
+// granted.
+type FullDiskAccessor interface {
+	// SetRefused is what the kind's installs and removals return when one
+	// of its programs refuses for want of Full Disk Access all the same:
+	// once, for every thing, refused's error, given the program. Unset, a
+	// refusal holds them back (engine.NotYet), saying so.
+	SetRefused(refused func(ctx context.Context, program string) error)
+}
+
 // Dependents is a kind that knows what installed needs a thing.
 type Dependents interface {
 	// NeededBy lists what's installed that needs name.
