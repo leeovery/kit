@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-20
+
+Raise a directory on one Mac's PATH ahead of every Mac's, by adding it to that Mac too.
+
+🔧 Changed
+- This Mac's PATH directories now come ahead of every Mac's, then the system's — before, every Mac's came first.
+- `kit path add` for a directory every Mac already has, run without `--shared`, now moves it ahead on this Mac instead of being refused.
+- `kit path remove` without `--shared` takes a directory out of this Mac's file alone when every Mac also has it, and says where it stays on the PATH.
+
 ## [0.3.0] - 2026-11-19
 
 Changes from other Macs reach each Mac within the hour, because runs now bring in kit-config's remote commits first.
