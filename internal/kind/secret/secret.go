@@ -204,19 +204,6 @@ func (s *Secrets) path(sec Secret) string {
 	return tilde.Expand(s.home, sec.Name)
 }
 
-// FileHolds is nil when the file the secret name fills holds want, byte
-// for byte: else that it differs, neither shown.
-func (s *Secrets) FileHolds(name, want string) error {
-	got, err := os.ReadFile(s.path(Secret{Name: name}))
-	if err != nil {
-		return err
-	}
-	if string(got) != want {
-		return errors.New("the file put in place differs from it")
-	}
-	return nil
-}
-
 // envLines are ~/.secrets.zsh's exports, by name, each its whole line.
 func (s *Secrets) envLines() (map[string]string, []string, error) {
 	f, err := os.Open(filepath.Join(s.home, EnvFile))

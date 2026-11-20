@@ -224,6 +224,38 @@ func TestAddASecretByItsReference(t *testing.T) {
 	}
 }
 
+// A file whose value is typed or comes on standard input is kept as a
+// field, and lands as a sync writes a field's text in a file, ended by one
+// newline: the next sync changes nothing.
+func TestAddASecretFileGivenAsText(t *testing.T) {
+	for name, terminal := range map[string]bool{"typed": true, "on stdin": false} {
+		t.Run(name, func(t *testing.T) {
+			w := laptopWorld(t)
+			w.terminal, w.typed, w.stdin = terminal, "key", "key\n"
+			f := w.fake
+			f.On("op", "whoami")
+			optest.Keeps(f, "op://vault/Item", []string{"Keys/other"}, nil)
+			f.On("op", "item", "edit", "Item", "--vault", "vault")
+			optest.Holds(f, map[string]string{"op://vault/Item/Keys/key": "key"})
+			w.expectSync(t, []string{"laptop/declarations"}, "kit secret add ~/.ssh/key (laptop)")
+			args := []string{"secret", "add", "~/.ssh/key", "--item", "op://vault/Item", "--field", "Keys/key"}
+			if !terminal {
+				args = append(args, "--stdin")
+			}
+			if out, _, code := w.run(t, args...); code != 0 {
+				t.Fatalf("kit secret add printed\n%s exit %d", out, code)
+			}
+			if got := w.read(t, ".ssh/key"); got != "key\n" {
+				t.Errorf("the file holds %q, want the text ended by one newline, as a sync writes it", got)
+			}
+			w.terminal = false
+			if out, _, code := w.run(t, "secret", "sync"); code != 0 || !strings.Contains(out, "secret ok 1 synced, 0 changed\n") {
+				t.Errorf("the next kit secret sync printed\n%s exit %d; want nothing changed", out, code)
+			}
+		})
+	}
+}
+
 // A file by --ref is read as a file holds it, that reference alone, and
 // written alone: ~/.secrets.zsh isn't touched.
 func TestAddASecretFileByItsReference(t *testing.T) {

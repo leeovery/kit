@@ -50,9 +50,8 @@ func (r *run) secrets() (*secret.Secrets, error) {
 
 // addSecret keeps a secret's value in its store (unless it's there
 // already, --ref, when it reads that one value), reads it back to compare,
-// declares the secret, and puts that secret alone in place, from the value
-// in hand, a file from --from compared with the file put in place, byte for
-// byte, values never shown: one secret at a time. A new value goes where
+// declares the secret, and puts that secret alone in place, as its store
+// gave it back (keepValue), values never shown: one secret at a time. A new value goes where
 // it's told, the block named (--in) or the item (--item), and its line in
 // the file's block for that item, made when there's none; a reference in an
 // item a block of the file is for goes in that block, short, and any other
@@ -80,8 +79,10 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	d, item := at.store, at.entry.Item
 	c := startChanges(r, []string{at.entry.Name})
 	c.step(ctx, at.entry.Name, func(ctx context.Context) check.Result {
+		placed := value
 		if so.ref == "" {
-			if why := keepValue(ctx, k, at, so, value); why != "" {
+			var why string
+			if placed, why = keepValue(ctx, k, at, so, value); why != "" {
 				return check.Result{State: check.Failed, Reason: why}
 			}
 		}
@@ -99,13 +100,8 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 			return check.Result{State: check.Failed, Reason: "declared, but its line doesn't read: " + err.Error()}
 		}
 		event.Say(ctx, event.Doing{Says: "putting it in place"})
-		if err := k.Put(e.Name, value); err != nil {
+		if err := k.Put(e.Name, placed); err != nil {
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't put it in place: " + err.Error()}
-		}
-		if so.from != "" && (secret.Secret{Name: e.Name}).IsFile() {
-			if err := k.FileHolds(e.Name, value); err != nil {
-				return check.Result{State: check.Failed, Reason: "stored and declared, but checked against " + so.from + ": " + err.Error()}
-			}
 		}
 		summary := "declared in " + at.scope + said + ", put in place"
 		if so.ref == "" {
@@ -119,8 +115,11 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 
 // keepValue keeps a new value in at's store, attached from --from or as a
 // field, then reads it back to compare, the step saying which it's doing:
-// why not, when either fails, else "".
-func keepValue(ctx context.Context, k *secret.Secrets, at secretTarget, so secretOptions, value string) string {
+// what goes in place, as the store gives it back and a sync would write
+// it, or why not, when either fails. A file's value kept as a field is
+// read once more in a file's form (Fetch), as its store gives a field's
+// text to a file otherwise than to a variable.
+func keepValue(ctx context.Context, k *secret.Secrets, at secretTarget, so secretOptions, value string) (placed, why string) {
 	d, item := at.store, at.entry.Item
 	event.Say(ctx, event.Doing{Says: "storing in " + d.About().Name})
 	keep, readBack := k.Store, k.ReadBack
@@ -131,15 +130,22 @@ func keepValue(ctx context.Context, k *secret.Secrets, at secretTarget, so secre
 	kept, err := keep(ctx, d, item, at.short, what)
 	switch {
 	case err != nil:
-		return err.Error()
+		return "", err.Error()
 	case kept != at.short:
-		return fmt.Sprintf("kept in %s, but as %s, not %s, where kit checked it could go: nothing declared", d.About().Name, d.Join(item, kept), d.Join(item, at.short))
+		return "", fmt.Sprintf("kept in %s, but as %s, not %s, where kit checked it could go: nothing declared", d.About().Name, d.Join(item, kept), d.Join(item, at.short))
 	}
 	event.Say(ctx, event.Doing{Says: "reading it back"})
-	if err := readBack(ctx, d, d.Join(item, at.short), value); err != nil {
-		return "stored, but reading it back failed: " + err.Error()
+	ref := d.Join(item, at.short)
+	if err := readBack(ctx, d, ref, value); err != nil {
+		return "", "stored, but reading it back failed: " + err.Error()
 	}
-	return ""
+	if so.from != "" || !(secret.Secret{Name: at.entry.Name}).IsFile() {
+		return value, ""
+	}
+	if placed, err = k.Fetch(ctx, d, at.entry.Name, ref); err != nil {
+		return "", "stored, but reading it back as a file failed: " + err.Error()
+	}
+	return placed, ""
 }
 
 // secretTarget is where kit secret add puts a secret: the file, by its
