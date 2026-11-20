@@ -90,8 +90,8 @@ Then kit commits and pushes kit-config.
   one of them.
 - **Some paths are refused.** `kit file add` refuses a link, or a path outside your home
   folder. It also refuses a path git ignores, and a folder that holds a git repository.
-- **A copy that matches is relinked.** If the file in place is the same as kit-config's,
-  `kit apply` links it again without asking.
+- **Matches and moves are relinked.** `kit apply` relinks a copy the same as kit-config's,
+  and a link to a file kit-config no longer has.
 - **Declare what a file needs.** If your `.zshrc` loads a plugin, declare the plugin as a
   package or a [step of your own](steps.md). Otherwise the shell on a new Mac can break.
 
