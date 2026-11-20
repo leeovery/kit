@@ -49,8 +49,8 @@ full; told neither, in this file's block for an item when it has one alone.
 --field says where in the item, in its store's words. kit secret places
 lists the blocks. The line goes in this file's block for that item, which
 kit makes when there's none, going by the name --in gave. Then the value's
-read back and compared, declared, and put in place: that secret alone, from
-the value in hand, no other read from its store. A variable's value of many
+read back and compared, declared, and put in place: that secret alone, as
+its store gives it back, no other secret read. A variable's value of many
 lines is refused: declare it as a file.
 
 A value in a store already (--ref) goes in this file's block for its item,

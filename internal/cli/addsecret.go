@@ -51,11 +51,11 @@ func (r *run) secrets() (*secret.Secrets, error) {
 // addSecret keeps a secret's value in its store (unless it's there
 // already, --ref, when it reads that one value), reads it back to compare,
 // declares the secret, and puts that secret alone in place, as its store
-// gave it back (keepValue), values never shown: one secret at a time. A new value goes where
-// it's told, the block named (--in) or the item (--item), and its line in
-// the file's block for that item, made when there's none; a reference in an
-// item a block of the file is for goes in that block, short, and any other
-// in the plain [secrets], in full. Declared for every Mac, it comes out of
+// gave it back (keepValue), values never shown: one secret at a time. A new
+// value goes where it's told, the block named (--in) or the item (--item),
+// and its line in the file's block for that item, made when there's none; a
+// reference in an item a block of the file is for goes in that block, short,
+// and any other in the plain [secrets], in full. Declared for every Mac, it comes out of
 // the Macs' files that had it, in the same edit. Everything's checked before
 // the value's asked for, or read (secretTarget), and a variable's value of
 // many lines is refused before it's stored.
