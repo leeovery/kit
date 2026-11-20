@@ -143,7 +143,7 @@ func isDisableSleep(name string) bool {
 func (p *Power) sleepDisabled(ctx context.Context) (string, bool, error) {
 	res, err := p.run.Run(ctx, runner.Command{Name: "pmset", Args: []string{"-g"}})
 	if err != nil {
-		return "", false, fmt.Errorf("pmset -g: %w", err)
+		return "", false, err
 	}
 	in := false
 	for line := range strings.Lines(string(res.Stdout)) {

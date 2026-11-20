@@ -224,7 +224,7 @@ func TestPmsetGFailingFailsTheCheck(t *testing.T) {
 	}
 	fake.On("pmset", "-g", "custom").Prints(custom)
 	fake.On("pmset", "-g").Exits(1)
-	if got := kind.Compare(t.Context(), p, list); got.State != check.Failed || got.Reason != "pmset -g: pmset exited 1" {
+	if got := kind.Compare(t.Context(), p, list); got.State != check.Failed || got.Reason != "pmset exited 1" {
 		t.Errorf("Compare() = %v, %q; want it failed, pmset -g's error its reason", got.State, got.Reason)
 	}
 }
