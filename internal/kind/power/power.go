@@ -1,6 +1,6 @@
 // Package power is the Mac's power settings as a kind: each declared in a
 // [power settings] section in pmset's form (-c sleep 0), compared with what
-// pmset -g custom says, and applied through sudo. As with macOS settings, a
+// pmset says, and applied through sudo. As with macOS settings, a
 // setting kit has seen as declared and that differs now was changed on the
 // Mac, so applying leaves it for kit reconcile.
 package power
@@ -29,6 +29,15 @@ type record struct {
 
 // sections are pmset -g custom's headings, by the source they're for.
 var sections = map[string]string{"AC Power:": "charger", "Battery Power:": "battery", "UPS Power:": "ups"}
+
+// disablesleep is the one setting pmset -g custom leaves out: pmset -g shows
+// it as SleepDisabled, under "System-wide power settings:", one value for
+// every source.
+const (
+	disableSleep  = "disablesleep"
+	sleepDisabled = "SleepDisabled"
+	systemWide    = "System-wide power settings:"
+)
 
 // Power is the Mac's power settings, driven through pmset.
 type Power struct {
@@ -87,8 +96,9 @@ func (p *Power) Values(list config.List) (config.List, error) {
 
 // settings are the power settings as they are, by source and setting, as
 // in charger:sleep. A Mac with one source, which pmset shows without a
-// heading, has the charger's.
-func (p *Power) settings(ctx context.Context) (map[string]string, error) {
+// heading, has the charger's. disablesleep, read only when one of names is
+// it, is under "system", whatever the source.
+func (p *Power) settings(ctx context.Context, names []string) (map[string]string, error) {
 	res, err := p.run.Run(ctx, runner.Command{Name: "pmset", Args: []string{"-g", "custom"}})
 	if err != nil {
 		return nil, err
@@ -108,13 +118,55 @@ func (p *Power) settings(ctx context.Context) (map[string]string, error) {
 		setting := strings.Join(fields[:len(fields)-1], " ")
 		out[source+":"+setting] = fields[len(fields)-1]
 	}
+	if !slices.ContainsFunc(names, isDisableSleep) {
+		return out, nil
+	}
+	v, ok, err := p.sleepDisabled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		out["system:"+disableSleep] = v
+	}
 	return out, nil
 }
 
+func isDisableSleep(name string) bool {
+	_, setting, _ := strings.Cut(name, ":")
+	return setting == disableSleep
+}
+
+// sleepDisabled is disablesleep's value, from pmset -g's system-wide
+// section alone: the sections after it hold the settings in use, with notes
+// such as "(sleep prevented by powerd)". macOS shows the line set or not, so
+// without it pmset's output isn't as kit knows it, and the value isn't found.
+func (p *Power) sleepDisabled(ctx context.Context) (string, bool, error) {
+	res, err := p.run.Run(ctx, runner.Command{Name: "pmset", Args: []string{"-g"}})
+	if err != nil {
+		return "", false, fmt.Errorf("pmset -g: %w", err)
+	}
+	in := false
+	for line := range strings.Lines(string(res.Stdout)) {
+		if strings.TrimLeft(line, " \t") == line {
+			in = strings.TrimSpace(line) == systemWide
+			continue
+		}
+		if fields := strings.Fields(line); in && len(fields) == 2 && fields[0] == sleepDisabled {
+			return fields[1], true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // actual is a declared setting's value: for every source, its value when
-// every source pmset shows has the same, else "".
+// every source pmset shows has the same, else "". disablesleep has one
+// value, whichever source it's declared for.
 func actual(settings map[string]string, name string) (string, bool) {
 	source, setting, _ := strings.Cut(name, ":")
+	if setting == disableSleep {
+		v, ok := settings["system:"+disableSleep]
+		return v, ok
+	}
 	if source != "all" {
 		v, ok := settings[name]
 		return v, ok
@@ -134,7 +186,7 @@ func actual(settings map[string]string, name string) (string, bool) {
 // Installed lists the declared settings pmset shows, and those kit has seen
 // as declared before.
 func (p *Power) Installed(ctx context.Context) ([]kind.Installed, error) {
-	settings, err := p.settings(ctx)
+	settings, err := p.settings(ctx, slices.Collect(maps.Keys(p.declared)))
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +212,7 @@ func (p *Power) Installed(ctx context.Context) ([]kind.Installed, error) {
 // Differs says how each declared setting changed since kit saw it as
 // declared is set now.
 func (p *Power) Differs(ctx context.Context, names []string) (map[string]string, error) {
-	settings, err := p.settings(ctx)
+	settings, err := p.settings(ctx, names)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +232,7 @@ func (p *Power) Differs(ctx context.Context, names []string) (map[string]string,
 
 // Value is a setting's value as it is.
 func (p *Power) Value(ctx context.Context, name string) (string, error) {
-	settings, err := p.settings(ctx)
+	settings, err := p.settings(ctx, []string{name})
 	if err != nil {
 		return "", err
 	}
@@ -191,8 +243,12 @@ func (p *Power) Value(ctx context.Context, name string) (string, error) {
 	return v, nil
 }
 
-// flag is pmset's flag for a setting's source.
+// flag is pmset's flag for a setting's source: -a for disablesleep, one
+// value for every source.
 func flag(name string) string {
+	if isDisableSleep(name) {
+		return "-a"
+	}
 	source, _, _ := strings.Cut(name, ":")
 	for f, s := range config.PowerSources {
 		if s == source {
