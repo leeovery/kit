@@ -15,10 +15,10 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -144,14 +144,15 @@ func versioned(version string) ([]byte, error) {
 
 // Shipped is the kit.app a release ships with the kit at self, its links
 // followed: in the libexec folder beside the kit's own, where Homebrew and
-// install.sh put it. "" when there's none, as beside a kit built by hand.
+// install.sh put it, its executable there and the team it's signed by. ""
+// when there's none, as beside a kit built by hand.
 func Shipped(self string) string {
 	resolved, err := filepath.EvalSymlinks(self)
 	if err != nil {
 		return ""
 	}
 	app := filepath.Join(filepath.Dir(filepath.Dir(resolved)), "libexec", Name)
-	if _, err := os.Stat(filepath.Join(app, executable)); err != nil {
+	if _, err := os.Stat(filepath.Join(app, executable)); err != nil || read(filepath.Join(app, signedBy)) == "" {
 		return ""
 	}
 	return app
@@ -174,13 +175,14 @@ type App struct {
 
 	// mu guards whether the app's ready; whether a build's been tried, or
 	// the app closed; built, closed once the build under way has ended, nil
-	// while none is; and sent, when the last notification was posted or
-	// taken away.
-	mu    sync.Mutex
-	ready bool
-	tried bool
-	built chan struct{}
-	sent  int64
+	// while none is; failed, why the last build failed; and sent, when the
+	// last notification was posted or taken away.
+	mu     sync.Mutex
+	ready  bool
+	tried  bool
+	built  chan struct{}
+	failed error
+	sent   int64
 }
 
 // New returns kit.app in the data directory dir, run through run: copied
@@ -272,7 +274,7 @@ func (a *App) building() (ready bool, built <-chan struct{}) {
 	go func() {
 		err := a.build(a.life)
 		a.mu.Lock()
-		a.ready, a.built = err == nil, nil
+		a.ready, a.built, a.failed = err == nil, nil, err
 		a.mu.Unlock()
 		close(done)
 	}()
@@ -284,6 +286,20 @@ func (a *App) building() (ready bool, built <-chan struct{}) {
 // embeds.
 func (a *App) Current() bool {
 	return a.from.made(a.Path())
+}
+
+// Stale says how the bundle there differs from what this kit makes, once
+// Current has found it does.
+func (a *App) Stale() string {
+	return a.from.stale()
+}
+
+// Unready says why the app isn't there to post with, once Ready has found
+// it isn't, and when it's tried again.
+func (a *App) Unready() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.from.unready(a.failed)
 }
 
 // build makes the bundle aside, in the data directory, and puts it in place
@@ -319,6 +335,11 @@ type origin interface {
 	can(ctx context.Context) bool
 	// make makes the bundle at bundle, in the folder work.
 	make(ctx context.Context, work, bundle string) error
+	// stale says a bundle there isn't made from it.
+	stale() string
+	// unready says why there's no bundle made from it to post with,
+	// failed being why the last try failed, nil when none was made.
+	unready(failed error) string
 }
 
 // compiled is the app built on the Mac from the files kit embeds, signed
@@ -364,6 +385,15 @@ func (c compiled) make(ctx context.Context, work, bundle string) error {
 	return nil
 }
 
+func (compiled) stale() string { return Name + " not built from this kit" }
+
+func (compiled) unready(failed error) string {
+	if failed != nil {
+		return Name + " isn't built: " + failed.Error() + "; the next kit apply tries again"
+	}
+	return Name + " isn't built: it needs Swift's compiler, from the command line tools; the next kit apply builds it"
+}
+
 // copied is the app a release ships, built and signed once, copied as it
 // is.
 type copied struct {
@@ -371,54 +401,53 @@ type copied struct {
 	from string
 }
 
+// made reports whether the bundle at path is a copy of a build the release
+// ships: signed by the same team, and built from the same files. A later
+// release's build of those files, with another version, needn't replace
+// it, as macOS grants both alike.
 func (c copied) made(path string) bool {
-	have, err := digest(path)
-	if err != nil {
+	if _, err := os.Stat(filepath.Join(path, executable)); err != nil {
 		return false
 	}
-	want, err := digest(c.from)
-	return err == nil && have == want
+	for _, file := range []string{signedBy, builtFrom} {
+		if read(filepath.Join(path, file)) != read(filepath.Join(c.from, file)) {
+			return false
+		}
+	}
+	return true
 }
 
 func (copied) can(context.Context) bool { return true }
 
+// teamID is a Developer ID team's identifier, as Apple gives it.
+var teamID = regexp.MustCompile(`^[A-Z0-9]{10}$`)
+
 // make copies the app with ditto, which keeps the extended attributes and
 // the rest a copy of the files alone could lose of what codesign sealed,
-// then checks the copy's signature.
+// then checks the copy's signature is whole and the team's Developer ID's,
+// the team the copy says: the identity kit records for it.
 func (c copied) make(ctx context.Context, _, bundle string) error {
 	if _, err := c.run.Run(ctx, runner.Command{Name: "ditto", Args: []string{c.from, bundle}}); err != nil {
 		return fmt.Errorf("copy %s: %w", c.from, err)
 	}
-	if _, err := c.run.Run(ctx, runner.Command{Name: "codesign", Args: []string{"--verify", "--strict", bundle}}); err != nil {
-		return fmt.Errorf("check the signature of %s, copied from %s: %w", Name, c.from, err)
+	team := read(filepath.Join(bundle, signedBy))
+	if !teamID.MatchString(team) {
+		return fmt.Errorf("%s, copied from %s, names no Developer ID team (%q)", Name, c.from, team)
+	}
+	signed := fmt.Sprintf(`-R=identifier "%s" and anchor apple generic and certificate leaf[subject.OU] = "%s"`, BundleID, team)
+	if _, err := c.run.Run(ctx, runner.Command{Name: "codesign", Args: []string{"--verify", "--strict", signed, bundle}}); err != nil {
+		return fmt.Errorf("check %s, copied from %s, is signed by team %s's Developer ID: %w", Name, c.from, team, err)
 	}
 	return nil
 }
 
-// digest is the digest of the bundle at path: each file's path in it, and
-// what it holds.
-func digest(path string) (string, error) {
-	h := sha256.New()
-	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		data, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(path, p)
-		if err != nil {
-			return err
-		}
-		h.Write(fmt.Appendf(nil, "%s\n%d\n", rel, len(data)))
-		h.Write(data)
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", path, err)
+func (copied) stale() string { return Name + " not the one this kit ships" }
+
+func (c copied) unready(failed error) string {
+	if failed != nil {
+		return Name + " isn't in place: " + failed.Error() + "; the next kit apply tries again"
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return Name + " isn't in place: the next kit apply copies it from " + c.from
 }
 
 // write writes data to path, making its folder.

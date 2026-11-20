@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,8 +170,8 @@ func TestTheAppIsRebuilt(t *testing.T) {
 			if err := change(app.Path()); err != nil {
 				t.Fatal(err)
 			}
-			if app.Current() {
-				t.Error("Current = true, want the app not current")
+			if app.Current() || app.Stale() != "kit.app not built from this kit" {
+				t.Errorf("Current = %v, Stale = %q; want the app not built from this kit", app.Current(), app.Stale())
 			}
 			dir := filepath.Dir(app.Path())
 			fake := runnertest.New(t)
@@ -206,6 +207,9 @@ func TestABuildIsTriedOnce(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "kit.app")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a bundle that failed to build was put in place (%v)", err)
 	}
+	if why := app.Unready(); !strings.HasPrefix(why, "kit.app isn't built: compile kit.app: ") || !strings.HasSuffix(why, "; the next kit apply tries again") {
+		t.Errorf("Unready() = %q, want the compile that failed, and when it's tried again", why)
+	}
 }
 
 // Without Swift's compiler, or the command line tools it needs, nothing's
@@ -216,9 +220,13 @@ func TestWithoutSwift(t *testing.T) {
 	t.Run("no swiftc", func(t *testing.T) {
 		fake := runnertest.New(t)
 		fake.On("osascript", "-e", script)
-		macapp.New(fake, t.TempDir(), "", terminal, clock).Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
+		app := macapp.New(fake, t.TempDir(), "", terminal, clock)
+		app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
 		if got := fake.Calls(); !reflect.DeepEqual(got, []string{"osascript -e '" + script + "'"}) {
 			t.Errorf("ran %q, want osascript alone", got)
+		}
+		if why, want := app.Unready(), "kit.app isn't built: it needs Swift's compiler, from the command line tools; the next kit apply builds it"; why != want {
+			t.Errorf("Unready() = %q, want %q", why, want)
 		}
 	})
 	t.Run("no command line tools", func(t *testing.T) {

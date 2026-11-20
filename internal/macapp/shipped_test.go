@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/kit/internal/macapp"
@@ -36,9 +37,13 @@ func release(t *testing.T, root, version string) (kit, app string) {
 	return kit, app
 }
 
+// signedByTeam is codesign's check that a bundle is kit.app, signed by the
+// test's team's Developer ID.
+const signedByTeam = `-R=identifier "com.leeovery.kit" and anchor apple generic and certificate leaf[subject.OU] = "` + team + `"`
+
 // copying scripts fake to copy the app shipped at from into the data
-// directory dir as kit does: copied aside with ditto, its signature checked.
-// It returns the copy's commands, in order.
+// directory dir as kit does: copied aside with ditto, then its signature
+// checked whole and the team's. It returns the copy's commands, in order.
 func copying(t *testing.T, fake *runnertest.Fake, from, dir string) []string {
 	t.Helper()
 	bundle := filepath.Join(dir, ".kit.app-build", "kit.app")
@@ -47,10 +52,25 @@ func copying(t *testing.T, fake *runnertest.Fake, from, dir string) []string {
 			t.Error(err)
 		}
 	})
-	fake.On("codesign", "--verify", "--strict", bundle)
+	fake.On("codesign", "--verify", "--strict", signedByTeam, bundle)
 	return []string{
 		runner.Command{Name: "ditto", Args: []string{from, bundle}}.String(),
-		runner.Command{Name: "codesign", Args: []string{"--verify", "--strict", bundle}}.String(),
+		runner.Command{Name: "codesign", Args: []string{"--verify", "--strict", signedByTeam, bundle}}.String(),
+	}
+}
+
+// relay lays the app shipped at app out again, as another release's build:
+// at version, built from the files whose fingerprint is builtFrom, signed
+// by the team named.
+func relay(t *testing.T, app, version, builtFrom, team string) {
+	t.Helper()
+	if err := macapp.Lay(app, version, team); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{"Resources/built-from": builtFrom + "\n", "MacOS/kit": "app " + version} {
+		if err := os.WriteFile(filepath.Join(app, "Contents", name), []byte(data), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -108,6 +128,14 @@ func TestTheShippedAppIsFound(t *testing.T) {
 	}
 	if got := macapp.Shipped(kit); got != "" {
 		t.Errorf("Shipped() with no executable in the app = %q, want none", got)
+	}
+
+	kit, app = release(t, filepath.Join(root, "unsigned"), "1.0.0")
+	if err := os.Remove(filepath.Join(app, "Contents", "Resources", "team")); err != nil {
+		t.Fatal(err)
+	}
+	if got := macapp.Shipped(kit); got != "" {
+		t.Errorf("Shipped() of an app naming no team = %q, want none", got)
 	}
 }
 
@@ -191,40 +219,44 @@ func TestTheShippedAppIsCopied(t *testing.T) {
 	}
 }
 
-// The app in place is copied again whenever it isn't the one shipped: an
-// older release's, one the Mac built itself, or a copy changed since.
+// The app in place is copied again whenever it isn't a copy of the build
+// shipped: one built from other files, signed by another team, built on
+// the Mac, or with its executable gone. Until it is, it says so.
 func TestTheShippedAppReplacesAnother(t *testing.T) {
-	for name, before := range map[string]func(t *testing.T, dir string){
-		"an older release's": func(t *testing.T, dir string) {
-			_, older := release(t, t.TempDir(), "0.9.0")
-			if err := os.CopyFS(filepath.Join(dir, "kit.app"), os.DirFS(older)); err != nil {
+	for name, before := range map[string]func(t *testing.T, app string){
+		"built from other files": func(t *testing.T, app string) {
+			relay(t, app, "0.9.0", "an older kit's files", team)
+		},
+		"signed by another team": func(t *testing.T, app string) {
+			relay(t, app, "1.0.0", macapp.Fingerprint(), "ZYXWV98765")
+		},
+		"built on the Mac": func(t *testing.T, app string) {
+			dir := filepath.Dir(app)
+			if err := os.RemoveAll(app); err != nil {
 				t.Fatal(err)
 			}
-		},
-		"built on the Mac": func(t *testing.T, dir string) {
 			if !macapp.New(runFor(t, dir), dir, "", terminal, clock).Ready(t.Context()) {
 				t.Fatal("the app wasn't built")
 			}
 		},
-		"changed since": func(t *testing.T, dir string) {
-			_, shipped := release(t, t.TempDir(), "1.0.0")
-			if err := os.CopyFS(filepath.Join(dir, "kit.app"), os.DirFS(shipped)); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "kit.app", "Contents", "MacOS", "kit"), []byte("damaged"), 0o755); err != nil {
+		"its executable gone": func(t *testing.T, app string) {
+			if err := os.Remove(filepath.Join(app, "Contents", "MacOS", "kit")); err != nil {
 				t.Fatal(err)
 			}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "kit")
-			before(t, dir)
 			_, shipped := release(t, t.TempDir(), "1.0.0")
+			if err := os.CopyFS(filepath.Join(dir, "kit.app"), os.DirFS(shipped)); err != nil {
+				t.Fatal(err)
+			}
+			before(t, filepath.Join(dir, "kit.app"))
 			fake := runnertest.New(t)
 			want := copying(t, fake, shipped, dir)
 			app := macapp.New(fake, dir, shipped, terminal, clock)
-			if app.Current() {
-				t.Error("Current = true, want the app not the one shipped")
+			if app.Current() || app.Stale() != "kit.app not the one this kit ships" {
+				t.Errorf("Current = %v, Stale = %q; want the app not the one this kit ships", app.Current(), app.Stale())
 			}
 			if !app.Ready(t.Context()) || !reflect.DeepEqual(fake.Calls(), want) {
 				t.Errorf("ran %q, want it copied: %q", fake.Calls(), want)
@@ -236,14 +268,35 @@ func TestTheShippedAppReplacesAnother(t *testing.T) {
 	}
 }
 
-// A copy whose signature doesn't check out isn't put in place, nor tried
-// again in the run: the notification goes through osascript.
-func TestACopyThatDoesntVerify(t *testing.T) {
+// A later release's build of the same files, by the same team, leaves the
+// copy in place alone, its older version and all: macOS grants both alike,
+// and the hourly run may be inside it.
+func TestALaterReleaseOfTheSameFilesIsKept(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	_, shipped := release(t, t.TempDir(), "1.0.0")
+	if err := os.CopyFS(filepath.Join(dir, "kit.app"), os.DirFS(shipped)); err != nil {
+		t.Fatal(err)
+	}
+	relay(t, shipped, "1.1.0", macapp.Fingerprint(), team)
+	fake := runnertest.New(t)
+	app := macapp.New(fake, dir, shipped, terminal, clock)
+	if !app.Current() || !app.Ready(t.Context()) || len(fake.Calls()) > 0 {
+		t.Errorf("Current = %v, ran %q; want the copy in place kept", app.Current(), fake.Calls())
+	}
+	if same(t, app.Path(), shipped) {
+		t.Error("the copy in place was replaced by the later release's")
+	}
+}
+
+// A copy that isn't kit.app signed by the team it names, as one signed ad
+// hoc, isn't put in place, nor tried again in the run: the notification
+// goes through osascript, and the app says why it isn't in place.
+func TestACopyNotSignedByItsTeam(t *testing.T) {
 	_, shipped := release(t, t.TempDir(), "1.0.0")
 	dir := filepath.Join(t.TempDir(), "kit")
 	fake := runnertest.New(t)
 	copied := copying(t, fake, shipped, dir)
-	fake.On("codesign", "--verify", "--strict", filepath.Join(dir, ".kit.app-build", "kit.app")).Exits(1)
+	fake.On("codesign", "--verify", "--strict", signedByTeam, filepath.Join(dir, ".kit.app-build", "kit.app")).Exits(3)
 	script := `display notification "Open it" with title "kit" subtitle "Sign in"`
 	fake.On("osascript", "-e", script)
 	app := macapp.New(fake, dir, shipped, terminal, clock)
@@ -255,7 +308,34 @@ func TestACopyThatDoesntVerify(t *testing.T) {
 		t.Errorf("ran %q, want %q", got, want)
 	}
 	if _, err := os.Stat(app.Path()); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("a copy that didn't verify was put in place (%v)", err)
+		t.Errorf("a copy not signed by its team was put in place (%v)", err)
+	}
+	why := app.Unready()
+	if !strings.HasPrefix(why, "kit.app isn't in place: check kit.app, copied from "+shipped+", is signed by team "+team+"'s Developer ID: ") || !strings.HasSuffix(why, "; the next kit apply tries again") {
+		t.Errorf("Unready() = %q, want the check that failed, and when it's tried again", why)
+	}
+}
+
+// A copy naming no team, or one that isn't a team's, is refused before its
+// signature's checked, as there's no team to check it against.
+func TestACopyNamingNoTeam(t *testing.T) {
+	for name, named := range map[string]string{"none": "", "not a team's": `X" or anchor apple`} {
+		t.Run(name, func(t *testing.T) {
+			_, shipped := release(t, t.TempDir(), "1.0.0")
+			if err := os.WriteFile(filepath.Join(shipped, "Contents", "Resources", "team"), []byte(named), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(t.TempDir(), "kit")
+			fake := runnertest.New(t)
+			copied := copying(t, fake, shipped, dir)
+			app := macapp.New(fake, dir, shipped, terminal, clock)
+			if app.Ready(t.Context()) || !reflect.DeepEqual(fake.Calls(), copied[:1]) {
+				t.Errorf("ran %q, want the copy alone, refused", fake.Calls())
+			}
+			if _, err := os.Stat(app.Path()); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("a copy naming no team was put in place (%v)", err)
+			}
+		})
 	}
 }
 

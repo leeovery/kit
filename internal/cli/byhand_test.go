@@ -183,11 +183,13 @@ func TestApplyNotifiesThroughTheShippedApp(t *testing.T) {
 	w.write(t, kitPath, "")
 	shipped := filepath.Join(w.home, ".local", "libexec", "kit.app")
 	w.write(t, filepath.Join(".local", "libexec", "kit.app", "Contents", "MacOS", "kit"), "app")
+	w.write(t, filepath.Join(".local", "libexec", "kit.app", "Contents", "Resources", "team"), "ABCDE12345\n")
 	data := filepath.Join(w.home, ".local", "share", "kit")
 	bundle := filepath.Join(data, ".kit.app-build", "kit.app")
+	signed := `-R=identifier "com.leeovery.kit" and anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345"`
 	copied := []runner.Command{
 		{Name: "ditto", Args: []string{shipped, bundle}},
-		{Name: "codesign", Args: []string{"--verify", "--strict", bundle}},
+		{Name: "codesign", Args: []string{"--verify", "--strict", signed, bundle}},
 	}
 	w.fake.On("ditto", copied[0].Args...).Does(func() {
 		if err := os.CopyFS(bundle, os.DirFS(shipped)); err != nil {

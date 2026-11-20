@@ -961,16 +961,21 @@ archive beside kit. `scripts/release-build` has the tree's `cmd/kitapp` lay its 
 alone; the icon; the fingerprint of the files it's built from; and the Developer ID team it's
 signed by), compiles `kit.swift` for arm64 and x86_64 (macOS 12 on, Go's own oldest) and joins
 them, one app for both archives, so it's notarised once; signs it with the Mac's Developer ID
-and the hardened runtime; sends it to Apple's notary service (notarytool's keychain profile
-`notarytool`, which kit-config's `notarytool` step makes); staples the ticket; and checks it as
-a Mac will (`codesign --verify --strict`, `stapler validate`, `spctl` taking it as notarised),
-in each archive too. Homebrew's formula puts it in the keg's `libexec`, install.sh in a
-`libexec` beside the `bin` it puts kit in; kit finds it there from its own executable, links
-followed (`macapp.Shipped`), never a fixed prefix. A run that needs kit.app copies that one into
-kit's data folder, the path the launch opens, aside with `ditto`, which keeps what codesign
-sealed, and puts the copy in place once `codesign --verify --strict` passes it; again only when
-the copy there isn't the one shipped (a digest of every file of each), as after an update that
-ships another build. A kit with none beside it (`go build`'s, the tests', an older archive's)
+and the hardened runtime; sends it to Apple's notary service (the keychain profile
+`notarytool`, made with `xcrun notarytool store-credentials`); staples the ticket; and checks it
+as a Mac will (`codesign --verify --strict`, `stapler validate`, `spctl` taking it as
+notarised), in each archive too. Homebrew's formula puts it in the keg's `libexec`, install.sh
+in a `libexec` beside the `bin` it puts kit in; kit finds it there from its own executable,
+links followed, an app naming its team (`macapp.Shipped`), never a fixed prefix. A run that
+needs kit.app copies that one into kit's data folder, the path the launch opens, aside with
+`ditto`, which keeps what codesign sealed, and puts the copy in place once codesign passes it
+whole and signed as kit.app by the Developer ID of the team it names (`--verify --strict -R`,
+`anchor apple generic` and the leaf's `subject.OU`), so the team kit records is the
+signature's, never the file's alone. It copies again only when the copy there names another
+team or other files built from than the app shipped, or has no executable: a later release's
+build of the same files, its version all that's new, leaves the copy alone, as macOS grants
+both alike and the hourly run may be inside it, so `hourly-launch` stays current across such
+an update. A kit with none beside it (`go build`'s, the tests', an older archive's)
 builds kit.app as it always has: from the files it embeds, with `swiftc` once the command line
 tools are there, signed ad hoc, again only when those files change, so a release's build of
 the same files is kept. What macOS grants Full Disk Access to is kit.app's identity

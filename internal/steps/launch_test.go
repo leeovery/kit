@@ -26,8 +26,17 @@ type kitApp struct {
 	readyCalls int
 }
 
-func (a *kitApp) Path() string  { return a.path }
-func (a *kitApp) Current() bool { return a.current }
+// The fake kit.app's words for how it's stale, and why it isn't ready,
+// which the step says as they are.
+const (
+	appStale   = "kit.app not as this kit makes it"
+	appUnready = "kit.app isn't there: the next kit apply tries again"
+)
+
+func (a *kitApp) Path() string    { return a.path }
+func (a *kitApp) Current() bool   { return a.current }
+func (a *kitApp) Stale() string   { return appStale }
+func (a *kitApp) Unready() string { return appUnready }
 func (a *kitApp) Ready(context.Context) bool {
 	a.readyCalls++
 	if a.buildable {
@@ -227,7 +236,7 @@ func TestHourlyLaunchStands(t *testing.T) {
 		{"not loaded", kit, true, false, "not loaded", []string{"bootstrap"}},
 		{"another kit, loaded", other, true, true, "runs another kit (" + other + ")", []string{"bootout", "bootstrap"}},
 		{"another kit, not loaded", other, true, false, "runs another kit (" + other + ")", []string{"bootstrap"}},
-		{"kit.app built from other files", kit, false, true, "kit.app not built from this kit", nil},
+		{"kit.app built from other files", kit, false, true, appStale, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
@@ -347,16 +356,17 @@ func TestHourlyLaunchLeftWithNoKitToName(t *testing.T) {
 	}
 }
 
-// Without Swift's compiler kit.app can't be built, and nothing's written:
-// the next kit apply tries again.
+// With kit.app not ready, as without Swift's compiler to build it, or a
+// copy that failed, nothing's written: the next kit apply tries again, and
+// the step says why as kit.app does.
 func TestHourlyLaunchWaitsForKitApp(t *testing.T) {
 	home := homeWith(t, "bin/kit")
 	fake := runnertest.New(t)
 	l := launching(home, fake, &kitApp{path: "/Users/someone/.local/share/kit/kit.app"}, filepath.Join(home, "bin/kit"))
 	step := steps.HourlyLaunch(l)
 	err := step.Apply(t.Context(), step.Check(t.Context()))
-	if !engine.IsNotYet(err) {
-		t.Fatalf("Apply() = %v, want not yet", err)
+	if !engine.IsNotYet(err) || err.Error() != appUnready {
+		t.Fatalf("Apply() = %v, want not yet, saying %q", err, appUnready)
 	}
 	if _, statErr := os.Stat(filepath.Join(l.Dir, "com.leeovery.kit.nightly.plist")); !os.IsNotExist(statErr) || len(fake.Calls()) > 0 {
 		t.Errorf("wrote the agent (%v) or ran %q; want nothing done", statErr, fake.Calls())

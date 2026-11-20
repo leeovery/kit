@@ -29,12 +29,14 @@ const LaunchLabel = macapp.BundleID + ".nightly"
 
 // App is kit.app as the hourly launch opens it: where it is; whether it's
 // made as this kit makes it, copied from the app shipped beside it or built
-// from the files it embeds; and ready, made first when it isn't, false when
-// it can't be.
+// from the files it embeds, Stale saying how it isn't; and ready, made
+// first when it isn't, false when it can't be, Unready saying why.
 type App interface {
 	Path() string
 	Current() bool
+	Stale() string
 	Ready(ctx context.Context) bool
+	Unready() string
 }
 
 // Launching is what the hourly launch is made of.
@@ -170,7 +172,7 @@ func HourlyLaunch(l Launching) engine.Step {
 			case !runner.Has(runner.Exec{}, kit):
 				return missing("changed", "runs a kit that's gone ("+kit+")")
 			case !l.App.Current():
-				return missing("changed", "kit.app not built from this kit")
+				return missing("changed", l.App.Stale())
 			}
 			if _, err := output(ctx, l.Run, "launchctl", "print", service); err != nil {
 				return missing("unloaded", "not loaded")
@@ -183,7 +185,7 @@ func HourlyLaunch(l Launching) engine.Step {
 				return engine.NotYet(why)
 			}
 			if !l.App.Ready(ctx) {
-				return engine.NotYet("kit.app isn't built: it needs Swift's compiler, from the command line tools; the next kit apply builds it")
+				return engine.NotYet(l.App.Unready())
 			}
 			want, err := LaunchAgent(l.App.Path(), kit)
 			if err != nil {

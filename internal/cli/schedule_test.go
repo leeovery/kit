@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -289,6 +290,37 @@ func TestARebuiltKitAppNeedsItsAccessAgain(t *testing.T) {
 	}
 	if code != 0 {
 		t.Errorf("exit %d, want 0", code)
+	}
+}
+
+// After an update that ships a later build of kit.app's same files, by the
+// same team, the copy in place is still this kit's: the launch stands, and
+// so does kit.app's Full Disk Access, as macOS keeps it for the team.
+func TestALaterReleaseKeepsKitAppCurrent(t *testing.T) {
+	w := laptopWorld(t)
+	for path, data := range map[string]string{
+		filepath.Join(".local", "libexec", "kit.app", "Contents", "MacOS", "kit"):            "app 1.1.0",
+		filepath.Join(".local", "libexec", "kit.app", "Contents", "Info.plist"):              "1.1.0",
+		filepath.Join(".local", "libexec", "kit.app", "Contents", "Resources", "built-from"): macapp.Fingerprint() + "\n",
+		filepath.Join(".local", "libexec", "kit.app", "Contents", "Resources", "team"):       "ABCDE12345\n",
+		filepath.Join(kitApp, "Contents", "Info.plist"):                                      "1.0.0",
+		filepath.Join(kitApp, "Contents", "Resources", "team"):                               "ABCDE12345\n",
+	} {
+		w.write(t, path, data)
+	}
+	if err := nightly.Update(w.stateDir(), func(r *nightly.Record) {
+		r.Access = nightly.Access{At: w.now, App: "team:ABCDE12345", Granted: true}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, _, code := w.run(t, "status", "hourly-launch", "kit-app-access")
+	for _, want := range []string{"hourly-launch ok ", "kit-app-access ok "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("kit status printed\n%s\nwant it to hold %q", out, want)
+		}
+	}
+	if code != 0 || slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "ditto ") }) {
+		t.Errorf("exit %d, ran %q; want 0, nothing copied", code, w.fake.Calls())
 	}
 }
 
