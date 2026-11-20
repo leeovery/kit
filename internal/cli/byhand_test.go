@@ -181,9 +181,14 @@ func TestApplyNotifiesThroughTheShippedApp(t *testing.T) {
 	kb := &keyboard{}
 	w.listen = kb.listen
 	w.write(t, kitPath, "")
-	shipped := filepath.Join(w.home, ".local", "libexec", "kit.app")
 	w.write(t, filepath.Join(".local", "libexec", "kit.app", "Contents", "MacOS", "kit"), "app")
 	w.write(t, filepath.Join(".local", "libexec", "kit.app", "Contents", "Resources", "team"), "ABCDE12345\n")
+	// kit finds the shipped app through its own path with links resolved, so
+	// the temporary directory's own, as /var's on macOS, are resolved here too.
+	shipped, err := filepath.EvalSymlinks(filepath.Join(w.home, ".local", "libexec", "kit.app"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	data := filepath.Join(w.home, ".local", "share", "kit")
 	bundle := filepath.Join(data, ".kit.app-build", "kit.app")
 	signed := `-R=identifier "com.leeovery.kit" and anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345"`
