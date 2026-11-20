@@ -1083,10 +1083,10 @@ is refused. The step `file` finds each one:
 
 - **missing:** not linked; applying links it, making its folders.
 - **changed:** linked otherwise with nothing lost by linking it again (a copy the same as
-  the repository's, a link to one the same, a link into the repository to nothing, left when
-  the file moved to another scope's home folder, or a file under `~/.ssh` or `~/.gnupg`
-  others can read); applying puts it right. A link to nothing outside the repository stays
-  diverged.
+  the repository's, a link to one the same, a link into kit-config to a file it no longer
+  has, such as one left when the file moved to another scope's home folder, or a file under
+  `~/.ssh` or `~/.gnupg` others can read); applying puts it right. A link to nothing outside
+  the repository stays diverged.
 - **diverged:** a different file where the link belongs, such as an app that saves by
   replacing the file. Applying never overwrites it; `kit reconcile` offers adopt (the Mac's
   copy into the repository, then linked), revert (the Mac's copy to the Bin, then linked) or

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/gitrepo"
@@ -324,7 +325,7 @@ func (f *Files) deadLink(dst string) bool {
 		return false
 	}
 	_, err = os.Stat(target)
-	return errors.Is(err, fs.ErrNotExist)
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
 }
 
 // Apply links what found says to link, and removes the dead links, each on
@@ -691,8 +692,11 @@ func same(a, b string) bool {
 // resolve is a link's target as a full path: one relative to the link's
 // folder made absolute.
 func resolve(link, target string) string {
-	if target == "" || filepath.IsAbs(target) {
+	if target == "" {
 		return target
+	}
+	if filepath.IsAbs(target) {
+		return filepath.Clean(target)
 	}
 	return filepath.Join(filepath.Dir(link), target)
 }

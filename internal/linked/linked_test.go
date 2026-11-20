@@ -195,76 +195,141 @@ func TestApplyLinksAndNeverOverwritesADifferentFile(t *testing.T) {
 }
 
 func TestALinkIntoKitConfigToNothingIsRelinkedOnlyWhereTheFileMoved(t *testing.T) {
+	moved := func(m *mac) {
+		m.write(".config/kit/laptop/home/.claude/settings", "kit's\n", 0o644)
+		m.keeps("laptop/home/.claude/settings")
+	}
+	relinked := func(m *mac) string { return filepath.Join(m.repo, "laptop/home/.claude/settings") }
 	tests := []struct {
-		name  string
+		name string
+		// to is where the link at ~/.claude/settings leads, set up beside
+		// what kit-config holds.
+		to    func(m *mac) string
 		setup func(m *mac)
 		state string
-		// after is where the link leads once applied, from the home: ""
-		// when it's gone.
-		after string
+		// meanwhile changes the Mac between the check and applying.
+		meanwhile func(m *mac)
+		// after is where the link leads once applied, "" when it's no
+		// link: nil when it's left as it was.
+		after func(m *mac) string
 	}{
 		{
-			name: "dangling into kit-config, the file in another scope",
+			name:  "dangling into kit-config, the file in another scope",
+			to:    func(m *mac) string { return filepath.Join(m.repo, "shared/home/.claude/settings") },
+			setup: moved,
+			state: linked.Changed,
+			after: relinked,
+		},
+		{
+			name:  "dangling into kit-config, relative",
+			to:    func(*mac) string { return "../.config/kit/shared/home/.claude/settings" },
+			setup: moved,
+			state: linked.Changed,
+			after: relinked,
+		},
+		{
+			name: "dangling into kit-config, a folder on its way now a file",
+			to:   func(m *mac) string { return filepath.Join(m.repo, "shared/home/.claude/settings") },
 			setup: func(m *mac) {
-				m.write(".config/kit/laptop/home/.claude/settings", "kit's\n", 0o644)
-				m.link(".claude/settings", filepath.Join(m.repo, "shared/home/.claude/settings"))
-				m.keeps("laptop/home/.claude/settings")
+				m.write(".config/kit/shared/home/.claude", "a file\n", 0o644)
+				moved(m)
 			},
 			state: linked.Changed,
-			after: ".config/kit/laptop/home/.claude/settings",
+			after: relinked,
 		},
 		{
 			name: "dangling into kit-config, the file nowhere",
+			to:   func(m *mac) string { return filepath.Join(m.repo, "shared/home/.claude/settings") },
 			setup: func(m *mac) {
 				m.write(".config/kit/shared/home/.claude/other", "other\n", 0o644)
 				m.link(".claude/other", filepath.Join(m.repo, "shared/home/.claude/other"))
-				m.link(".claude/settings", filepath.Join(m.repo, "shared/home/.claude/settings"))
 				m.keeps("shared/home/.claude/other")
 			},
 			state: linked.Dead,
 		},
 		{
-			name: "dangling outside kit-config",
+			name:  "dangling outside kit-config",
+			to:    func(m *mac) string { return filepath.Join(m.home, "elsewhere/.claude/settings") },
+			setup: moved,
+			state: linked.Diverged,
+		},
+		{
+			name:  "dangling into a sibling of kit-config",
+			to:    func(m *mac) string { return m.repo + "2/shared/home/.claude/settings" },
+			setup: moved,
+			state: linked.Diverged,
+		},
+		{
+			name:  "dangling out of kit-config by ..",
+			to:    func(m *mac) string { return m.repo + "/../elsewhere/settings" },
+			setup: moved,
+			state: linked.Diverged,
+		},
+		{
+			name: "to a folder in kit-config",
+			to:   func(m *mac) string { return filepath.Join(m.repo, "shared/home/.claude") },
 			setup: func(m *mac) {
-				m.write(".config/kit/laptop/home/.claude/settings", "kit's\n", 0o644)
-				m.link(".claude/settings", filepath.Join(m.home, "elsewhere/.claude/settings"))
-				m.keeps("laptop/home/.claude/settings")
+				m.write(".config/kit/shared/home/.claude/other", "other\n", 0o644)
+				moved(m)
 			},
 			state: linked.Diverged,
-			after: "elsewhere/.claude/settings",
 		},
 		{
 			name: "to a file in kit-config that differs",
+			to:   func(m *mac) string { return filepath.Join(m.repo, "old/settings") },
 			setup: func(m *mac) {
-				m.write(".config/kit/laptop/home/.claude/settings", "kit's\n", 0o644)
+				moved(m)
 				m.write(".config/kit/old/settings", "the Mac's\n", 0o644)
-				m.link(".claude/settings", filepath.Join(m.repo, "old/settings"))
-				m.keeps("laptop/home/.claude/settings")
 			},
 			state: linked.Diverged,
-			after: ".config/kit/old/settings",
+		},
+		{
+			name:  "dangling into kit-config, a file of its own there by applying",
+			to:    func(m *mac) string { return filepath.Join(m.repo, "shared/home/.claude/settings") },
+			setup: moved,
+			state: linked.Changed,
+			meanwhile: func(m *mac) {
+				if err := os.Remove(filepath.Join(m.home, ".claude/settings")); err != nil {
+					m.t.Fatal(err)
+				}
+				m.write(".claude/settings", "the Mac's\n", 0o644)
+			},
+			after: func(*mac) string { return "" },
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newMac(t)
 			tt.setup(m)
+			to := tt.to(m)
+			m.link(".claude/settings", to)
 
 			found := m.files.Check(t.Context())
 			if got := states(found)["~/.claude/settings"]; got != tt.state {
 				t.Errorf("state = %q, want %q", got, tt.state)
 			}
-			if err := m.files.Apply(t.Context(), found); err != nil {
+			if tt.meanwhile != nil {
+				tt.meanwhile(m)
+			}
+			if err := m.files.Apply(t.Context(), found); (err != nil) != (tt.meanwhile != nil) {
 				t.Fatalf("Apply() = %v", err)
 			}
-			if tt.after == "" {
+			switch {
+			case tt.state == linked.Dead:
 				if _, err := os.Lstat(filepath.Join(m.home, ".claude/settings")); !os.IsNotExist(err) {
 					t.Errorf("the link is still there: %v", err)
 				}
-				return
+			case tt.after == nil:
+				if got := m.target(".claude/settings"); got != to {
+					t.Errorf("after applying, it leads to %q, want it left leading to %q", got, to)
+				}
+			default:
+				if got, want := m.target(".claude/settings"), tt.after(m); got != want {
+					t.Errorf("after applying, it leads to %q, want %q", got, want)
+				}
 			}
-			if got, want := m.target(".claude/settings"), filepath.Join(m.home, tt.after); got != want {
-				t.Errorf("after applying, it leads to %q, want %q", got, want)
+			if tt.meanwhile != nil && m.read(".claude/settings") != "the Mac's\n" {
+				t.Error("a file of its own was overwritten")
 			}
 		})
 	}
