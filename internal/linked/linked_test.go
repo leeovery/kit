@@ -194,6 +194,82 @@ func TestApplyLinksAndNeverOverwritesADifferentFile(t *testing.T) {
 	}
 }
 
+func TestALinkIntoKitConfigToNothingIsRelinkedOnlyWhereTheFileMoved(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(m *mac)
+		state string
+		// after is where the link leads once applied, from the home: ""
+		// when it's gone.
+		after string
+	}{
+		{
+			name: "dangling into kit-config, the file in another scope",
+			setup: func(m *mac) {
+				m.write(".config/kit/laptop/home/.claude/settings", "kit's\n", 0o644)
+				m.link(".claude/settings", filepath.Join(m.repo, "shared/home/.claude/settings"))
+				m.keeps("laptop/home/.claude/settings")
+			},
+			state: linked.Changed,
+			after: ".config/kit/laptop/home/.claude/settings",
+		},
+		{
+			name: "dangling into kit-config, the file nowhere",
+			setup: func(m *mac) {
+				m.write(".config/kit/shared/home/.claude/other", "other\n", 0o644)
+				m.link(".claude/other", filepath.Join(m.repo, "shared/home/.claude/other"))
+				m.link(".claude/settings", filepath.Join(m.repo, "shared/home/.claude/settings"))
+				m.keeps("shared/home/.claude/other")
+			},
+			state: linked.Dead,
+		},
+		{
+			name: "dangling outside kit-config",
+			setup: func(m *mac) {
+				m.write(".config/kit/laptop/home/.claude/settings", "kit's\n", 0o644)
+				m.link(".claude/settings", filepath.Join(m.home, "elsewhere/.claude/settings"))
+				m.keeps("laptop/home/.claude/settings")
+			},
+			state: linked.Diverged,
+			after: "elsewhere/.claude/settings",
+		},
+		{
+			name: "to a file in kit-config that differs",
+			setup: func(m *mac) {
+				m.write(".config/kit/laptop/home/.claude/settings", "kit's\n", 0o644)
+				m.write(".config/kit/old/settings", "the Mac's\n", 0o644)
+				m.link(".claude/settings", filepath.Join(m.repo, "old/settings"))
+				m.keeps("laptop/home/.claude/settings")
+			},
+			state: linked.Diverged,
+			after: ".config/kit/old/settings",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newMac(t)
+			tt.setup(m)
+
+			found := m.files.Check(t.Context())
+			if got := states(found)["~/.claude/settings"]; got != tt.state {
+				t.Errorf("state = %q, want %q", got, tt.state)
+			}
+			if err := m.files.Apply(t.Context(), found); err != nil {
+				t.Fatalf("Apply() = %v", err)
+			}
+			if tt.after == "" {
+				if _, err := os.Lstat(filepath.Join(m.home, ".claude/settings")); !os.IsNotExist(err) {
+					t.Errorf("the link is still there: %v", err)
+				}
+				return
+			}
+			if got, want := m.target(".claude/settings"), filepath.Join(m.home, tt.after); got != want {
+				t.Errorf("after applying, it leads to %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestADeadLinkKitMadeIsFoundWithItsFolderGone(t *testing.T) {
 	m := newMac(t)
 	m.write(".config/kit/shared/home/.config/tool/a", "a\n", 0o644)

@@ -34,7 +34,8 @@ const (
 	Missing = "missing"
 	// Changed is a file linked otherwise, with nothing lost by linking it
 	// again: a copy the same as the repository's, a link to one the same,
-	// or a private file others can read. Applying puts it right.
+	// a link into the repository whose file has moved, or a private file
+	// others can read. Applying puts it right.
 	Changed = "changed"
 	// Diverged is a different file where the link belongs: a file of its
 	// own, or a link elsewhere. Applying leaves it; kit reconcile settles
@@ -219,6 +220,8 @@ func (f *Files) state(l Link) (check.Item, bool) {
 			return f.privacy(l, it)
 		case same(l.Src, l.Dst):
 			it.State, it.Detail, it.Action = Changed, "linked to "+tilde.Shown(f.Home, target)+", the same file", ActionLink
+		case f.deadLink(l.Dst):
+			it.State, it.Detail, it.Action = Changed, "linked to "+tilde.Shown(f.Home, target)+", which kit-config no longer has", ActionLink
 		default:
 			it.State, it.Detail = Diverged, "linked to "+tilde.Shown(f.Home, target)+", which differs"
 		}
@@ -369,15 +372,13 @@ func (f *Files) remember(links []Link) error {
 	return state.Update(f.StateDir, recordName, func(rec *record) { rec.Links = dsts })
 }
 
-// link links l: in place of nothing, or of a file the same as the
-// repository's, never of one that differs; its folders made as needed, and
-// a private file kept private.
+// link links l: in place of nothing, of a file the same as the
+// repository's, or of a link into the repository to nothing, never of one
+// that differs; its folders made as needed, and a private file kept
+// private.
 func (f *Files) link(l Link) error {
-	if info, err := os.Lstat(l.Dst); err == nil {
-		target, _ := os.Readlink(l.Dst)
-		if info.Mode()&fs.ModeSymlink == 0 && !info.Mode().IsRegular() || resolve(l.Dst, target) != l.Src && !same(l.Src, l.Dst) {
-			return fmt.Errorf("it differs from %s: kit reconcile settles it", l.Path)
-		}
+	if !f.replaceable(l) {
+		return fmt.Errorf("it differs from %s: kit reconcile settles it", l.Path)
 	}
 	mode := os.FileMode(0o755)
 	if dir, ok := f.privateDir(l); ok {
@@ -410,6 +411,22 @@ func (f *Files) link(l Link) error {
 		return err
 	}
 	return nil
+}
+
+// replaceable reports whether linking l loses nothing at its place: there's
+// nothing there, its link, a file or link the same as the repository's, or
+// a link into the repository whose file has moved.
+func (f *Files) replaceable(l Link) bool {
+	info, err := os.Lstat(l.Dst)
+	switch {
+	case err != nil:
+		return true
+	case info.Mode()&fs.ModeSymlink != 0:
+		target, _ := os.Readlink(l.Dst)
+		return resolve(l.Dst, target) == l.Src || same(l.Src, l.Dst) || f.deadLink(l.Dst)
+	default:
+		return info.Mode().IsRegular() && same(l.Src, l.Dst)
+	}
 }
 
 // find is the declared file linked at name.
