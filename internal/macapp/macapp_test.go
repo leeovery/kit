@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 )
 
 const terminal = "com.example.terminal"
+
+// team is the Developer ID team a test's release signs kit.app by.
+const team = "ABCDE12345"
 
 // clock is the time a test's app is told: its notifications and their
 // taking away are sent from 1000 on, in nanoseconds, each after the last.
@@ -48,11 +52,11 @@ func building(t *testing.T, fake *runnertest.Fake, dir string) []string {
 func built(t *testing.T) (app *macapp.App, fake *runnertest.Fake) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "kit")
-	if !macapp.New(runFor(t, dir), dir, terminal, clock).Ready(t.Context()) {
+	if !macapp.New(runFor(t, dir), dir, "", terminal, clock).Ready(t.Context()) {
 		t.Fatal("the app wasn't built")
 	}
 	fake = runnertest.New(t)
-	return macapp.New(fake, dir, terminal, clock), fake
+	return macapp.New(fake, dir, "", terminal, clock), fake
 }
 
 // runFor is a runner that builds the app in dir.
@@ -69,7 +73,7 @@ func TestTheAppIsBuilt(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "kit")
 	fake := runnertest.New(t)
 	want := building(t, fake, dir)
-	app := macapp.New(fake, dir, terminal, clock)
+	app := macapp.New(fake, dir, "", terminal, clock)
 
 	if !app.Ready(t.Context()) {
 		t.Fatalf("Ready = false, ran %q", fake.Calls())
@@ -119,18 +123,34 @@ func TestTheAppBuiltIsKept(t *testing.T) {
 	}
 }
 
-// Built, the app says which files it was built from, the files kit embeds:
-// a build from other files is another app to macOS, which grants Full Disk
-// Access to an app as it's signed.
-func TestTheAppSaysWhatItWasBuiltFrom(t *testing.T) {
+// Built on the Mac, signed ad hoc, the app's identity is the fingerprint of
+// the files it was built from, the files kit embeds: a build from other
+// files is another app to macOS, which grants Full Disk Access to an app as
+// it's signed.
+func TestTheAppBuiltIsKnownByItsFiles(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "kit")
-	if got := macapp.Built(dir); got != "" {
-		t.Errorf("Built() with no app = %q, want none", got)
+	if got := macapp.Identity(dir); got != "" {
+		t.Errorf("Identity() with no app = %q, want none", got)
 	}
 	app, _ := built(t)
 	dir = filepath.Dir(app.Path())
-	if got := macapp.Built(dir); got != macapp.Fingerprint() || len(got) != 64 || !app.Current() {
-		t.Errorf("Built() = %q, Current %v; want the fingerprint of the files kit embeds, %q", got, app.Current(), macapp.Fingerprint())
+	if got := macapp.Identity(dir); got != macapp.Fingerprint() || len(got) != 64 || !app.Current() {
+		t.Errorf("Identity() = %q, Current %v; want the fingerprint of the files kit embeds, %q", got, app.Current(), macapp.Fingerprint())
+	}
+}
+
+// A release's build is known by the team that signed it, whatever its
+// version or the files it was built from, as macOS keeps a Developer ID
+// app's grant across its updates.
+func TestAReleasesBuildIsKnownByItsTeam(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	for _, version := range []string{"1.0.0", "1.1.0"} {
+		if err := macapp.Lay(filepath.Join(dir, "kit.app"), version, team); err != nil {
+			t.Fatal(err)
+		}
+		if got := macapp.Identity(dir); got != "team:"+team {
+			t.Errorf("Identity() of %s's build = %q, want team:%s", version, got, team)
+		}
 	}
 }
 
@@ -150,13 +170,13 @@ func TestTheAppIsRebuilt(t *testing.T) {
 			if err := change(app.Path()); err != nil {
 				t.Fatal(err)
 			}
-			if app.Current() {
-				t.Error("Current = true, want the app not current")
+			if app.Current() || app.Stale() != "kit.app not built from this kit" {
+				t.Errorf("Current = %v, Stale = %q; want the app not built from this kit", app.Current(), app.Stale())
 			}
 			dir := filepath.Dir(app.Path())
 			fake := runnertest.New(t)
 			want := building(t, fake, dir)
-			if !macapp.New(fake, dir, terminal, clock).Ready(t.Context()) || !reflect.DeepEqual(fake.Calls(), want) {
+			if !macapp.New(fake, dir, "", terminal, clock).Ready(t.Context()) || !reflect.DeepEqual(fake.Calls(), want) {
 				t.Errorf("ran %q, want it built again: %q", fake.Calls(), want)
 			}
 		})
@@ -171,7 +191,7 @@ func TestABuildIsTriedOnce(t *testing.T) {
 	building(t, fake, dir)
 	fake.On("swiftc", "-O", "-o", filepath.Join(dir, ".kit.app-build", "kit.app", "Contents", "MacOS", "kit"), filepath.Join(dir, ".kit.app-build", "kit.swift")).Exits(1)
 	fake.On("osascript", "-e", `display notification "Open it" with title "kit" subtitle "Sign in"`)
-	app := macapp.New(fake, dir, terminal, clock)
+	app := macapp.New(fake, dir, "", terminal, clock)
 
 	app.Notify(t.Context(), "card:sign-in", "Sign in", "Open it")
 	app.Notify(t.Context(), "card:sign-in", "Sign in", "Open it")
@@ -187,6 +207,9 @@ func TestABuildIsTriedOnce(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "kit.app")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a bundle that failed to build was put in place (%v)", err)
 	}
+	if why := app.Unready(); !strings.HasPrefix(why, "kit.app isn't built: compile kit.app: ") || !strings.HasSuffix(why, "; the next kit apply tries again") {
+		t.Errorf("Unready() = %q, want the compile that failed, and when it's tried again", why)
+	}
 }
 
 // Without Swift's compiler, or the command line tools it needs, nothing's
@@ -197,9 +220,13 @@ func TestWithoutSwift(t *testing.T) {
 	t.Run("no swiftc", func(t *testing.T) {
 		fake := runnertest.New(t)
 		fake.On("osascript", "-e", script)
-		macapp.New(fake, t.TempDir(), terminal, clock).Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
+		app := macapp.New(fake, t.TempDir(), "", terminal, clock)
+		app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
 		if got := fake.Calls(); !reflect.DeepEqual(got, []string{"osascript -e '" + script + "'"}) {
 			t.Errorf("ran %q, want osascript alone", got)
+		}
+		if why, want := app.Unready(), "kit.app isn't built: it needs Swift's compiler, from the command line tools; the next kit apply builds it"; why != want {
+			t.Errorf("Unready() = %q, want %q", why, want)
 		}
 	})
 	t.Run("no command line tools", func(t *testing.T) {
@@ -208,7 +235,7 @@ func TestWithoutSwift(t *testing.T) {
 		fake.On("swiftc", "--version")
 		fake.On("xcode-select", "-p").Exits(2)
 		fake.On("osascript", "-e", script)
-		app := macapp.New(fake, t.TempDir(), terminal, clock)
+		app := macapp.New(fake, t.TempDir(), "", terminal, clock)
 		app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
 		app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
 		want := []string{"xcode-select -p", "osascript -e '" + script + "'", "xcode-select -p", "osascript -e '" + script + "'"}
@@ -244,7 +271,7 @@ func TestNotifyAndClear(t *testing.T) {
 func TestNotifyWithNothingToActivate(t *testing.T) {
 	app, _ := built(t)
 	fake := runnertest.New(t)
-	app = macapp.New(fake, filepath.Dir(app.Path()), "", clock)
+	app = macapp.New(fake, filepath.Dir(app.Path()), "", "", clock)
 	args := []string{"-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--at", "1000"}
 	fake.On("open", args...)
 	app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it")
@@ -269,7 +296,7 @@ func TestAnAppThatWontOpen(t *testing.T) {
 // and nothing's built to try.
 func TestClearWithoutTheApp(t *testing.T) {
 	fake := runnertest.New(t)
-	macapp.New(fake, t.TempDir(), terminal, clock).Clear(t.Context(), "dialog")
+	macapp.New(fake, t.TempDir(), "", terminal, clock).Clear(t.Context(), "dialog")
 	if calls := fake.Calls(); len(calls) > 0 {
 		t.Errorf("ran %q, want nothing", calls)
 	}
@@ -280,7 +307,7 @@ func TestClearWithoutTheApp(t *testing.T) {
 func TestOsascriptQuotes(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("osascript", "-e", `display notification "a \"b\" \\ c" with title "kit" subtitle "Sign in"`)
-	macapp.New(fake, t.TempDir(), terminal, clock).Notify(t.Context(), "x", "Sign in", `a "b" \ c`)
+	macapp.New(fake, t.TempDir(), "", terminal, clock).Notify(t.Context(), "x", "Sign in", `a "b" \ c`)
 	if calls := fake.Calls(); len(calls) != 1 {
 		t.Errorf("ran %q, want osascript once", calls)
 	}
@@ -305,7 +332,7 @@ func TestPrepareBuildsAside(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	app := macapp.New(fake, dir, terminal, clock)
+	app := macapp.New(fake, dir, "", terminal, clock)
 
 	app.Prepare()
 	close(release)
@@ -354,7 +381,7 @@ func TestAWaitForTheBuildIsGivenUp(t *testing.T) {
 	fake.On("swiftc", swiftcIn(dir)...).Does(func() { close(compiling) }).Hangs()
 	script := `display notification "Open it" with title "kit" subtitle "Sign in"`
 	fake.On("osascript", "-e", script)
-	app := macapp.New(fake, dir, terminal, clock)
+	app := macapp.New(fake, dir, "", terminal, clock)
 	ctx, stop := context.WithCancel(t.Context())
 	notified := make(chan struct{})
 	go func() {
@@ -391,7 +418,7 @@ func TestNotifyOnceItsContextIsDone(t *testing.T) {
 	app.Notify(ctx, "dialog", "macOS is asking", "Answer it")
 	dir := filepath.Join(t.TempDir(), "kit")
 	building(t, fake, dir)
-	macapp.New(fake, dir, terminal, clock).Notify(ctx, "dialog", "macOS is asking", "Answer it")
+	macapp.New(fake, dir, "", terminal, clock).Notify(ctx, "dialog", "macOS is asking", "Answer it")
 	if calls := fake.Calls(); len(calls) > 0 {
 		t.Errorf("ran %q, want nothing", calls)
 	}
@@ -403,7 +430,7 @@ func TestTheCompileHasTenMinutes(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "kit")
 	fake := runnertest.New(t)
 	building(t, fake, dir)
-	if !macapp.New(fake, dir, terminal, clock).Ready(t.Context()) {
+	if !macapp.New(fake, dir, "", terminal, clock).Ready(t.Context()) {
 		t.Fatal("the app wasn't built")
 	}
 	for _, c := range fake.Commands() {

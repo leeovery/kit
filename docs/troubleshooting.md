@@ -122,9 +122,13 @@ in, kit asks again on the next run.
 
 `kit status` shows the step `kit-app-access` as `not given to this build of kit.app`.
 
-**Cause:** the hourly run goes through kit.app, which needs Full Disk Access. When an update
-changes kit.app, kit builds it again. macOS treats the new build as another app, and the old
-grant doesn't carry over.
+**Cause:** macOS sees another kit.app than the one you gave access to. Releases ship kit.app
+signed, so updates keep the grant. Two things change kit.app all the same:
+
+- the first update that ships kit.app replaces the kit.app your Mac built;
+- a kit you built yourself builds kit.app from changed files.
+
+macOS treats the new kit.app as another app, and the old grant doesn't carry over.
 
 **Fix:** run `kit apply` at a terminal, with no step named. It opens System Settings at Full
 Disk Access, and Finder at kit.app. Then:

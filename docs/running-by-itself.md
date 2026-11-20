@@ -17,7 +17,7 @@ kit status nightly
 ```
 
 You don't need to run `kit nightly` yourself. On the hour, launchd opens kit.app, and kit.app
-runs `kit nightly`. `kit apply` installs that launch and builds kit.app.
+runs `kit nightly`. `kit apply` installs that launch and puts kit.app in place.
 
 ## Jobs of your own
 
@@ -85,8 +85,13 @@ read Time Machine's state. A whole `kit apply` at a terminal asks for it with a 
 kit.app Full Disk Access". The card opens System Settings at Full Disk Access, and Finder at
 kit.app. Its step says "Drag kit.app into the list, and switch it on".
 
-The next hourly run checks it. A new build of kit.app needs it given again: remove the old one
-from the list with −, then drag kit.app in.
+The next hourly run checks it. The grant lasts through kit's updates, because each release
+ships kit.app signed the same way. You give it again in two cases:
+
+- the first update that ships kit.app replaces the kit.app your Mac built;
+- a kit you built yourself builds kit.app from changed files.
+
+Each time, remove the old kit.app from the list with −, then drag kit.app in.
 
 ## Nothing tells you: you look
 

@@ -938,8 +938,8 @@ run `open -W -g -n` on kit.app every hour on the hour, with `nightly` and the ki
 named as it's found there (Homebrew's link, not its versioned folder); kit.app runs `kit
 nightly --scheduled` as its child, waits, and quits (`open -W` exits 0 whatever the run did, so
 nothing reads how it ended: kit's run log has it). macOS holds kit.app responsible for its
-child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app is rebuilt only
-when its own files change (the dotfiles' Nightly.app did the same). The agent names that kit
+child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app's identity is
+(**kit.app**, below; the dotfiles' Nightly.app did the same). The agent names that kit
 whichever kit applies, so a lasting build of kit's own, as install.sh's `KIT_FROM` leaves in
 `~/.local/bin`, names the kit on PATH, not itself; with no kit on PATH, the kit applying. It
 comes after Homebrew's formulae, however they went, and finds the kit then, so a first apply
@@ -947,22 +947,51 @@ from such a build names Homebrew's kit, installed earlier in the run. A build th
 (`go run`'s, a worktree's, a build in a temporary folder) names none, so the hourly run never
 runs a kit that may be gone: it leaves the agent as it stands, its check looking at the kit the
 agent names, and `kit apply` saying why it left it. Its check:
-the agent says that, for the kit and kit.app, the kit it names is there, kit.app is built from this
-kit's files, and launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` builds
+the agent says that, for the kit and kit.app, the kit it names is there, kit.app is the one this
+kit makes, and launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` makes
 kit.app, writes the agent, loads it (`launchctl bootstrap`, after `bootout` when it was loaded
 and changed, asked once more a second later should launchd refuse, as it can while the old job
 is torn down), and records when, the first run being up to an hour off. Only the launch's runs
 record the hourly run: `kit nightly` by hand records the nightly run, when it's due, never the
 hourly one, so it never hides a launch that's stopped.
 
+**kit.app** is built once, at release, on the maintainer's Mac, and shipped in each release's
+archive beside kit. `scripts/release-build` has the tree's `cmd/kitapp` lay its bundle out
+(`macapp.Lay`: the `Info.plist` kit embeds, carrying the release's version, numbers and dots
+alone; the icon; the fingerprint of the files it's built from; and the Developer ID team it's
+signed by), compiles `kit.swift` for arm64 and x86_64 (macOS 12 on, Go's own oldest) and joins
+them, one app for both archives, so it's notarised once; signs it with the Mac's Developer ID
+and the hardened runtime; sends it to Apple's notary service (the keychain profile
+`notarytool`, made with `xcrun notarytool store-credentials`); staples the ticket; and checks it
+as a Mac will (`codesign --verify --strict`, `stapler validate`, `spctl` taking it as
+notarised), in each archive too. Homebrew's formula puts it in the keg's `libexec`, install.sh
+in a `libexec` beside the `bin` it puts kit in; kit finds it there from its own executable,
+links followed, an app naming its team (`macapp.Shipped`), never a fixed prefix. A run that
+needs kit.app copies that one into kit's data folder, the path the launch opens, aside with
+`ditto`, which keeps what codesign sealed, and puts the copy in place once codesign passes it
+whole and signed as kit.app by the Developer ID of the team it names (`--verify --strict -R`,
+`anchor apple generic` and the leaf's `subject.OU`), so the team kit records is the
+signature's, never the file's alone. It copies again only when the copy there names another
+team or other files built from than the app shipped, or has no executable: a later release's
+build of the same files, its version all that's new, leaves the copy alone, as macOS grants
+both alike and the hourly run may be inside it, so `hourly-launch` stays current across such
+an update. A kit with none beside it (`go build`'s, the tests', an older archive's)
+builds kit.app as it always has: from the files it embeds, with `swiftc` once the command line
+tools are there, signed ad hoc, again only when those files change, so a release's build of
+the same files is kept. What macOS grants Full Disk Access to is kit.app's identity
+(`macapp.Identity`): a Developer ID app's grant follows its designated requirement, bundle
+identifier and team, so a release's build is known by its team, every release alike; one built
+on the Mac is another app to macOS once it's built from other files, so it's known by their
+fingerprint.
+
 After it, `kit-app-access` gives kit.app Full Disk Access, a step by hand: a card in `kit apply`
 at a terminal, System Settings opened at the list and Finder at kit.app, for the drag (as the
 boot's for the terminal), done as the person says. Each scheduled run records whether kit.app
 could read what only Full Disk Access shows (nothing, with none of it on the Mac to read), with
-the fingerprint of the files kit.app was built from; the step is done while the last word, the
-run's or the person's, is granted for the kit.app there, so one rebuilt from other files
-(another app to macOS, its grant gone) or found without it needs the card again, and `kit
-status` says so. `full-disk-access`, with the `prefs` feature or backup exclusions declared, is
+kit.app's identity; the step is done while the last word, the run's or the person's, is
+granted for the identity of the kit.app there, so one of another (one built on the Mac from
+other files, or the first release's build in place of one built on the Mac: another app to
+macOS, its grant gone) or found without it needs the card again, and `kit status` says so. `full-disk-access`, with the `prefs` feature or backup exclusions declared, is
 the grant of the terminal or SSH session alone, for a capture or restore run there and the
 exclusions, placed as `[features]` places prefs only while no exclusions wait for it; the
 launch's runs leave it out, their exclusions held while the
@@ -1632,5 +1661,6 @@ refuses a line the restore would refuse, before writing anything, and copies not
 - No personal data in the repo or its history, ever (see House rules in `CLAUDE.md`);
   `scripts/personal-data-scan` checks the files and every commit, in `scripts/gates`.
 - Public, under the MIT licence. Released by the maintainer with mint, whose hooks build the
-  binaries on the Mac before the tag, then upload them to the release and update the Homebrew
-  tap (`scripts/release-build`, `scripts/release-upload`).
+  binaries, and kit.app signed by his Developer ID and notarised (**kit.app**, above), on the
+  Mac before the tag, then upload them to the release and update the Homebrew tap
+  (`scripts/release-build`, `scripts/release-upload`).

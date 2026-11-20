@@ -92,7 +92,7 @@ func recordAccess(r *run) {
 // Disk Access, as granted says. Unrecorded, the run goes on, its log saying
 // why.
 func (r *run) recordAccess(granted bool) {
-	access := nightly.Access{At: r.now, App: macapp.Built(r.dataDir), Granted: granted}
+	access := nightly.Access{At: r.now, App: macapp.Identity(r.dataDir), Granted: granted}
 	if err := nightly.Update(r.stateDir, func(rec *nightly.Record) { rec.Access = access }); err != nil {
 		r.sink.Emit(event.Logged{Time: r.now, Line: "kit.app's Full Disk Access went unrecorded: " + err.Error(), Alert: true})
 	}

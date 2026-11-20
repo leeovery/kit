@@ -3,24 +3,46 @@
 # Builds a release's binaries on this Mac before mint tags it: mint's pre_tag
 # runs it after scripts/gates, with the version about to be tagged in
 # MINT_NEW_VERSION. It builds HEAD in a checkout of its own outside the
-# repository, kit for arm64 and amd64, checks each reports the version, then
-# archives and sums them under the names install.sh and the Homebrew formula
-# read, and keeps them, with the commit built, in
+# repository: first kit's Mac app, kit.app, one binary for arm64 and x86_64,
+# laid out by cmd/kitapp with the version in its Info.plist, and signed with
+# this Mac's Developer ID and the hardened runtime; then kit for arm64 and
+# amd64, checking each reports the version. It sends kit.app to Apple's
+# notary service and waits on its answer, for about an hour at most, staples
+# Apple's ticket to it and checks it as Gatekeeper does. Then it archives
+# each kit with kit.app beside it, and sums them, under the names install.sh
+# and the Homebrew formula read, and keeps them, with the commit built, in
 # ~/Library/Caches/kit/release/<version>/, in place of any other version's,
-# for scripts/release-upload once the release is made. Any failure exits
-# non-zero, so mint stops before the tag. It runs each binary to check its
-# version, so it needs an Apple-silicon Mac with Rosetta.
+# for scripts/release-upload once the release is made. A tree made before
+# kit.app shipped, without cmd/kitapp, is built as it was, kit alone. Any
+# failure exits non-zero, so mint stops before the tag. It runs each binary
+# to check its version, so it needs an Apple-silicon Mac with Rosetta.
 #
 # By hand it builds the version given, as scripts/release-build 0.0.0-check,
-# without releasing anything; a ref after the version builds that ref, as
-# scripts/release-upload builds a tag's tree. Each run logs to
-# ~/Library/Logs/kit/release-<version>.log.
+# which checks signing and notarising without releasing anything; a ref
+# after the version builds that ref, as scripts/release-upload builds a
+# tag's tree. Each run logs to ~/Library/Logs/kit/release-<version>.log.
 set -euo pipefail
 
 scripts=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/release-common
 . "$scripts/release-common"
 
+bundle_id=com.leeovery.kit
+identity="Developer ID Application"
+# notarytool's login is the Mac's, whatever it notarises, so its profile is
+# named for notarytool, not for kit.
+profile=notarytool
+# notarytool waits on Apple this many seconds at a time, this many times at
+# most, so mint, which gives a hook no time limit, waits about an hour.
+notary_wait=900
+notary_waits=4
+keychain_hint="The login keychain may be locked, as over SSH (security unlock-keychain), or macOS may be asking on the Mac's screen to let codesign use the key."
+# kit.app's arches, as swiftc names them, and the oldest macOS it runs on,
+# Go's own oldest, so no kit runs where its app can't.
+app_arches=(arm64 x86_64)
+app_macos=12
+# The Developer ID's team, which check_identity reads from its name.
+team=
 work=
 
 usage() {
@@ -28,7 +50,7 @@ usage() {
 }
 
 check_platform() {
-	[[ $(uname -s) == Darwin ]] || release_fail "release-build runs the binaries it builds, for macOS, to check them: run it on a Mac."
+	[[ $(uname -s) == Darwin ]] || release_fail "release-build signs with macOS's codesign and notarytool, and runs the binaries it builds, for macOS, to check them: run it on a Mac."
 }
 
 check_version() {
@@ -51,6 +73,28 @@ commit_of() {
 	git rev-parse -q --verify "$1^{commit}" || release_fail "$1 names no commit to build."
 }
 
+# check_identity checks the keychain has one Developer ID to sign kit.app
+# with, and reads its team from its name, as "Developer ID Application: Name
+# (ABCDE12345)".
+check_identity() {
+	local found count
+	found=$(security find-identity -v -p codesigning | grep "\"$identity: ") || true
+	count=$(grep -c . <<<"$found") || true
+	case $count in
+	0) release_fail "The keychain has no valid $identity certificate to sign kit.app with: add it, with its private key, to the login keychain." ;;
+	1) ;;
+	*) release_fail "The keychain has $count valid $identity certificates, and codesign can't choose one: remove all but one." ;;
+	esac
+	team=$(sed -E 's/.*\(([A-Z0-9]+)\)"$/\1/' <<<"$found")
+	[[ $team =~ ^[A-Z0-9]{10}$ ]] || release_fail "The $identity certificate's name ends in no team, as (ABCDE12345): $found"
+}
+
+check_profile() {
+	if ! xcrun notarytool history --keychain-profile "$profile" >/dev/null; then
+		release_fail "notarytool can't use the keychain profile $profile, as it says above. If the profile isn't made, make it with xcrun notarytool store-credentials $profile; a locked keychain, or no network, fails the same way."
+	fi
+}
+
 # arch_flag is arch(1)'s name for Go's arch $1.
 arch_flag() {
 	case $1 in
@@ -65,6 +109,40 @@ arch_flag() {
 build() {
 	(cd "$1" && CGO_ENABLED=0 GOOS=darwin GOARCH=$3 go build -trimpath \
 		-ldflags "-s -w -X main.version=$2" -o "$4" ./cmd/kit)
+}
+
+# build_app builds kit.app at version $2 from the checkout $1 into the folder
+# $3: laid out by the checkout's cmd/kitapp, its executable compiled for each
+# arch and joined, then signed with the Developer ID and the hardened
+# runtime.
+build_app() {
+	local app=$3/kit.app arch thin=()
+	(cd "$1" && go run ./cmd/kitapp "$app" "$2" "$team") || release_fail "cmd/kitapp couldn't lay kit.app out, as it says above."
+	for arch in "${app_arches[@]}"; do
+		swiftc -O -target "$arch-apple-macos$app_macos" -o "$3/kit-$arch" "$1/internal/macapp/kit.swift" ||
+			release_fail "swiftc couldn't compile kit.app for $arch, as it says above."
+		thin+=("$3/kit-$arch")
+	done
+	lipo -create -output "$app/Contents/MacOS/kit" "${thin[@]}"
+	rm -f "${thin[@]}"
+	codesign --force --options runtime --timestamp --sign "$identity" "$app" ||
+		release_fail "codesign couldn't sign $app, as it says above. $keychain_hint"
+	check_signature "$app"
+}
+
+# check_signature checks that the app $1 is signed as kit.app by the
+# Developer ID of the team read, with the hardened runtime.
+check_signature() {
+	local details
+	codesign --verify --strict "$1" || release_fail "$1's signature doesn't verify."
+	details=$(codesign --display --verbose=2 "$1" 2>&1)
+	if ! grep -qx "Identifier=$bundle_id" <<<"$details" ||
+		! grep -q "^Authority=$identity: " <<<"$details" ||
+		! grep -qx "TeamIdentifier=$team" <<<"$details" ||
+		! grep -q "^CodeDirectory .*(runtime)" <<<"$details"; then
+		echo "$details"
+		release_fail "$1 isn't signed as $bundle_id by the $identity of team $team, with the hardened runtime."
+	fi
 }
 
 # cant_run says why the binary $1, built for arch $2, doesn't run here, and
@@ -87,12 +165,87 @@ check_binary() {
 	[[ $reported == "kit version $3" ]] || release_fail "$1 reports \"$reported\", not kit version $3."
 }
 
-# archive archives the binary $1 alone, named kit, into $2.
+# field is the field $1 of notarytool's JSON answer $2; nothing when it has
+# none.
+field() {
+	plutil -extract "$1" raw -o - - <<<"$2" 2>/dev/null || true
+}
+
+# notarise sends the app $1 to Apple's notary service, zipped as $2, waits
+# on its answer, and staples the ticket Apple gives to the app.
+notarise() {
+	local result id status="In Progress" round started elapsed
+	ditto -c -k --keepParent "$1" "$2"
+	echo "Sending kit.app to Apple's notary service…"
+	result=$(xcrun notarytool submit "$2" --keychain-profile "$profile" --no-wait --output-format json || true)
+	id=$(field id "$result")
+	if [[ -z $id ]]; then
+		echo "$result"
+		release_fail "notarytool gave no submission id, as its output above says: xcrun notarytool history --keychain-profile $profile shows what Apple has."
+	fi
+	local again="xcrun notarytool wait $id --keychain-profile $profile says when Apple has answered, and mint can then be run again."
+	for ((round = 1; round <= notary_waits; round++)); do
+		echo "Submission $id: waiting on Apple's answer…"
+		started=$(release_now)
+		result=$(xcrun notarytool wait "$id" --keychain-profile "$profile" --timeout "$notary_wait" --output-format json || true)
+		elapsed=$(($(release_now) - started))
+		status=$(field status "$result")
+		# A wait that ran its time ends with no answer, or in progress; one
+		# with no answer well before then failed, as on a locked keychain or
+		# with no network, and waiting again would only fail again.
+		if [[ -z $status ]] && ((elapsed < notary_wait - 60)); then
+			echo "$result"
+			release_fail "notarytool's wait on submission $id failed after $elapsed seconds, as it says above: $again"
+		fi
+		status=${status:-In Progress}
+		[[ $status == "In Progress" ]] || break
+	done
+	echo "Submission $id: $status"
+	if [[ $status == "In Progress" ]]; then
+		release_fail "Apple hasn't answered submission $id in about an hour: $again"
+	fi
+	if [[ $status != Accepted ]]; then
+		xcrun notarytool log "$id" --keychain-profile "$profile" || true
+		release_fail "Apple's notary service refused kit.app, as its log above says."
+	fi
+	xcrun stapler staple "$1" || release_fail "stapler couldn't staple Apple's ticket to $1, as it says above."
+}
+
+# check_notarised checks the app $1 as a Mac will: its signature whole, its
+# ticket stapled, and Gatekeeper accepting it as notarised.
+check_notarised() {
+	local assessed
+	codesign --verify --strict "$1" || release_fail "$1's signature doesn't verify, stapled."
+	xcrun stapler validate "$1" || release_fail "$1 has no valid ticket stapled, as stapler says above."
+	assessed=$(spctl --assess --type execute --verbose=2 "$1" 2>&1) || {
+		echo "$assessed"
+		release_fail "Gatekeeper refuses $1, as spctl says above."
+	}
+	grep -q "source=Notarized Developer ID" <<<"$assessed" || {
+		echo "$assessed"
+		release_fail "Gatekeeper doesn't take $1 as notarised, as spctl says above."
+	}
+}
+
+# archive archives the binary $1, named kit, and kit.app at $2 beside it,
+# when $2 isn't empty, into $3.
 archive() {
-	COPYFILE_DISABLE=1 tar --create --gzip --file "$2" --format ustar \
+	local beside=()
+	[[ -z $2 ]] || beside=(-C "$(dirname "$2")" kit.app)
+	COPYFILE_DISABLE=1 tar --create --gzip --file "$3" --format ustar \
 		--no-mac-metadata --no-xattrs --no-acls --no-fflags \
 		--uid 0 --gid 0 --uname root --gname wheel \
-		--directory "$(dirname "$1")" kit
+		--directory "$(dirname "$1")" kit ${beside[@]+"${beside[@]}"}
+}
+
+# check_archive checks kit.app as the archive $1 carries it, unpacked, as
+# Homebrew and install.sh unpack it.
+check_archive() {
+	local into=$work/unpacked
+	rm -rf "$into"
+	mkdir "$into"
+	tar -xzf "$1" -C "$into"
+	check_notarised "$into/kit.app"
 }
 
 # sum writes the checksums file of version $1's archives in the folder $2.
@@ -143,19 +296,35 @@ main() {
 	fi
 	local commit
 	commit=$(commit_of "$ref")
+	check_identity
+	check_profile
 
 	work=$(mktemp -d)
 	trap clean_up EXIT
 	git worktree add --quiet --detach "$work/tree" "$commit"
 	echo "Building kit $version from $commit"
 
-	local arch bin out=$work/out
-	mkdir "$work/bin" "$out"
+	local arch bin app='' archived out=$work/out
+	mkdir "$work/bin" "$work/app" "$out"
+	if [[ -e $work/tree/cmd/kitapp ]]; then
+		build_app "$work/tree" "$version" "$work/app"
+		app=$work/app/kit.app
+	else
+		echo "$commit has no cmd/kitapp: building kit without kit.app, as that tree was."
+	fi
 	for arch in "${release_arches[@]}"; do
 		bin=$work/bin/darwin_$arch/kit
 		build "$work/tree" "$version" "$arch" "$bin"
 		check_binary "$bin" "$arch" "$version"
-		archive "$bin" "$out/$(release_archive "$version" "$arch")"
+	done
+	if [[ -n $app ]]; then
+		notarise "$app" "$work/notarise.zip"
+		check_notarised "$app"
+	fi
+	for arch in "${release_arches[@]}"; do
+		archived=$out/$(release_archive "$version" "$arch")
+		archive "$work/bin/darwin_$arch/kit" "$app" "$archived"
+		[[ -z $app ]] || check_archive "$archived"
 	done
 	sum "$version" "$out"
 	echo "$commit" >"$out/commit"

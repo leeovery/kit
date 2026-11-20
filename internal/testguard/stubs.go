@@ -15,11 +15,11 @@ import (
 // apps, change power, sharing, Spotlight and disks, read what's mounted
 // (mount), mount and unmount them (mount_apfs, umount), browse the network
 // (dns-sd, which kit no longer runs), read the Mac's names (scutil) and
-// model (system_profiler), copy files (rsync), download (curl), read the
-// real ssh config, running what its Match exec lines say (ssh, which finds
-// the home folder by the user, never HOME), and build and sign kit's app
-// (swiftc, codesign).
-var stubbed = []string{"agntc", "brew", "bun", "claude", "codesign", "composer", "curl", "defaults", "diskutil", "dns-sd", "gh", "git", "go", "ioreg", "killall", "launchctl", "mas", "mdfind", "mdutil", "mount", "mount_apfs", "npm", "op", "open", "osascript", "pkgutil", "pmset", "pnpm", "rsync", "scutil", "ssh", "sudo", "sw_vers", "swiftc", "sysctl", "system_profiler", "systemsetup", "tmutil", "tmux", "umount", "uv", "yarn"}
+// model (system_profiler), copy files (rsync, ditto), download (curl), read
+// the real ssh config, running what its Match exec lines say (ssh, which
+// finds the home folder by the user, never HOME), and build, sign and copy
+// kit's app (swiftc, codesign, ditto).
+var stubbed = []string{"agntc", "brew", "bun", "claude", "codesign", "composer", "curl", "defaults", "diskutil", "ditto", "dns-sd", "gh", "git", "go", "ioreg", "killall", "launchctl", "mas", "mdfind", "mdutil", "mount", "mount_apfs", "npm", "op", "open", "osascript", "pkgutil", "pmset", "pnpm", "rsync", "scutil", "ssh", "sudo", "sw_vers", "swiftc", "sysctl", "system_profiler", "systemsetup", "tmutil", "tmux", "umount", "uv", "yarn"}
 
 // stubs is a directory of stand-ins for the stubbed programs. Each run of one
 // adds a line to the record, its name and arguments, and fails.

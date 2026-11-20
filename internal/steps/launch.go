@@ -28,12 +28,15 @@ const LaunchName = "hourly-launch"
 const LaunchLabel = macapp.BundleID + ".nightly"
 
 // App is kit.app as the hourly launch opens it: where it is; whether it's
-// built from the files this kit embeds; and ready, built first when it
-// isn't, false when it can't be.
+// made as this kit makes it, copied from the app shipped beside it or built
+// from the files it embeds, Stale saying how it isn't; and ready, made
+// first when it isn't, false when it can't be, Unready saying why.
 type App interface {
 	Path() string
 	Current() bool
+	Stale() string
 	Ready(ctx context.Context) bool
+	Unready() string
 }
 
 // Launching is what the hourly launch is made of.
@@ -130,8 +133,8 @@ func agentKit(data []byte) string {
 const reloadWait = time.Second
 
 // HourlyLaunch checks kit's launch agent is in place, saying what
-// LaunchAgent says for the kit to run and kit.app, kit.app built from this
-// kit's files, and loaded; applying builds kit.app, writes the agent and
+// LaunchAgent says for the kit to run and kit.app, kit.app made as this kit
+// makes it, and loaded; applying makes kit.app, writes the agent and
 // loads it, loading it again when it's changed, and records when, so that
 // the check on the runs gives the first run its hour. With no kit to name
 // (Kit gives ""), the check looks at the agent as it stands, the kit it
@@ -169,7 +172,7 @@ func HourlyLaunch(l Launching) engine.Step {
 			case !runner.Has(runner.Exec{}, kit):
 				return missing("changed", "runs a kit that's gone ("+kit+")")
 			case !l.App.Current():
-				return missing("changed", "kit.app not built from this kit")
+				return missing("changed", l.App.Stale())
 			}
 			if _, err := output(ctx, l.Run, "launchctl", "print", service); err != nil {
 				return missing("unloaded", "not loaded")
@@ -182,7 +185,7 @@ func HourlyLaunch(l Launching) engine.Step {
 				return engine.NotYet(why)
 			}
 			if !l.App.Ready(ctx) {
-				return engine.NotYet("kit.app isn't built: it needs Swift's compiler, from the command line tools; the next kit apply builds it")
+				return engine.NotYet(l.App.Unready())
 			}
 			want, err := LaunchAgent(l.App.Path(), kit)
 			if err != nil {
