@@ -961,16 +961,18 @@ record the hourly run: `kit nightly` by hand records the nightly run, when it's 
 hourly one, so it never hides a launch that's stopped.
 
 **kit.app** is built once, at release, on the maintainer's Mac, and shipped in each release's
-archive beside kit. `scripts/release-build` has the tree's `cmd/kitapp` lay its bundle out
-(`macapp.Lay`: the `Info.plist` kit embeds, carrying the release's version, numbers and dots
-alone; the icon; the fingerprint of the files it's built from; and the Developer ID team it's
-signed by), compiles `kit.swift` for arm64 and x86_64 (macOS 12 on, Go's own oldest) and joins
-them, one app for both archives, so it's notarised once; signs it with the Developer ID in the
-Mac's signing keychain and the hardened runtime; sends it to Apple's notary service (the
-keychain profile `notarytool`, in the same keychain, which the script unlocks itself with
-`DEVELOPER_ID_P12_PASSWORD`, so a release asks nothing, at the Mac or over SSH); staples the
-ticket; and checks it as a Mac will (`codesign --verify --strict`, `stapler validate`, `spctl`
-taking it as notarised), in each archive too. Homebrew's formula puts it in the keg's `libexec`,
+archive beside kit. press, the maintainer's release tool, reading `.press.toml`, has the tree's
+`cmd/kitapp` lay its bundle out (`macapp.Lay`: the `Info.plist` kit embeds, carrying the
+release's version, numbers and dots alone; the icon; the fingerprint of the files it's built
+from; and the Developer ID team it's signed by), compiles `kit.swift` for arm64 and x86_64
+(macOS 12 on, Go's own oldest) and joins them, one app for both archives, so it's notarised
+once; signs it with the Developer ID in the
+Mac's signing keychain and the hardened runtime, kit itself signed beside it
+(`com.leeovery.kit.cli`); sends both to Apple's notary service (the keychain profile
+`notarytool`, in the same keychain, which press unlocks itself, so a release asks nothing, at
+the Mac or over SSH); staples the ticket to kit.app; and checks it as a Mac will
+(`codesign --verify --strict`, `stapler validate`, `spctl` taking a quarantined copy as
+notarised), in each archive too. Homebrew's formula puts it in the keg's `libexec`,
 install.sh in a `libexec` beside the `bin` it puts kit in; kit finds it there from its own
 executable, links followed, an app naming its team (`macapp.Shipped`), never a fixed prefix. A
 run that needs kit.app copies that one into kit's data folder, the path the launch opens, aside
@@ -1666,6 +1668,6 @@ refuses a line the restore would refuse, before writing anything, and copies not
 - No personal data in the repo or its history, ever (see House rules in `CLAUDE.md`);
   `scripts/personal-data-scan` checks the files and every commit, in `scripts/gates`.
 - Public, under the MIT licence. Released by the maintainer with mint, whose hooks build the
-  binaries, and kit.app signed by his Developer ID and notarised (**kit.app**, above), on the
-  Mac before the tag, then upload them to the release and update the Homebrew tap
-  (`scripts/release-build`, `scripts/release-upload`).
+  binaries and kit.app, signed by his Developer ID and notarised (**kit.app**, above), on the
+  Mac before the tag, then upload them to the release and update the Homebrew tap, through
+  press, the maintainer's release tool (`.press.toml`; `press prepare`, `press upload`).

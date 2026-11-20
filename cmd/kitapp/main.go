@@ -1,7 +1,7 @@
-// Command kitapp lays out kit.app's bundle for a release, as
-// scripts/release-build builds it: all but its executable, which the script
-// compiles from internal/macapp/kit.swift, then signs with the team's
-// Developer ID. It runs no program.
+// Command kitapp lays out kit.app's bundle for a release, as press builds it
+// (.press.toml): all but its executable, which press's build compiles from
+// internal/macapp/kit.swift, then signs with the team's Developer ID. It runs
+// no program.
 //
 // Usage:
 //

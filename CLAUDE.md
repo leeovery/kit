@@ -62,8 +62,10 @@ scripts/personal-data-scan   # no personal data in the files or the history
   checks both, with private patterns CI holds as a secret.
 - **Releases are the maintainer's.** Never tag, release, or write a changelog or release
   notes. The maintainer releases with mint (`./release`), whose hooks run the gates and build
-  the binaries on the Mac before the tag (`scripts/release-build`), then upload them to the
-  release and update the Homebrew tap (`scripts/release-upload`).
+  the binaries on the Mac before the tag, then upload them to the release and update the
+  Homebrew tap, through press, the maintainer's release tool, which reads what kit builds and
+  ships from `.press.toml` (`press prepare`, then `press upload`; `press prepare 0.0.0-check`
+  checks signing and notarising without releasing).
 - **Never log a secret.** Values go from their store to their file without passing through
   events; arguments, environment and output are redacted before they're logged.
 
