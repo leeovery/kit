@@ -1071,7 +1071,7 @@ func TestTheSnapshotsQuestions(t *testing.T) {
 		{"apps, given twice", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally", "tally"}}, false, nil, "ok 1 app · kit apply takes it over", ""},
 		{"apps, none", AdoptStep, nil, false, Answers{Adopt: &[]string{}}, false, nil, "ok none", ""},
 		{"apps, asked", AdoptStep, nil, false, Answers{}, true, nil, "ok 2 apps · kit apply takes them over",
-			"adopt: which apps should Homebrew take over, so a new Mac gets them?\nthe rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"},
+			"adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over in place, updating an older copy; the rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"},
 		{"apps, no terminal", AdoptStep, nil, false, Answers{}, false, nil,
 			"failed no terminal to ask at: --adopt <cask> for each app installed by hand that Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt leaves them as they are, for good", ""},
 		{"apps, a cask offered for none", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally", "kubius"}}, false, nil,
@@ -1261,7 +1261,7 @@ func TestSetupAdoptsTheAppsTicked(t *testing.T) {
 	if _, err := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"adopt: which apps should Homebrew take over, so a new Mac gets them?\nthe rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"}; !slices.Equal(ask.asked, want) {
+	if want := []string{"adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over in place, updating an older copy; the rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"}; !slices.Equal(ask.asked, want) {
 		t.Errorf("asked %q, want %q", ask.asked, want)
 	}
 	if err := s.update(func(r *record) { r.Restore, r.Link, r.Adopt = &[]string{}, &[]string{}, &[]string{"tally"} }); err != nil {
@@ -1286,10 +1286,10 @@ func TestSetupAdoptsTheAppsTicked(t *testing.T) {
 	byHand := s.byHandStep().Check(t.Context())
 	var names []string
 	for _, it := range byHand.Items {
-		names = append(names, it.Name)
+		names = append(names, strings.TrimSpace(it.Name+" "+it.Detail))
 	}
-	if !strings.HasPrefix(byHand.Summary, "2, which kit doesn't look after") || !slices.Equal(names, []string{"Kubius", "Editor"}) {
-		t.Errorf("by hand said %q, %q; want Kubius and Editor alone", byHand.Summary, names)
+	if !strings.HasPrefix(byHand.Summary, "2, which kit doesn't look after") || !slices.Equal(names, []string{"Kubius", "Editor kit cask add editor"}) {
+		t.Errorf("by hand said %q, %q; want Kubius, and Editor with the command taking it over later", byHand.Summary, names)
 	}
 }
 
@@ -1348,7 +1348,7 @@ func TestSetupOffersEachCaskOnce(t *testing.T) {
 	if got := said(report, AdoptStep)[0]; got != "adopt ok 4 apps · kit apply takes them over" {
 		t.Errorf("stood %q", got)
 	}
-	want := "adopt: which apps should Homebrew take over, so a new Mac gets them?\nthe rest stay as they are, and kit won't ask about them again: Word and Excel office (ticked), Spark Desktop readdle-spark (ticked), Google Chrome (ticked)"
+	want := "adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over in place, updating an older copy; the rest stay as they are, and kit won't ask about them again: Word and Excel office (ticked), Spark Desktop readdle-spark (ticked), Google Chrome (ticked)"
 	if !slices.Equal(ask.asked, []string{want}) {
 		t.Errorf("asked %q\nwant %q", ask.asked, want)
 	}
@@ -1374,7 +1374,7 @@ func TestSetupAdoptsACaskDeclaredAlready(t *testing.T) {
 	s.Given.Adopt = &[]string{"viewer", "tally"}
 	p, _ := engine.New(s.adoptStep(), s.commitStep())
 	report, _ := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1})
-	if got := said(report, AdoptStep)[0]; got != "adopt ok 2 apps · kit apply takes them over" {
+	if got := said(report, AdoptStep)[0]; got != "adopt ok 1 app · 1 declared already · kit apply takes them over" {
 		t.Errorf("--adopt viewer tally stood %q", got)
 	}
 	if d := m.declared[len(m.declared)-1]; !slices.Equal(d.Adopt, []string{"tally"}) {
@@ -1382,6 +1382,41 @@ func TestSetupAdoptsACaskDeclaredAlready(t *testing.T) {
 	}
 	if names, _ := byHandNames(t, s); !slices.Equal(names, []string{"Kubius", "Editor"}) {
 		t.Errorf("by hand listed %q, want Kubius and Editor", names)
+	}
+}
+
+// A Mac declaring the cask of its only app by hand already, as kit-config
+// joined does, is offered nothing, its row saying kit apply takes the app
+// over.
+func TestSetupSaysWhatsDeclaredAlready(t *testing.T) {
+	s, _ := adopting(t, nil)
+	s.found = &snapshot.Snapshot{ByHand: []brew.ByHand{{Name: "Kubius"}, {Name: "Viewer", Cask: "viewer"}}}
+	p, _ := engine.New(s.adoptStep())
+	report, _ := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1})
+	if got := said(report, AdoptStep)[0]; got != "adopt ok none to take over · 1 declared already · kit apply takes it over" {
+		t.Errorf("stood %q", got)
+	}
+	if names, _ := byHandNames(t, s); !slices.Equal(names, []string{"Kubius"}) {
+		t.Errorf("by hand listed %q, want Kubius alone", names)
+	}
+}
+
+// An app whose cask the Mac declares off stays by hand, listed so, with no
+// command beside it, and --adopt for its cask is refused, saying so.
+func TestSetupLeavesACaskDeclaredOffByHand(t *testing.T) {
+	s, _ := adopting(t, nil)
+	s.hand = &handApps{declared: map[string]bool{}, off: map[string]bool{"tally": true}, offered: []offer{{cask: "editor", apps: []string{"Editor"}}}}
+	byHand := s.byHandStep().Check(t.Context())
+	var names []string
+	for _, it := range byHand.Items {
+		names = append(names, strings.TrimSpace(it.Name+" "+it.Detail))
+	}
+	if !slices.Equal(names, []string{"Kubius", "Editor kit cask add editor", "Tally", "Viewer"}) {
+		t.Errorf("by hand listed %q; want Tally among them, no command beside it", names)
+	}
+	s.Given.Adopt = &[]string{"tally"}
+	if _, err := s.adoptAnswer(t.Context()); err == nil || !strings.HasPrefix(err.Error(), "this Mac declares the tally cask off, so its app stays by hand") {
+		t.Errorf("--adopt tally, declared off: %v", err)
 	}
 }
 

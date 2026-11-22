@@ -284,7 +284,7 @@ func TestSetupAdoptsAsItsFlagsSay(t *testing.T) {
 	}
 
 	out, errOut, code := w.run(t, append(base, "--adopt", "tally")...)
-	for _, want := range []string{"adopt ok 1 app · kit apply takes it over\n", "commit ok 3 declared · committed and pushed", "by-hand ok 2, which kit doesn't look after", "by-hand installed by hand Editor, Kubius\n"} {
+	for _, want := range []string{"adopt ok 1 app · kit apply takes it over\n", "commit ok 3 declared · committed and pushed", "by-hand ok 2, which kit doesn't look after", "by-hand installed by hand Editor (kit cask add editor), Kubius\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("kit setup --adopt tally printed\n%s%s\nwant it to hold %q", out, errOut, want)
 		}

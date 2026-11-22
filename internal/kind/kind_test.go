@@ -659,21 +659,38 @@ func TestDriftWhenWhatsByHandCantBeTold(t *testing.T) {
 }
 
 // Taken goes by every name a thing declared or installed goes by, as Drift
-// does; by the names declared alone while the kind's program isn't here;
-// and fails when what's installed couldn't be looked at.
+// does, a thing declared off as much as one on, and says which are off;
+// by the names declared alone while the kind's program isn't here; and
+// fails when what's installed couldn't be looked at.
 func TestTaken(t *testing.T) {
-	k := &fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}}, aliases: map[string]string{"homebrew/cask/editor": "editor"}}
-	taken, err := kind.Taken(t.Context(), k, declared("homebrew/cask/editor"))
+	k := &fakeKind{
+		installed: []kind.Installed{{Name: "jq", Explicit: true}, {Name: "zoom", Explicit: true}},
+		aliases:   map[string]string{"homebrew/cask/editor": "editor", "homebrew/cask/firefox": "firefox", "old-zoom": "zoom"},
+	}
+	list := declared("homebrew/cask/editor", "homebrew/cask/firefox", "old-zoom")
+	list.Entries[1].Off, list.Entries[2].Off = true, true
+	taken, err := kind.Taken(t.Context(), k, list)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]bool{"editor": true, "homebrew/cask/editor": true, "jq": true, "tally": false} {
-		if taken(name) != want {
-			t.Errorf("taken(%q) = %v, want %v", name, !want, want)
+	for _, tt := range []struct {
+		name       string
+		taken, off bool
+	}{
+		{"editor", true, false}, {"homebrew/cask/editor", true, false}, {"jq", true, false},
+		{"firefox", true, true}, {"homebrew/cask/firefox", true, true}, {"zoom", true, true}, {"tally", false, false},
+	} {
+		if taken.Taken(tt.name) != tt.taken || taken.Off(tt.name) != tt.off {
+			t.Errorf("%s: taken %v, off %v; want %v, %v", tt.name, taken.Taken(tt.name), taken.Off(tt.name), tt.taken, tt.off)
 		}
 	}
+	if got := kind.Compare(t.Context(), k, list); slices.ContainsFunc(got.Items, func(it check.Item) bool { return it.Name == "zoom" }) {
+		t.Errorf("Compare() = %+v, want zoom, declared off by its old name, not extra", got.Items)
+	}
 	k = &fakeKind{err: fmt.Errorf("brew: %w on kit's PATH", runner.ErrNotFound)}
-	if taken, err := kind.Taken(t.Context(), k, declared("tally")); err != nil || !taken("tally") || taken("editor") {
+	off := declared("tally", "spaceman")
+	off.Entries[1].Off = true
+	if taken, err := kind.Taken(t.Context(), k, off); err != nil || !taken.Taken("tally") || taken.Off("tally") || !taken.Off("spaceman") || taken.Taken("editor") {
 		t.Errorf("without its program, Taken = %v; want the names declared alone", err)
 	}
 	k = &fakeKind{err: errors.New("brew list exited 1")}

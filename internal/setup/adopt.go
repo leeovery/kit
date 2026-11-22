@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
@@ -23,15 +24,17 @@ import (
 func (s *Setup) adoptStep() engine.Step {
 	return s.questionStep(question{
 		name: AdoptStep, title: "To Homebrew", flags: "--adopt or --no-adopt",
-		answered: func(rec record) (string, bool) {
+		answered: func(ctx context.Context, rec record) (string, bool) {
 			if rec.Adopt == nil {
 				return "", false
 			}
-			n := s.takenOver(*rec.Adopt)
-			if n == 0 {
-				return "none", true
+			hand := s.handApps(ctx)
+			n := s.takenOver(hand, *rec.Adopt)
+			first := "none"
+			if n > 0 {
+				first = appCount(n)
 			}
-			return says(fmt.Sprintf("%d %s", n, look.Plural(n, "app", "apps")), "kit apply takes "+look.Plural(n, "it", "them")+" over"), true
+			return hand.takesOver(first, n), true
 		},
 		anew: func(rec record) bool { return anew(s.givenAdopt(), rec.Adopt) },
 		nothing: func(ctx context.Context, _ *snapshot.Snapshot) (string, bool) {
@@ -39,7 +42,7 @@ func (s *Setup) adoptStep() engine.Step {
 			if hand.err != nil {
 				return "couldn't tell which it can take over: " + oneLine(hand.err.Error()), len(hand.offered) == 0
 			}
-			return "none to take over", len(hand.offered) == 0
+			return hand.takesOver("none to take over", 0), len(hand.offered) == 0
 		},
 		ask: func(ctx context.Context, _ *snapshot.Snapshot) error {
 			casks, err := s.adoptAnswer(ctx)
@@ -48,41 +51,70 @@ func (s *Setup) adoptStep() engine.Step {
 			}
 			return s.update(func(r *record) { r.Adopt = &casks })
 		},
-		edited: func(rec record) string {
+		edited: func(ctx context.Context, rec record) string {
 			if rec.Adopt == nil || len(*rec.Adopt) == 0 {
 				return "with no app for Homebrew to take over"
 			}
-			n := s.takenOver(*rec.Adopt)
-			return fmt.Sprintf("with Homebrew to take over %d %s", n, look.Plural(n, "app", "apps"))
+			return "with Homebrew to take over " + appCount(s.takenOver(s.handApps(ctx), *rec.Adopt))
 		},
 	})
 }
 
-// takenOver is how many apps installed by hand casks take over, as the
-// snapshot found them: as many as there are casks, when it found none of
-// theirs.
-func (s *Setup) takenOver(casks []string) int {
+// appCount says n apps.
+func appCount(n int) string { return fmt.Sprintf("%d %s", n, look.Plural(n, "app", "apps")) }
+
+// takenOver is how many apps installed by hand casks take over, but those
+// the Mac declares already, as the snapshot found them: as many as there
+// are casks, when it found none of theirs.
+func (s *Setup) takenOver(hand *handApps, casks []string) int {
 	found, _ := s.snapshot()
-	n := 0
+	n, matched := 0, false
 	if found != nil {
 		for _, app := range found.ByHand {
 			if app.Cask != "" && slices.Contains(casks, app.Cask) {
-				n++
+				matched = true
+				if !hand.declared[app.Cask] {
+					n++
+				}
 			}
 		}
 	}
-	return cmp.Or(n, len(casks))
+	if matched {
+		return n
+	}
+	for _, c := range casks {
+		if !hand.declared[c] {
+			n++
+		}
+	}
+	return n
+}
+
+// takesOver is the row of the apps taken over: first, then how many apps
+// the Mac declares the casks of already, and what kit apply does with all
+// of them, n taken over by the answer.
+func (h *handApps) takesOver(first string, n int) string {
+	parts := []string{first}
+	if h.declaredApps > 0 {
+		parts = append(parts, fmt.Sprintf("%d declared already", h.declaredApps))
+	}
+	if all := n + h.declaredApps; all > 0 {
+		parts = append(parts, "kit apply takes "+look.Plural(all, "it", "them")+" over")
+	}
+	return says(parts...)
 }
 
 // handApps is what setup makes of the apps installed by hand that a cask
 // installs: those offered Homebrew, a cask each; the casks the Mac declares
-// already, by any name, whose apps the kit apply after setup takes over
-// anyway; and why which couldn't be told, when it couldn't, as which casks
-// install them, or what the Mac declares.
+// already, on, by any name, whose apps the kit apply after setup takes over
+// anyway, and how many apps they are; those it declares off, whose apps
+// stay by hand; and why which couldn't be told, when it couldn't, as which
+// casks install them, or what the Mac declares.
 type handApps struct {
-	offered  []offer
-	declared map[string]bool
-	err      error
+	offered       []offer
+	declared, off map[string]bool
+	declaredApps  int
+	err           error
 }
 
 // offer is a cask offered Homebrew, and the apps it takes over.
@@ -106,7 +138,7 @@ func (s *Setup) handApps(ctx context.Context) *handApps {
 		return known
 	}
 	found, m := s.snapshot()
-	h := &handApps{declared: map[string]bool{}}
+	h := &handApps{declared: map[string]bool{}, off: map[string]bool{}}
 	if found == nil {
 		return h
 	}
@@ -125,8 +157,11 @@ func (s *Setup) handApps(ctx context.Context) *handApps {
 		for _, c := range casks {
 			switch {
 			case err != nil:
-			case taken(c):
+			case taken.Off(c):
+				h.off[c] = true
+			case taken.Taken(c):
 				h.declared[c] = true
+				h.declaredApps += len(appsOf(found, c))
 			default:
 				h.offered = append(h.offered, offer{cask: c, apps: appsOf(found, c)})
 			}
@@ -138,16 +173,16 @@ func (s *Setup) handApps(ctx context.Context) *handApps {
 	return h
 }
 
-// casksTaken reports of a cask whether m declares it, or has it installed,
-// by any name it goes by (kind.Taken).
-func casksTaken(ctx context.Context, m snapshot.Mac) (func(string) bool, error) {
+// casksTaken is how m's declared casks, and those installed, take a
+// cask's name (kind.Taken).
+func casksTaken(ctx context.Context, m snapshot.Mac) (kind.Taking, error) {
 	if m.Config == nil {
-		return nil, errors.New("kit-config isn't read")
+		return kind.Taking{}, errors.New("kit-config isn't read")
 	}
 	k := brew.CasksDescriptor.New(kindDeps(m))
 	list, unread, err := kind.Declared(m.Config, k, m.Name)
 	if err = cmp.Or(err, unread); err != nil {
-		return nil, err
+		return kind.Taking{}, err
 	}
 	return kind.Taken(ctx, k, list)
 }
@@ -170,7 +205,10 @@ func (s *Setup) adoptAnswer(ctx context.Context) ([]string, error) {
 	case s.Given.Adopt != nil:
 		casks := *s.givenAdopt()
 		for _, c := range casks {
-			if hand.err == nil && !hand.declared[c] && !hand.offers(c) {
+			switch {
+			case hand.off[c]:
+				return nil, fmt.Errorf("this Mac declares the %s cask off, so its app stays by hand: %s", c, adoptFlags(hand.offered))
+			case hand.err == nil && !hand.declared[c] && !hand.offers(c):
 				return nil, fmt.Errorf("no app installed by hand here is the %s cask's to take over: %s", c, adoptFlags(hand.offered))
 			}
 		}
@@ -185,9 +223,13 @@ func (s *Setup) adoptAnswer(ctx context.Context) ([]string, error) {
 			items[i].More = o.cask
 		}
 	}
-	return s.tickedAs(ctx, AdoptStep, "which apps should Homebrew take over, so a new Mac gets them?\nthe rest stay as they are, and kit won't ask about them again", items,
+	return s.tickedAs(ctx, AdoptStep, "which apps should Homebrew take over, so a new Mac gets them?\n"+adoptMore, items,
 		func(i int) string { return hand.offered[i].cask })
 }
+
+// adoptMore is what more the question says: what taking over does, and
+// what becomes of the rest.
+const adoptMore = "Homebrew takes each over in place, updating an older copy; the rest stay as they are, and kit won't ask about them again"
 
 // givenAdopt are the casks --adopt gives, each once: nil when it's not
 // given.
@@ -252,21 +294,33 @@ func (s *Setup) adopting(ctx context.Context, rec record) (adopt, left []string)
 	return adopt, left
 }
 
-// leftByHand are the apps installed by hand found that stay so: all but
-// those whose cask the Mac declares already, and those whose cask was
-// ticked and declared, not refused by the commit.
-func (s *Setup) leftByHand(found *snapshot.Snapshot, hand *handApps) []brew.ByHand {
+// leftByHand are the apps installed by hand found that stay so, an item
+// each: all but those whose cask the Mac declares on already, and those
+// whose cask was ticked and declared, not refused by the commit. One whose
+// cask was offered and not ticked says the command that takes it over
+// later, as its detail.
+func (s *Setup) leftByHand(found *snapshot.Snapshot, hand *handApps) []check.Item {
 	adopted := s.record().Adopt
 	refused := s.refused()
-	var left []brew.ByHand
+	var left []check.Item
 	for _, app := range found.ByHand {
-		taken := adopted != nil && slices.Contains(*adopted, app.Cask) && hand.offers(app.Cask) && !refused[brew.CasksDescriptor.Name+":"+app.Cask]
-		if app.Cask == "" || !hand.declared[app.Cask] && !taken {
-			left = append(left, app)
+		ticked := adopted != nil && slices.Contains(*adopted, app.Cask)
+		if app.Cask != "" && (hand.declared[app.Cask] || ticked && hand.offers(app.Cask) && !refused[brew.CasksDescriptor.Name+":"+app.Cask]) {
+			continue
 		}
+		it := check.Item{ID: ByHandStep + ":" + app.Name, Name: app.Name, State: "installed by hand"}
+		if hand.offers(app.Cask) && !ticked {
+			it.Detail = AddCask + app.Cask
+		}
+		left = append(left, it)
 	}
 	return left
 }
+
+// AddCask is the command, before a cask's token, that takes over an app
+// installed by hand: an item of the apps left by hand says it, as its
+// detail, for one a cask installs.
+const AddCask = "kit cask add "
 
 // refused are the things setup's commit refused to declare, by id.
 func (s *Setup) refused() map[string]bool {

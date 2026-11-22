@@ -96,13 +96,13 @@ func counted(ps []snapshot.Part) check.Result {
 // refused after.
 type question struct {
 	name, title, flags string
-	answered           func(rec record) (string, bool)
+	answered           func(ctx context.Context, rec record) (string, bool)
 	anew               func(rec record) bool
 	nothing            func(ctx context.Context, found *snapshot.Snapshot) (string, bool)
 	ask                func(ctx context.Context, found *snapshot.Snapshot) error
 	// edited, when set, is how a refusal once the edits are made says the
 	// answer recorded: else by the title, and the answer as its row says it.
-	edited func(rec record) string
+	edited func(ctx context.Context, rec record) string
 }
 
 // anew reports whether a flag gives an answer, given, other than the one
@@ -116,7 +116,7 @@ func (s *Setup) questionStep(q question) engine.Step {
 		Name: q.name, Title: q.title,
 		Check: func(ctx context.Context) check.Result {
 			rec := s.record()
-			said, ok := q.answered(rec)
+			said, ok := q.answered(ctx, rec)
 			switch {
 			case q.anew(rec):
 				return check.Result{State: check.Attention, Summary: "answered anew"}
@@ -134,13 +134,13 @@ func (s *Setup) questionStep(q question) engine.Step {
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
 			if rec := s.record(); rec.Declared && q.anew(rec) {
-				said, ok := q.answered(rec)
+				said, ok := q.answered(ctx, rec)
 				if !ok {
 					said = "unasked"
 				}
 				made := strings.ToLower(q.title[:1]) + q.title[1:] + " " + said
 				if q.edited != nil {
-					made = q.edited(rec)
+					made = q.edited(ctx, rec)
 				}
 				return fmt.Errorf("kit setup, part-way, has made its edits in kit-config, %s: run kit setup again without %s", made, q.flags)
 			}
@@ -172,7 +172,7 @@ func (s *Setup) dataStep() engine.Step {
 	}
 	return s.questionStep(question{
 		name: DataStep, title: snapshot.FoldersLabel, flags: "--restore or --no-restore",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			if rec.Restore == nil {
 				return "", false
 			}
@@ -249,7 +249,7 @@ func (s *Setup) tickedAs(ctx context.Context, step, question string, items []Ite
 func (s *Setup) prefsStep() engine.Step {
 	return s.questionStep(question{
 		name: PrefsStep, title: "Apps' settings", flags: "--prefs or --no-prefs",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			switch {
 			case rec.Prefs == nil:
 				return "", false
@@ -295,7 +295,7 @@ func (s *Setup) prefsAnswer(ctx context.Context) (bool, error) {
 func (s *Setup) filesStep() engine.Step {
 	return s.questionStep(question{
 		name: FilesStep, title: "Linked files", flags: "--link or --no-link",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			if rec.Link == nil {
 				return "", false
 			}
@@ -343,7 +343,7 @@ const NothingNew = "nothing: kit-config is new"
 func (s *Setup) installStep() engine.Step {
 	return s.questionStep(question{
 		name: InstallStep, title: "To install", flags: "--apply or --no-apply",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			switch {
 			case rec.Apply == nil:
 				return "", false
@@ -596,11 +596,7 @@ func (s *Setup) byHandStep() engine.Step {
 			if hand.err != nil {
 				said += "; kit couldn't tell which Homebrew can take over: " + oneLine(hand.err.Error())
 			}
-			res := check.Result{State: check.OK, Summary: said}
-			for _, app := range left {
-				res.Items = append(res.Items, check.Item{ID: ByHandStep + ":" + app.Name, Name: app.Name, State: "installed by hand"})
-			}
-			return res
+			return check.Result{State: check.OK, Summary: said, Items: left}
 		},
 	}
 }
