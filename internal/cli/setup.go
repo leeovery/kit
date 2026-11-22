@@ -35,8 +35,8 @@ import (
 
 func newSetupCommand(a *app) *cobra.Command {
 	var given setup.Answers
-	var restores, links []string
-	var noRestore, noLink, prefs, noPrefs, apply, noApply bool
+	var restores, links, adopts []string
+	var noRestore, noLink, noAdopt, prefs, noPrefs, apply, noApply bool
 	cmd := &cobra.Command{
 		Use:         "setup",
 		Short:       "Set up a Mac in use: kit-config made or joined, the Mac declared as it is",
@@ -60,10 +60,13 @@ Mac's [paths], as kit path add does. It asks:
   whether apps' settings are saved every night (--prefs, --no-prefs);
   which of the shell's and tools' files kit-config keeps, each moved in and
   linked back as kit file add does (--link, --no-link);
+  which of the apps installed by hand that a cask installs Homebrew takes
+  over, so a new Mac installs them too (--adopt, --no-adopt): their casks
+  declared, kit apply adopts them, and the rest are left by hand;
   joining, whether what kit-config declares that this Mac hasn't installs
   with the rest (--apply), or setup stops here to look first (--no-apply).
 It commits and pushes all of it as one, says what kit doesn't look after
-(the apps installed by hand) and where secrets go (kit secret add), then
+(the apps left installed by hand) and where secrets go (kit secret add), then
 runs kit apply.
 
 It refuses when the config folder holds a config already. Without a
@@ -77,7 +80,7 @@ fails, running it again pushes it. Never delete the config folder
 part-way: files are moved into it and linked back.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			given.Restore, given.Link = listFlag(restores, noRestore), listFlag(links, noLink)
+			given.Restore, given.Link, given.Adopt = listFlag(restores, noRestore), listFlag(links, noLink), listFlag(adopts, noAdopt)
 			given.Prefs, given.Apply = boolFlag(prefs, noPrefs), boolFlag(apply, noApply)
 			return a.setup(cmd.Context(), given)
 		},
@@ -93,9 +96,11 @@ part-way: files are moved into it and linked back.`,
 	f.BoolVar(&noPrefs, "no-prefs", false, "don't save apps' settings")
 	f.StringArrayVar(&links, "link", nil, "a file kit-config keeps, moved in and linked back, as often as wanted")
 	f.BoolVar(&noLink, "no-link", false, "no files for kit-config to keep")
+	f.StringArrayVar(&adopts, "adopt", nil, "a cask Homebrew takes over an app installed by hand with, as often as wanted")
+	f.BoolVar(&noAdopt, "no-adopt", false, "leave every app installed by hand as it is")
 	f.BoolVar(&apply, "apply", false, "run kit apply once setup's done, installing what kit-config declares")
 	f.BoolVar(&noApply, "no-apply", false, "stop once setup's committed, to look first")
-	for _, pair := range [][]string{{"create", "join"}, {"restore", "no-restore"}, {"prefs", "no-prefs"}, {"link", "no-link"}, {"apply", "no-apply"}} {
+	for _, pair := range [][]string{{"create", "join"}, {"restore", "no-restore"}, {"prefs", "no-prefs"}, {"link", "no-link"}, {"adopt", "no-adopt"}, {"apply", "no-apply"}} {
 		cmd.MarkFlagsMutuallyExclusive(pair...)
 	}
 	return cmd
@@ -268,7 +273,8 @@ func tempDirs(getenv func(string) string) []string {
 }
 
 // declareSetup declares what kit setup's snapshot found in this Mac's
-// file, then its answers, as kit restore add, kit file add, kit feature on
+// file, with the casks that take over apps installed by hand, then its
+// answers, as kit restore add, kit file add, kit feature on
 // and kit prefs start-fresh would, saying on sink what it runs; then
 // commits kit.toml and this Mac's folder, and pushes, as one. What's
 // refused, and what's declared as it is for want of telling whether it
@@ -279,13 +285,14 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 		return failed(err)
 	}
 	defer func() { _ = r.close() }()
+	d.Found.Adopt(d.Adopt)
 	if err := snapshot.Write(snapshot.Mac{Name: r.machine, Config: r.cfg}, d.Found); err != nil {
 		return failed(err)
 	}
 	counts, total := map[string]int{}, 0
 	var items []check.Item
 	for _, p := range d.Found.Parts {
-		counts[p.Kind] = len(p.Lines)
+		counts[p.Kind] += len(p.Lines)
 		total += len(p.Lines)
 		for _, ref := range p.Refused {
 			items = append(items, check.Item{ID: p.Kind + ":" + ref.Entry.Name, Name: ref.Entry.Name, State: "refused", Detail: ref.Err.Error()})

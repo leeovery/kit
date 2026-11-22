@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -275,6 +276,35 @@ func TestALineTheConfigRefusesIsLeftOut(t *testing.T) {
 	}
 	if got, want := declarations(t, m), "[homebrew formulae]\nbat\n"; got != want {
 		t.Errorf("laptop/declarations =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// The casks that take over apps installed by hand are declared among the
+// casks' lines, once each, those the snapshot holds already as they are;
+// with no casks' part looked at, as one of their own.
+func TestTheCasksAdoptedAreDeclaredWithTheRest(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		parts []snapshot.Part
+		want  []string
+	}{
+		{"among the casks", []snapshot.Part{{Kind: "brew"}, {Kind: "cask", Lines: []config.Entry{{Name: "ghostty"}, {Name: "tally"}}}}, []string{"brew 0", "cask 3"}},
+		{"the casks not looked at", []snapshot.Part{{Kind: "cask", Err: errors.New("brew broke")}}, []string{"cask 0: brew broke", "cask 2"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newMac(t, "")
+			s := snapshot.Snapshot{Parts: tt.parts}
+			s.Adopt([]string{"tally", "editor", "editor"})
+			if got := counts(s); !slices.Equal(got, tt.want) {
+				t.Errorf("parts = %q, want %q", got, tt.want)
+			}
+			if err := snapshot.Write(m, &s); err != nil {
+				t.Fatal(err)
+			}
+			if got := declarations(t, m); !strings.Contains(got, "[homebrew casks]\neditor\n") || strings.Count(got, "tally") != 1 {
+				t.Errorf("laptop/declarations =\n%s\nwant editor and tally declared, once each", got)
+			}
+		})
 	}
 }
 

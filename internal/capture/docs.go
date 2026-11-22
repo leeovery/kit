@@ -41,7 +41,7 @@ var docs = []Fixture{
 		})},
 	result("drift-temp", "kit brew add hello --temp: installed, not declared", "brew add hello --temp",
 		said{"hello", []string{"installed, for now: not declared, quiet for 7 days, then kit reconcile asks"}}, said{"kit-config", []string{"nothing changed"}}),
-	{Name: "first-config-done", About: "kit setup's end on a Mac in use: the Mac declared as it is, kit apply carrying on", Width: 82, Height: 36,
+	{Name: "first-config-done", About: "kit setup's end on a Mac in use: the Mac declared as it is, kit apply carrying on", Width: 82, Height: 37,
 		Shows: "carries on now", at: docsAt, draw: setupDone},
 	result("linked-files-add", "kit file add: the file moved into kit-config and linked back", "file add ~/.config/tool/conf",
 		said{"~/.config/tool/conf", []string{"in kit-config, linked: laptop/home/.config/tool/conf"}}, committed("laptop/home/.config/tool/conf")),

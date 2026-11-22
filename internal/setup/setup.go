@@ -45,6 +45,7 @@ const (
 	DataStep     = "restore"
 	PrefsStep    = "prefs"
 	FilesStep    = "files"
+	AdoptStep    = "adopt"
 	InstallStep  = "to-install"
 	CommitStep   = "commit"
 	ByHandStep   = "by-hand"
@@ -87,9 +88,10 @@ type Answers struct {
 	Create, Join string
 	// Mac is this Mac's name; From, a Mac a new one starts as a copy of.
 	Mac, From string
-	// Restore are the folders a new Mac brings back, and Link the files
-	// kit-config keeps: an empty list for none.
-	Restore, Link *[]string
+	// Restore are the folders a new Mac brings back, Link the files
+	// kit-config keeps, and Adopt the casks Homebrew takes over the apps
+	// installed by hand with: an empty list for none.
+	Restore, Link, Adopt *[]string
 	// Prefs is whether apps' settings are saved nightly; Apply whether kit
 	// apply runs once setup's done.
 	Prefs, Apply *bool
@@ -100,6 +102,8 @@ type Declaring struct {
 	Found   *snapshot.Snapshot
 	Restore []string
 	Link    []string
+	// Adopt are the casks declared to take over apps installed by hand.
+	Adopt []string
 	// Prefs is whether apps' settings are saved: as answered, else as
 	// they are, capture switched on for this Mac already.
 	Prefs bool
@@ -165,6 +169,7 @@ type record struct {
 	From     string    `json:"from,omitempty"`
 	Restore  *[]string `json:"restore,omitempty"`
 	Link     *[]string `json:"link,omitempty"`
+	Adopt    *[]string `json:"adopt,omitempty"`
 	Prefs    *bool     `json:"prefs,omitempty"`
 	Apply    *bool     `json:"apply,omitempty"`
 	Declared bool      `json:"declared,omitempty"`
@@ -281,7 +286,7 @@ func (s *Setup) Steps() []engine.Step {
 		}
 	}
 	first[len(first)-1].Area = AreaDeclared
-	questions := []engine.Step{s.dataStep(), s.prefsStep(), s.filesStep(), s.installStep()}
+	questions := []engine.Step{s.dataStep(), s.prefsStep(), s.filesStep(), s.adoptStep(), s.installStep()}
 	commit := s.commitStep()
 	for i := range questions {
 		questions[i].Area, questions[i].Needs = AreaDeclared, []string{SnapshotStep}
