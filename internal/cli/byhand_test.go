@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/logs"
+	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -54,6 +55,27 @@ func downs(records []logs.Record) []string {
 	return down
 }
 
+// stopWithin is how long a run at a terminal may take to come to what
+// stops it, as a fake command pressing ctrl+c does.
+const stopWithin = 30 * time.Second
+
+// runStopped runs kit with args in w at a terminal, as run does, for a test
+// that stops the run from a fake command: should that command never run, as
+// when the run waits on a card nothing answers, the run's stopped once
+// stopWithin is up, the test failing with what kit ran, never waiting for
+// go test's own limit.
+func (w *world) runStopped(t *testing.T, args ...string) (stdout, stderr string, status int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), stopWithin)
+	defer cancel()
+	w.ctx = ctx
+	stdout, stderr, status = w.run(t, args...)
+	if ctx.Err() != nil {
+		t.Errorf("kit %s wasn't stopped within %s; it ran %q", strings.Join(args, " "), stopWithin, w.fake.Calls())
+	}
+	return stdout, stderr, status
+}
+
 // signInWorld is a Mac with ripgrep missing, and a step by hand that comes
 // after it: signing in to a tool, in a group, with notes saying why; kit.app
 // not built.
@@ -80,7 +102,7 @@ func TestApplyRaisesAStepByHand(t *testing.T) {
 	// osascript there, the login items are checked too: there are none.
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
 
-	if _, errOut, code := w.run(t, "apply"); code != 1 {
+	if _, errOut, code := w.runStopped(t, "apply"); code != 1 {
 		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
 	}
 	up := cards(w.lastLog(t))
@@ -117,7 +139,7 @@ func TestApplyRaisesACardOnceItsGraceIsOver(t *testing.T) {
 	})
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
 
-	if _, errOut, code := w.run(t, "apply"); code != 1 {
+	if _, errOut, code := w.runStopped(t, "apply"); code != 1 {
 		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
 	}
 	if up := cards(w.lastLog(t)); len(up) != 1 || up[0].Item != "sign-in" {
@@ -157,7 +179,7 @@ func TestApplyNotifiesThroughKitsApp(t *testing.T) {
 	w.fake.On("open", notify.Args...).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
 	w.fake.On("open", clear.Args...)
 
-	if _, errOut, code := w.run(t, "apply"); code != 1 {
+	if _, errOut, code := w.runStopped(t, "apply"); code != 1 {
 		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
 	}
 	var ran []string
@@ -183,6 +205,13 @@ func TestApplyNotifiesThroughTheShippedApp(t *testing.T) {
 	w.write(t, kitPath, "")
 	w.write(t, filepath.Join(".local", "libexec", "kit.app", "Contents", "MacOS", "kit"), "app")
 	w.write(t, filepath.Join(".local", "libexec", "kit.app", "Contents", "Resources", "team"), "ABCDE12345\n")
+	// The shipped app's team holds Full Disk Access already, so the sign-in's
+	// is the run's one card: kit.app's, left to give, could go up first.
+	if err := nightly.Update(w.stateDir(), func(r *nightly.Record) {
+		r.Access = nightly.Access{At: w.now, App: "team:ABCDE12345", Granted: true}
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// kit finds the shipped app through its own path with links resolved, so
 	// the temporary directory's own, as /var's on macOS, are resolved here too.
 	shipped, err := filepath.EvalSymlinks(filepath.Join(w.home, ".local", "libexec", "kit.app"))
@@ -208,7 +237,7 @@ func TestApplyNotifiesThroughTheShippedApp(t *testing.T) {
 	w.fake.On("open", notify.Args...).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
 	w.fake.On("open", clear.Args...)
 
-	if _, errOut, code := w.run(t, "apply"); code != 1 {
+	if _, errOut, code := w.runStopped(t, "apply"); code != 1 {
 		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
 	}
 	var ran []string
@@ -238,7 +267,7 @@ func TestApplyEndsWhileKitsAppIsBuilt(t *testing.T) {
 		stop.Do(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
 	})
 
-	if _, errOut, code := w.run(t, "apply"); code != 1 {
+	if _, errOut, code := w.runStopped(t, "apply"); code != 1 {
 		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
 	}
 	calls := w.fake.Calls()
