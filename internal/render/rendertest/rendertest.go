@@ -135,7 +135,8 @@ func BootOrder() []event.Step {
 
 // SetupDone is kit setup on a Mac in use, at at, done: kit-config made
 // anew, the Mac declared as it is, a part at a time, its questions
-// answered, committed and pushed; three apps installed by hand.
+// answered, two apps Homebrew is to take over among them, committed and
+// pushed; three apps left installed by hand.
 func SetupDone(at time.Time) []event.Event {
 	steps := []event.Step{
 		{Name: setup.GitHubStep, Title: "GitHub", Area: setup.AreaSetup},
@@ -145,6 +146,7 @@ func SetupDone(at time.Time) []event.Event {
 		{Name: setup.DataStep, Title: "Your data", Area: setup.AreaDeclared},
 		{Name: setup.PrefsStep, Title: "Apps' settings", Area: setup.AreaDeclared},
 		{Name: setup.FilesStep, Title: "Linked files", Area: setup.AreaDeclared},
+		{Name: setup.AdoptStep, Title: "To Homebrew", Area: setup.AreaDeclared},
 		{Name: setup.InstallStep, Title: "To install", Area: setup.AreaDeclared},
 		{Name: setup.CommitStep, Title: "Committed", Area: setup.AreaDeclared},
 		{Name: setup.ByHandStep, Title: "Installed by hand", Area: setup.AreaDeclared},
@@ -175,11 +177,12 @@ func SetupDone(at time.Time) []event.Event {
 	ok(setup.DataStep, "3 folders · 56.3 GB")
 	ok(setup.PrefsStep, "every night")
 	ok(setup.FilesStep, "5")
+	ok(setup.AdoptStep, "2 apps · kit apply takes them over")
 	ok(setup.InstallStep, setup.NothingNew)
 	events = append(events, event.StepStarted{Time: at, Step: setup.CommitStep},
 		event.StepFinished{Time: at, Step: setup.CommitStep, Result: check.Result{State: check.OK, Summary: "370 declared · committed and pushed kit.toml and laptop/", Counts: counts}})
 	byHand := check.Result{State: check.OK, Summary: "3, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there"}
-	for _, app := range []string{"Sketchpad", "Tally", "Mac Monitor"} {
+	for _, app := range []string{"Sketchpad", "Inkwell", "Mac Monitor"} {
 		byHand.Items = append(byHand.Items, check.Item{ID: setup.ByHandStep + ":" + app, Name: app, State: "installed by hand"})
 	}
 	events = append(events, event.StepFinished{Time: at, Step: setup.ByHandStep, Result: byHand})

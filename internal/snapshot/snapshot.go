@@ -381,6 +381,27 @@ func (m Mac) backupsPart(ctx context.Context) Part {
 	return p
 }
 
+// Adopt has s declare casks, each to take over an app installed by hand,
+// among the casks' lines: those it declares already as they are. With no
+// casks' part looked at, they're a part of their own.
+func (s *Snapshot) Adopt(casks []string) {
+	if len(casks) == 0 {
+		return
+	}
+	d := brew.CasksDescriptor
+	i := slices.IndexFunc(s.Parts, func(p Part) bool { return p.Kind == d.Name && p.Err == nil })
+	if i < 0 {
+		s.Parts = append(s.Parts, Part{Kind: d.Name, Label: d.Label, section: true})
+		i = len(s.Parts) - 1
+	}
+	p := &s.Parts[i]
+	for _, c := range casks {
+		if !slices.ContainsFunc(p.Lines, func(e config.Entry) bool { return e.Name == c }) {
+			p.Lines = append(p.Lines, config.Entry{Name: c})
+		}
+	}
+}
+
 // Write declares what s's parts found in the Mac's declarations file: one
 // edit, every section placed and sorted as kit writes them, the file
 // written whole or not at all once it reads back as the config's loader
@@ -407,7 +428,7 @@ func Write(m Mac, s *Snapshot) error {
 		return fmt.Errorf("declare the snapshot in %s: %w", config.DeclFile(m.Name), err)
 	}
 	for _, r := range refused {
-		i := slices.IndexFunc(s.Parts, func(p Part) bool { return p.Kind == r.Kind })
+		i := slices.IndexFunc(s.Parts, func(p Part) bool { return p.Kind == r.Kind && p.Err == nil })
 		if i < 0 {
 			continue
 		}

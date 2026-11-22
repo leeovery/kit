@@ -1393,6 +1393,26 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	return compare(ctx, k, declared).res
 }
 
+// Taken reports, of a name, whether declared declares it, or k has it
+// installed, by any name it goes by, as Drift goes by them. While k's
+// program isn't installed, it goes by the names declared alone; it fails
+// when what's installed couldn't be looked at.
+func Taken(ctx context.Context, k Kind, declared config.List) (func(name string) bool, error) {
+	c := compare(ctx, k, declared)
+	key := keyOf(k)
+	switch {
+	case c.looked:
+		return func(name string) bool { return c.taken[key(name)] }, nil
+	case c.res.State == check.Failed:
+		return nil, errors.New(c.res.Reason)
+	}
+	names := make(map[string]bool, len(declared.Entries))
+	for _, e := range declared.Entries {
+		names[key(e.Name)] = true
+	}
+	return func(name string) bool { return names[key(name)] }, nil
+}
+
 // Drift is what Compare finds, with, for a kind that can take over things
 // installed by hand (Adoptable), each of those neither declared nor
 // installed, by any name it goes by, as an item of its own: installed by
