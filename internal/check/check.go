@@ -154,10 +154,11 @@ func (r Result) Adding(parts ...string) Result {
 }
 
 // Says is the parts of r's summary: the summary whole when it wasn't said
-// in parts, and none when it says nothing.
+// in parts, or was written since without them, and none when it says
+// nothing.
 func (r Result) Says() []string {
 	switch {
-	case len(r.Parts) > 0:
+	case len(r.Parts) > 0 && strings.Join(r.Parts, "; ") == r.Summary:
 		return r.Parts
 	case r.Summary == "":
 		return nil

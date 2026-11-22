@@ -538,13 +538,12 @@ func (s *Setup) provenPrivate(ctx context.Context) error {
 // home folder, and linked back, so it's never to be deleted part-way.
 func (s *Setup) stopped(res check.Result) check.Result {
 	_, m := s.snapshot()
-	said := "kit setup again carries on; never delete " + tilde.Shown(m.Home, s.Dirs.Config) + " part-way, as files are moved into it and linked back"
+	said := []string{"kit setup again carries on", "never delete " + tilde.Shown(m.Home, s.Dirs.Config) + " part-way, as files are moved into it and linked back"}
 	if res.State == check.Failed {
-		res.Reason += "; " + said
-	} else {
-		res.Summary += "; " + said
+		res.Reason = strings.Join(append([]string{res.Reason}, said...), "; ")
+		return res
 	}
-	return res
+	return res.Adding(said...)
 }
 
 // byHandStep says which apps were installed by hand: kit leaves them to

@@ -532,7 +532,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		report.PushError = "not pushed: " + err.Error()
 	}
 	return report, p.update(func(r *Record) {
-		r.Captured, r.Summary, r.Errors, r.NotOwner = p.Now(), report.Summary(), len(report.Errors), ""
+		r.Captured, r.Summary, r.Parts, r.Errors, r.NotOwner = p.Now(), report.Summary(), report.Says(), len(report.Errors), ""
 		if report.PushError == "" {
 			r.Unpushed, r.PushError = time.Time{}, ""
 			return

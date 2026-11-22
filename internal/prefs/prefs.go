@@ -51,9 +51,11 @@ type Record struct {
 	On string `json:"on,omitempty"`
 	// OnAt is when capture was switched on.
 	OnAt time.Time `json:"on_at,omitzero"`
-	// Captured is when the last capture ran, and Summary what it found.
+	// Captured is when the last capture ran, and Summary what it found,
+	// Parts that in parts (Report.Says).
 	Captured time.Time `json:"captured,omitzero"`
 	Summary  string    `json:"summary,omitempty"`
+	Parts    []string  `json:"parts,omitempty"`
 	// Errors counts what the last capture couldn't save.
 	Errors int `json:"errors,omitempty"`
 	// Unpushed is since when commits have waited to be pushed, and

@@ -242,7 +242,6 @@ func TestPrettyShowsWhatACheckPrintedWhole(t *testing.T) {
 			t.Errorf("printed\n%s\nwant a row\n%s", out.String(), want)
 		}
 	}
-
 }
 
 // Status's details under a row are what's acted on, so they wrap, never

@@ -308,8 +308,9 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 		files, what = []string{config.File, config.Shared, r.machine}, config.File+", "+config.Shared+"/ and "+r.machine+"/"
 	}
 	res := syncing{repo: repo, files: files, what: what}.commit(ctx, fmt.Sprintf("kit setup (%s): this Mac as it is", r.machine))
-	if res.State != check.Failed {
-		res.Summary = fmt.Sprintf("%d declared · %s", total, res.Summary)
+	if says := slices.Clone(res.Says()); res.State != check.Failed && len(says) > 0 {
+		says[0] = fmt.Sprintf("%d declared · %s", total, says[0])
+		res = res.Saying(says...)
 	}
 	res.Counts, res.Items = counts, append(res.Items, items...)
 	return res
