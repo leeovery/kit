@@ -11,14 +11,15 @@ import (
 )
 
 // replaces reports whether kit replaces an app of version have with its
-// cask's, of version: only an older copy of the same major version, as
-// both say in dotted numbers. Another major version may be kept on purpose
-// (an older line, an LTS), a newer copy or a prerelease is ahead of the
-// cask, and latest says nothing, so --force, which deletes the app, waits
-// for none of them.
+// cask's, of version: only the same version, of another build, or an older
+// copy of the same major version, as both say in dotted numbers. Another
+// major version may be kept on purpose (an older line, an LTS), a newer
+// copy or a prerelease is ahead of the cask, and latest says nothing, so
+// --force, which deletes the app, and a package's installer, which runs
+// over it, wait for none of them.
 func replaces(have, version string) bool {
 	mine, theirs := dotted(have), dotted(version)
-	return mine != nil && theirs != nil && mine[0] == theirs[0] && compare(mine, theirs) < 0
+	return sameVersion(have, version) || mine != nil && theirs != nil && mine[0] == theirs[0] && compare(mine, theirs) < 0
 }
 
 // notReplacing is why the app at at, of version have, isn't replaced with
@@ -39,8 +40,8 @@ func notReplacing(at, have, version string) error {
 }
 
 // whyNot is what kit can say of an app of version have, beside its cask's,
-// of version, once it isn't an older copy of the same major version: ""
-// when it's an older major version, as the versions show.
+// of version, once kit won't replace it (replaces): "" when it's an older
+// major version, as the versions show.
 func whyNot(have, version string) string {
 	mine, theirs := dotted(have), dotted(version)
 	switch {
@@ -50,7 +51,7 @@ func whyNot(have, version string) string {
 		return "the cask's is a prerelease"
 	case version == "latest":
 		return "latest says no version"
-	case mine == nil || theirs == nil || compare(mine, theirs) == 0:
+	case mine == nil || theirs == nil:
 		return "can't tell whether this one is"
 	case compare(mine, theirs) > 0:
 		return "this one is newer"
@@ -93,6 +94,15 @@ var leadingNumbers = regexp.MustCompile(`^\d+(?:\.\d+)*`)
 // none when it starts otherwise.
 func leading(version string) []int {
 	return dotted(leadingNumbers.FindString(version))
+}
+
+// major is version's major version, the number it starts with, as 153 of
+// 153.7.0esr: -1 when it starts otherwise.
+func major(version string) int {
+	if numbers := leading(version); numbers != nil {
+		return numbers[0]
+	}
+	return -1
 }
 
 // dottedNumbers is a version of numbers alone, as in 4.6.8.

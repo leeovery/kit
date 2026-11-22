@@ -52,6 +52,9 @@ type catalogued struct {
 	// whatever its version.
 	version     string
 	autoUpdates bool
+	// pkg is whether it installs its app through a package alone, whose
+	// installer runs over whatever app is there, adopting none.
+	pkg bool
 	// disabled is whether Homebrew has disabled it, or will on a date set.
 	disabled bool
 	// unvetted is whether it moves into place anything kit can't tell to
@@ -225,27 +228,61 @@ func (c *catalogue) match(at, id, have string) (string, bool) {
 
 // takesOver reports whether installing the cask takes over its app of
 // version have: Homebrew adopts it whatever its version when the app
-// updates itself, else when it's the cask's version, and kit replaces it
-// when it's an older copy of the same major version (replaces).
+// updates itself, but a package's installer runs over it; else kit
+// replaces it when it's the cask's version or an older copy of the same
+// major version (replaces).
 func (k catalogued) takesOver(have string) bool {
-	return k.autoUpdates || sameVersion(have, k.version) || replaces(have, k.version)
+	return k.autoUpdates && !k.pkg || replaces(have, k.version)
 }
 
-// pick is the one of tokens that's the app's, of version have. The one
-// without @ in its token, when it updates itself: Homebrew adopts the app
-// whatever its version, deleting nothing, and an app that updates itself
-// runs ahead of the catalogue, as Dropbox does of dropbox, at
-// dropbox@beta's version. Else the one whose version shares the most of
-// have (nearness), as blender@lts for Blender's LTS, a tie going to the one
-// without @. None when more than one is without @.
+// pick is the one of tokens that's the app's, of version have. With one
+// without @ in its token that updates itself, that one, or the line of it
+// at the app's major version (lineOf). Else the one whose version shares
+// the most of have (nearness), as blender@lts for Blender's LTS, a tie
+// going to the one without @. None when more than one is without @.
 func (c *catalogue) pick(tokens []string, have string) (string, bool) {
 	plain := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return strings.Contains(token, "@") })
 	switch {
 	case len(plain) > 1:
 		return "", false
 	case len(plain) == 1 && c.casks[plain[0]].autoUpdates:
+		return c.lineOf(plain[0], tokens, have)
+	}
+	nearest := c.nearest(tokens, have)
+	switch {
+	case len(nearest) == 1:
+		return nearest[0], true
+	case len(plain) == 1 && slices.Contains(nearest, plain[0]):
 		return plain[0], true
 	}
+	return "", false
+}
+
+// lineOf is the one of tokens that's the app's, of version have, beside
+// plain, the one without @, which updates itself: plain when the app's
+// major version is plain's or later, as an app that updates itself runs
+// ahead of the catalogue (Dropbox of dropbox), or when either can't be
+// told. An app of an earlier major version is the line's at that major
+// version (bbedit@14, firefox@esr), the nearest if more than one is, but
+// never a channel's (channels); and none's, with no such line: plain
+// would declare a major version the person may have no licence for.
+func (c *catalogue) lineOf(plain string, tokens []string, have string) (string, bool) {
+	mine, theirs := major(have), major(c.casks[plain].version)
+	if mine < 0 || theirs < 0 || mine >= theirs {
+		return plain, true
+	}
+	lines := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool {
+		return token == plain || channel(token) || major(c.casks[token].version) != mine
+	})
+	if nearest := c.nearest(lines, have); len(nearest) == 1 {
+		return nearest[0], true
+	}
+	return "", false
+}
+
+// nearest are those of tokens whose versions share the most of have
+// (nearness).
+func (c *catalogue) nearest(tokens []string, have string) []string {
 	var nearest []string
 	most := -1
 	for _, token := range tokens {
@@ -256,13 +293,22 @@ func (c *catalogue) pick(tokens []string, have string) (string, bool) {
 			nearest = append(nearest, token)
 		}
 	}
-	switch {
-	case len(nearest) == 1:
-		return nearest[0], true
-	case len(plain) == 1 && slices.Contains(nearest, plain[0]):
-		return plain[0], true
-	}
-	return "", false
+	return nearest
+}
+
+// channels are the suffixes of tokens, after @, naming a channel of
+// prereleases rather than a line of versions, as Homebrew's catalogue has
+// them: a line is numbered (bbedit@14), or an LTS, an ESR, a legacy one.
+var channels = []string{
+	"alpha", "beta", "canary", "daily", "dev", "devel", "developer", "developer-edition", "development", "eap",
+	"early-adopter", "experimental", "insiders", "latest", "next", "nightly", "playtest", "prerelease", "pretest",
+	"preview", "ptb", "rc", "snapshot", "staging", "tachyon", "test", "tip", "twilight",
+}
+
+// channel reports whether token is a channel's (channels).
+func channel(token string) bool {
+	_, suffix, _ := strings.Cut(token, "@")
+	return slices.Contains(channels, suffix)
 }
 
 // states reports whether the cask states the bundle id id, in any case.
@@ -276,7 +322,7 @@ func (k catalogued) states(id string) bool {
 // cask that states none; it's the App Store's; or it can't be looked at.
 func (k catalogued) there(dir, home string) (bool, error) {
 	var found bool
-	for _, at := range k.apps {
+	for _, at := range k.placed(dir) {
 		path := filepath.Join(dir, at)
 		_, err := os.Lstat(path)
 		switch {
@@ -295,11 +341,27 @@ func (k catalogued) there(dir, home string) (bool, error) {
 	return found, nil
 }
 
+// placed are where the cask's apps go in dir, the Applications folder,
+// from it: where it says it puts them; for a package that says nowhere,
+// each app at dir's top whose bundle id it quits, as match finds one.
+func (k catalogued) placed(dir string) []string {
+	if len(k.apps) > 0 || len(k.quits) == 0 {
+		return k.apps
+	}
+	var found []string
+	for _, app := range apps.In(dir) {
+		if slices.Contains(k.quits, strings.ToLower(apps.BundleID(app))) {
+			found = append(found, filepath.Base(app))
+		}
+	}
+	return found
+}
+
 // replaceable is why the cask's apps already in dir aren't replaced by its
-// own: nil when each is an older copy of the same major version
-// (notReplacing).
+// own: nil when each is the cask's version, or an older copy of the same
+// major version (notReplacing).
 func (k catalogued) replaceable(dir string) error {
-	for _, at := range k.apps {
+	for _, at := range k.placed(dir) {
 		path := filepath.Join(dir, at)
 		if _, err := os.Lstat(path); err != nil {
 			continue
@@ -348,7 +410,7 @@ func caskOf(artifacts []json.RawMessage) catalogued {
 			}
 		}
 	}
-	if pkg && !app {
+	if k.pkg = pkg && !app; k.pkg {
 		for _, path := range deleted {
 			if at, ok := inApplications(path); ok && filepath.Ext(at) == ".app" && !strings.Contains(at, "*") {
 				k.apps = append(k.apps, at)

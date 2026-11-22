@@ -145,10 +145,10 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 		{"in a folder in the casks' folder", "Utilities", "Google Chrome.app", "com.google.Chrome", "", ""},
 		{"a fork, under its name", "", "Spaceman.app", "dev.fork.Spaceman", "", ""},
 		{"the cask's own, under its name", "", "Spaceman.app", "dev.original.Spaceman", "", "spaceman"},
-		{"its package's, as its uninstall deletes it, by the id it signals", "", "zoom.us.app", "us.zoom.xos", "", "zoom"},
-		{"a package's that says nowhere, by the id it quits", "", "Monitor.app", "com.example.monitor", "", "monitor"},
-		{"a package's that says nowhere, in a folder in the casks' folder", "Utilities", "Monitor.app", "com.example.monitor", "", ""},
-		{"a package's that says nowhere, in another folder apps are in", "other", "Monitor.app", "com.example.monitor", "", ""},
+		{"its package's, as its uninstall deletes it, by the id it signals", "", "zoom.us.app", "us.zoom.xos", "7.2.5", "zoom"},
+		{"a package's that says nowhere, by the id it quits", "", "Monitor.app", "com.example.monitor", "2.7.0", "monitor"},
+		{"a package's that says nowhere, in a folder in the casks' folder", "Utilities", "Monitor.app", "com.example.monitor", "2.7.0", ""},
+		{"a package's that says nowhere, in another folder apps are in", "other", "Monitor.app", "com.example.monitor", "2.7.0", ""},
 		{"by an id two packages that say nowhere quit", "", "Relay.app", "com.example.relay", "4.1", ""},
 		{"the plain token over one with @", "", "1Password.app", "com.1password.1password", "", "1password"},
 		{"a cask stating no id", "", "Quiet Tool.app", "com.example.quiet", "2.1", ""},
@@ -182,14 +182,18 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 }
 
 // Of the casks putting an app where it is, the one without @ is the one
-// when it updates itself, whatever the app's version: Homebrew adopts the
-// app as it is, deleting nothing, and the app runs ahead of the catalogue.
+// when it updates itself and the app's major version is its or later, as
+// an app that updates itself runs ahead of the catalogue: Homebrew adopts
+// it as it is. An app of an earlier major version is the line's at that
+// major version, never a channel's, and none's with no such line, as the
+// one without @ would declare a major version the person may not own.
 // Else the one whose version shares the most of the app's numbers it
 // starts with is: the app's own version most of all, its build after a
 // comma aside, as an older line's, an LTS or a beta; a tie going to the
 // one without @. And only if installing it would take the app over: the
 // app is its version, or an older copy of the same major version, which
-// kit replaces. Never one whose install would refuse it.
+// kit replaces, as a package's installer runs over it whether it updates
+// itself or not. Never one whose install would refuse it.
 func TestTheCaskOfTheAppsVersion(t *testing.T) {
 	for _, tt := range []struct {
 		name, app, id, version, want string
@@ -210,11 +214,24 @@ func TestTheCaskOfTheAppsVersion(t *testing.T) {
 		{"a prerelease", "Example Editor.app", "com.example.editor", "3.2-rc1", ""},
 		{"no version", "Example Editor.app", "com.example.editor", "", ""},
 		{"a cask of the latest", "Nightly.app", "com.example.nightly", "1.0", ""},
-		{"a cask that updates itself, another major version", "Google Chrome.app", "com.google.Chrome", "120.0", "google-chrome"},
 		{"a cask that updates itself, a newer copy", "Spaceman.app", "dev.original.Spaceman", "1.1", "spaceman"},
+		{"a cask that updates itself, a later major version", "Google Chrome.app", "com.google.Chrome", "159.0.8200.12", "google-chrome"},
 		{"a cask that updates itself, at the beta's version", "Dropbox.app", "com.getdropbox.dropbox", "281.3.5397", "dropbox"},
 		{"a cask that updates itself, a beta build", "1Password.app", "com.1password.1password", "8.12.48-24.BETA", "1password"},
-		{"a cask that updates itself, another major version than either", "1Password.app", "com.1password.1password", "7.9", "1password"},
+		{"a cask that updates itself, a version that doesn't start with numbers", "Spaceman.app", "dev.original.Spaceman", "Build 7", "spaceman"},
+		{"a cask that updates itself, an earlier major version, its line's", "BBEdit.app", "com.barebones.bbedit", "14.6.2", "bbedit@14"},
+		{"a cask that updates itself, an earlier major version of no line", "BBEdit.app", "com.barebones.bbedit", "15.0.3", ""},
+		{"a cask that updates itself, an ESR", "Firefox.app", "org.mozilla.firefox", "153.7.0", "firefox@esr"},
+		{"a cask that updates itself, its own major version beside an ESR and a beta", "Firefox.app", "org.mozilla.firefox", "160.0", "firefox"},
+		{"a cask that updates itself, ahead of the beta", "Firefox.app", "org.mozilla.firefox", "162.0", "firefox"},
+		{"a cask that updates itself, an earlier major version, never a channel's", "Little Snitch.app", "at.obdev.littlesnitch", "5.9.1", "little-snitch@5"},
+		{"a cask that updates itself, an earlier major version, with only a channel's", "1Password.app", "com.1password.1password", "7.9", ""},
+		{"a cask that updates itself, an earlier major version of no line at all", "Google Chrome.app", "com.google.Chrome", "120.0", ""},
+		{"a package that updates itself, an older copy", "Monitor.app", "com.example.monitor", "2.7.0", "monitor"},
+		{"a package that updates itself, its version, as a prefix of it", "Monitor.app", "com.example.monitor", "2.8.1", "monitor"},
+		{"a package that updates itself, its version", "Monitor.app", "com.example.monitor", "2.8.1.316", "monitor"},
+		{"a package that updates itself, a newer copy", "Monitor.app", "com.example.monitor", "2.9", ""},
+		{"a package that updates itself, an earlier major version", "Monitor.app", "com.example.monitor", "1.9", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)

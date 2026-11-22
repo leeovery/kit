@@ -51,26 +51,26 @@ func TestCasksInstallAdopting(t *testing.T) {
 // Store's copy, whatever its id. The rest go in all the same.
 func TestAnAppAlreadyThere(t *testing.T) {
 	for _, tt := range []struct {
-		name, cask, app, id string
-		store               bool
-		refused             string
+		name, cask, app, id, version string
+		store                        bool
+		refused                      string
 	}{
-		{"the cask's own", "google-chrome", "Google Chrome.app", "com.google.Chrome", false, ""},
-		{"its id in another case", "google-chrome", "Google Chrome.app", "COM.GOOGLE.CHROME", false, ""},
-		{"by a token the cask had", "chrome", "Google Chrome.app", "com.google.Chrome", false, ""},
-		{"in Homebrew's own tap", "homebrew/cask/google-chrome", "Google Chrome.app", "com.google.Chrome", false, ""},
-		{"its package's", "zoom", "zoom.us.app", "us.zoom.xos", false, ""},
-		{"by its target", "browser", "Browser.app", "com.example.browser", false, ""},
-		{"a fork under its name", "spaceman", "Spaceman.app", "dev.fork.Spaceman", false, "Spaceman.app is already in %s and isn't the cask's (dev.fork.Spaceman)"},
-		{"another app by a token the cask had", "chrome", "Google Chrome.app", "com.example.fork", false, "Google Chrome.app is already in %s and isn't the cask's (com.example.fork)"},
-		{"not its package's", "zoom", "zoom.us.app", "com.example.other", false, "zoom.us.app is already in %s and isn't the cask's (com.example.other)"},
-		{"a cask stating no id", "quiet-tool", "Quiet Tool.app", "com.example.quiet", false, "Quiet Tool.app is already in %s and isn't the cask's (com.example.quiet)"},
-		{"an app with no bundle id", "google-chrome", "Google Chrome.app", "", false, "Google Chrome.app is already in %s and isn't the cask's (no bundle id)"},
-		{"the App Store's, its id the cask's", "google-chrome", "Google Chrome.app", "com.google.Chrome", true, "Google Chrome.app is already in %s and is the App Store's"},
+		{"the cask's own", "google-chrome", "Google Chrome.app", "com.google.Chrome", "", false, ""},
+		{"its id in another case", "google-chrome", "Google Chrome.app", "COM.GOOGLE.CHROME", "", false, ""},
+		{"by a token the cask had", "chrome", "Google Chrome.app", "com.google.Chrome", "", false, ""},
+		{"in Homebrew's own tap", "homebrew/cask/google-chrome", "Google Chrome.app", "com.google.Chrome", "", false, ""},
+		{"its package's", "zoom", "zoom.us.app", "us.zoom.xos", "7.2.5", false, ""},
+		{"by its target", "browser", "Browser.app", "com.example.browser", "", false, ""},
+		{"a fork under its name", "spaceman", "Spaceman.app", "dev.fork.Spaceman", "", false, "Spaceman.app is already in %s and isn't the cask's (dev.fork.Spaceman)"},
+		{"another app by a token the cask had", "chrome", "Google Chrome.app", "com.example.fork", "", false, "Google Chrome.app is already in %s and isn't the cask's (com.example.fork)"},
+		{"not its package's", "zoom", "zoom.us.app", "com.example.other", "", false, "zoom.us.app is already in %s and isn't the cask's (com.example.other)"},
+		{"a cask stating no id", "quiet-tool", "Quiet Tool.app", "com.example.quiet", "", false, "Quiet Tool.app is already in %s and isn't the cask's (com.example.quiet)"},
+		{"an app with no bundle id", "google-chrome", "Google Chrome.app", "", "", false, "Google Chrome.app is already in %s and isn't the cask's (no bundle id)"},
+		{"the App Store's, its id the cask's", "google-chrome", "Google Chrome.app", "com.google.Chrome", "", true, "Google Chrome.app is already in %s and is the App Store's"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake, apps, casks := adopting(t)
-			app := installApp(t, apps, tt.app, tt.id)
+			app := installVersion(t, apps, tt.app, tt.id, tt.version)
 			if tt.store {
 				writeFile(t, filepath.Join(app, "Contents", "_MASReceipt", "receipt"), "")
 			}
@@ -234,11 +234,11 @@ func TestReplacingLeavesWhatElseFailed(t *testing.T) {
 	}
 }
 
-// An app Homebrew didn't adopt is replaced only when it's an older copy of
-// the same major version than the cask's, as both say in dotted numbers,
-// its build after a comma aside, as --force deletes it. Any other, another
-// major version, a newer copy, a prerelease, the same version of another
-// build, an app of no version or one kit can't read, or a cask of the
+// An app Homebrew didn't adopt is replaced only when it's the cask's
+// version, of another build, or an older copy of the same major version,
+// as both say in dotted numbers, its build after a comma aside, as --force
+// deletes it. Any other, another major version, a newer copy, a
+// prerelease, an app of no version or one kit can't read, or a cask of the
 // latest, is left, and the cask fails saying why.
 func TestAnAppIsReplacedOnlyAsAnOlderCopyOfItsMajorVersion(t *testing.T) {
 	const why = ": kit replaces only an older copy of the same major version"
@@ -251,7 +251,8 @@ func TestAnAppIsReplacedOnlyAsAnOlderCopyOfItsMajorVersion(t *testing.T) {
 		{"an older major version", "charles", "Charles.app", "com.xk72.Charles", "4.6.8", "Charles.app is 4.6.8 and the cask's is 5.2.3" + why},
 		{"a newer copy", "example-editor", "Example Editor.app", "com.example.editor", "3.3", "Example Editor.app is 3.3 and the cask's is 3.2" + why + ", and this one is newer"},
 		{"a newer major version", "godot@3", "Godot.app", "org.godotengine.godot", "4.7.2", "Godot.app is 4.7.2 and the cask's is 3.6.3" + why + ", and this one is newer"},
-		{"the same version, another build", "example-editor", "Example Editor.app", "com.example.editor", "3.2", "Example Editor.app is 3.2 and the cask's is 3.2" + why + ", and can't tell whether this one is"},
+		{"the same version, another build", "example-editor", "Example Editor.app", "com.example.editor", "3.2", ""},
+		{"the same version as written, another build", "keepassxc@beta", "KeePassXC.app", "org.keepassxc.keepassxc", "2.8.0-beta1", ""},
 		{"a prerelease", "example-editor", "Example Editor.app", "com.example.editor", "3.2-rc1", "Example Editor.app is 3.2-rc1 and the cask's is 3.2" + why + ", and this one is a prerelease"},
 		{"the cask's a prerelease", "keepassxc@beta", "KeePassXC.app", "org.keepassxc.keepassxc", "2.7.10", "KeePassXC.app is 2.7.10 and the cask's is 2.8.0-beta1" + why + ", and the cask's is a prerelease"},
 		{"a cask of the latest", "nightly", "Nightly.app", "com.example.nightly", "1.0", "Nightly.app is 1.0 and the cask's is latest" + why + ", and latest says no version"},
@@ -268,6 +269,50 @@ func TestAnAppIsReplacedOnlyAsAnOlderCopyOfItsMajorVersion(t *testing.T) {
 			want := []string{"brew install --cask --adopt " + tt.cask}
 			if tt.refused == "" {
 				want = append(want, "brew install --cask --force "+tt.cask)
+			}
+			if got := installs(fake); !slices.Equal(got, want) {
+				t.Errorf("ran %q, want %q", got, want)
+			}
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != tt.refused {
+				t.Errorf("Install() = %q, want %q", got, tt.refused)
+			}
+		})
+	}
+}
+
+// A package's installer runs over its app there, whether it updates itself
+// or not, so a package goes in only as kit would replace the app: its
+// version, or an older copy of the same major version, the app found where
+// the package says it puts it, or, saying nowhere, at the folder's top by
+// the bundle id it quits. Otherwise it isn't installed, saying why.
+func TestAPackageInstallsOverItsAppOnlyAsKitWouldReplaceIt(t *testing.T) {
+	const why = ": kit replaces only an older copy of the same major version"
+	for _, tt := range []struct {
+		name, cask, app, id, version, refused string
+	}{
+		{"no app there", "monitor", "", "", "", ""},
+		{"an older copy", "monitor", "Monitor.app", "com.example.monitor", "2.7.0", ""},
+		{"its version", "monitor", "Monitor.app", "com.example.monitor", "2.8.1.316", ""},
+		{"a newer copy", "monitor", "Monitor.app", "com.example.monitor", "2.9", "Monitor.app is 2.9 and the cask's is 2.8.1.316" + why + ", and this one is newer"},
+		{"an earlier major version", "monitor", "Monitor.app", "com.example.monitor", "1.9", "Monitor.app is 1.9 and the cask's is 2.8.1.316" + why},
+		{"another app under its name", "monitor", "Monitor.app", "com.example.other", "3.0", ""},
+		{"where it says it puts it, a newer copy", "zoom", "zoom.us.app", "us.zoom.xos", "8.0.1", "zoom.us.app is 8.0.1 and the cask's is 7.2.5.90525" + why + ", and this one is newer"},
+		{"where it says it puts it, an older copy", "zoom", "zoom.us.app", "us.zoom.xos", "7.1.0", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake, apps, casks := adopting(t)
+			if tt.app != "" {
+				installVersion(t, apps, tt.app, tt.id, tt.version)
+			}
+			fake.On("brew", "install", "--cask", "--adopt", tt.cask)
+			err := casks.Install(t.Context(), []string{tt.cask})
+			var want []string
+			if tt.refused == "" {
+				want = []string{"brew install --cask --adopt " + tt.cask}
 			}
 			if got := installs(fake); !slices.Equal(got, want) {
 				t.Errorf("ran %q, want %q", got, want)

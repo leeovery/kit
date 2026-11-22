@@ -110,7 +110,7 @@
       ]
     },
     "monitor": {
-      "auto_updates": true, "names": ["Monitor"], "tap_string": "homebrew/cask", "version": "2.0",
+      "auto_updates": true, "names": ["Monitor"], "tap_string": "homebrew/cask", "version": "2.8.1.316",
       "raw_artifacts": [
         [":uninstall", {":launchctl": "com.example.monitor.helper", ":quit": "com.example.monitor", ":pkgutil": "com.example.monitor"}],
         [":pkg", ["Monitor.pkg"]],
@@ -207,6 +207,63 @@
       "raw_artifacts": [
         [":uninstall", {":launchctl": ["com.dropbox.DropboxMacUpdate.agent"], ":quit": "com.getdropbox.dropbox"}],
         [":app", ["Dropbox.app"]]
+      ]
+    },
+    "bbedit": {
+      "auto_updates": true, "names": ["BBEdit"], "tap_string": "homebrew/cask", "version": "16.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.barebones.bbedit"}],
+        [":app", ["BBEdit.app"]],
+        [":binary", ["$APPDIR/BBEdit.app/Contents/Helpers/bbedit_tool"], {":target": "bbedit"}]
+      ]
+    },
+    "bbedit@14": {
+      "auto_updates": true, "names": ["BBEdit"], "tap_string": "homebrew/cask", "version": "14.6.9",
+      "raw_artifacts": [
+        [":app", ["BBEdit.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.barebones.bbedit.plist"]}]
+      ]
+    },
+    "firefox": {
+      "auto_updates": true, "names": ["Mozilla Firefox"], "tap_string": "homebrew/cask", "version": "160.0.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.mozilla.firefox"}],
+        [":app", ["Firefox.app"]]
+      ]
+    },
+    "firefox@esr": {
+      "auto_updates": true, "names": ["Mozilla Firefox ESR"], "tap_string": "homebrew/cask", "version": "153.7.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.mozilla.firefox"}],
+        [":app", ["Firefox.app"]]
+      ]
+    },
+    "firefox@beta": {
+      "auto_updates": true, "names": ["Mozilla Firefox Beta"], "tap_string": "homebrew/cask", "version": "161.0b5",
+      "raw_artifacts": [
+        [":app", ["Firefox.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/org.mozilla.firefox.plist"]}]
+      ]
+    },
+    "little-snitch": {
+      "auto_updates": true, "names": ["Little Snitch"], "tap_string": "homebrew/cask", "version": "6.5",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "at.obdev.littlesnitch"}],
+        [":app", ["Little Snitch.app"]]
+      ]
+    },
+    "little-snitch@5": {
+      "auto_updates": true, "names": ["Little Snitch"], "tap_string": "homebrew/cask", "version": "5.8",
+      "raw_artifacts": [
+        [":app", ["Little Snitch.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/at.obdev.littlesnitch.plist"]}]
+      ]
+    },
+    "little-snitch@nightly": {
+      "auto_updates": true, "names": ["Little Snitch Nightly"], "tap_string": "homebrew/cask", "version": "5.9,7309",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "at.obdev.littlesnitch"}],
+        [":app", ["Little Snitch.app"]]
       ]
     },
     "nightly": {
