@@ -150,10 +150,12 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		all = append(all, snoozeChoice)
 	case kind.ByHand:
 		// Never removed: kit deletes nothing it didn't install.
-		takes := ", and " + d.tool + " takes the app over"
+		// One set of words for both: "everywhere", after the label, tells
+		// them apart, and longer words would run past a terminal's width.
+		takes := does(takingOver, "declare it; "+d.tool+" takes it over, updating an older copy")
 		all = []choice{
-			{action: adopt, words: does(takingOver, "declare it for this Mac"+takes)},
-			{action: adopt, words: does(takingOver, "declare it for every Mac"+takes), shared: true},
+			{action: adopt, words: takes},
+			{action: adopt, words: takes, shared: true},
 			{action: leave, words: kind.Words{Label: "Leave by hand", Does: "leave it installed by hand, and stop asking", Doing: "leaving"}},
 			snoozeChoice,
 		}

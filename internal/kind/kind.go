@@ -1393,24 +1393,39 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	return compare(ctx, k, declared).res
 }
 
-// Taken reports, of a name, whether declared declares it, or k has it
-// installed, by any name it goes by, as Drift goes by them. While k's
+// Taking is how a kind's declared list, and what it has installed, take
+// names, by any name each thing goes by, as Drift goes by them.
+type Taking struct {
+	key        func(string) string
+	taken, off map[string]bool
+}
+
+// Taken reports whether name is declared, on or off, or installed.
+func (t Taking) Taken(name string) bool { return t.taken[t.key(name)] }
+
+// Off reports whether name is declared off.
+func (t Taking) Off(name string) bool { return t.off[t.key(name)] }
+
+// Taken is how declared, and what k has installed, take names. While k's
 // program isn't installed, it goes by the names declared alone; it fails
 // when what's installed couldn't be looked at.
-func Taken(ctx context.Context, k Kind, declared config.List) (func(name string) bool, error) {
+func Taken(ctx context.Context, k Kind, declared config.List) (Taking, error) {
 	c := compare(ctx, k, declared)
-	key := keyOf(k)
+	t := Taking{key: keyOf(k), taken: c.taken, off: c.off}
 	switch {
 	case c.looked:
-		return func(name string) bool { return c.taken[key(name)] }, nil
+		return t, nil
 	case c.res.State == check.Failed:
-		return nil, errors.New(c.res.Reason)
+		return Taking{}, errors.New(c.res.Reason)
 	}
-	names := make(map[string]bool, len(declared.Entries))
+	t.taken, t.off = make(map[string]bool, len(declared.Entries)), make(map[string]bool)
 	for _, e := range declared.Entries {
-		names[key(e.Name)] = true
+		t.taken[t.key(e.Name)] = true
+		if e.Off {
+			t.off[t.key(e.Name)] = true
+		}
 	}
-	return func(name string) bool { return names[key(name)] }, nil
+	return t, nil
 }
 
 // Drift is what Compare finds, with, for a kind that can take over things
@@ -1494,6 +1509,8 @@ type comparison struct {
 	res    check.Result
 	looked bool
 	taken  map[string]bool
+	// off are the names, as k matches them, the things declared off go by.
+	off map[string]bool
 }
 
 // compare is Compare, with what it went by (comparison).
@@ -1518,15 +1535,19 @@ func compare(ctx context.Context, k Kind, declared config.List) comparison {
 	// matched are the installed things declared, by name, and installedDeclared
 	// the declared names of those declared on.
 	matched := make(map[string]bool)
-	var unmatched, installedDeclared []string
+	var unmatched, offUnmatched, installedDeclared []string
 	off := 0
+	offNames := make(map[string]bool)
 	for _, e := range declared.Entries {
 		it, ok := byKey[key(e.Name)]
 		switch {
 		case e.Off:
 			off++
+			offNames[key(e.Name)] = true
 			if ok {
 				matched[it.Name] = true
+			} else {
+				offUnmatched = append(offUnmatched, e.Name)
 			}
 		case ok:
 			matched[it.Name] = true
@@ -1537,10 +1558,18 @@ func compare(ctx context.Context, k Kind, declared config.List) comparison {
 	}
 	var missing, unknown []string
 	fullNames := make(map[string]string)
-	if len(unmatched) > 0 {
-		resolved, err := Resolve(ctx, k, unmatched)
+	if len(unmatched)+len(offUnmatched) > 0 {
+		resolved, err := Resolve(ctx, k, slices.Concat(unmatched, offUnmatched))
 		if err != nil {
 			return comparison{res: failed(k, err)}
+		}
+		for _, name := range offUnmatched {
+			if full, known := resolved[name]; known {
+				offNames[key(full)] = true
+				if it := byKey[key(full)]; it.Name != "" {
+					matched[it.Name] = true
+				}
+			}
 		}
 		for _, name := range unmatched {
 			full, known := resolved[name]
@@ -1645,9 +1674,12 @@ func compare(ctx context.Context, k Kind, declared config.List) comparison {
 	if len(res.Items) > 0 {
 		res.State = check.Attention
 	}
-	taken := make(map[string]bool, len(declared.Entries)+len(fullNames)+len(installed))
+	taken := make(map[string]bool, len(declared.Entries)+len(fullNames)+len(installed)+len(offNames))
 	for _, e := range declared.Entries {
 		taken[key(e.Name)] = true
+	}
+	for name := range offNames {
+		taken[name] = true
 	}
 	for _, full := range fullNames {
 		taken[key(full)] = true
@@ -1655,7 +1687,7 @@ func compare(ctx context.Context, k Kind, declared config.List) comparison {
 	for _, it := range installed {
 		taken[key(it.Name)] = true
 	}
-	return comparison{res: res, looked: true, taken: taken}
+	return comparison{res: res, looked: true, taken: taken, off: offNames}
 }
 
 // failed is how k's step stands when looking at what's installed failed

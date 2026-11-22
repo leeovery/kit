@@ -23,7 +23,7 @@
 
   [0;1;38;2;255;79;154mINSTALLED BY HAND[0m  [0;38;2;156;163;180m2[0m
   [0;38;2;156;163;180m–[0m [0;38;2;156;163;180mSketchpad[0m
-  [0;38;2;156;163;180m–[0m [0;38;2;156;163;180mTally[0m
+  [0;38;2;156;163;180m–[0m [0;38;2;156;163;180mTally[0m  [0;38;2;244;244;246mkit cask add tally[0;38;2;156;163;180m takes it over later[0m
   [0;38;2;156;163;180m→ if kit sets this Mac up again, they're yours to install, through Homebrew or[0m
     [0;38;2;156;163;180mthe App Store, if they're there[0m
 
