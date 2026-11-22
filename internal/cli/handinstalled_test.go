@@ -39,7 +39,7 @@ func handWorld(t *testing.T) *world {
 	w.installApp(t, "Editor", "com.example.Editor")
 	w.installApp(t, "Kubius", "com.example.kubius")
 	w.write(t, driftFile, `{"first_seen": {"brew:ffmpeg": "2025-12-31T00:00:00Z", "brew:node@20": "2025-12-31T00:00:00Z", "cask:firefox": "2025-12-31T00:00:00Z"}}`)
-	w.write(t, handFile, `{"first_seen": {"cask:editor": "2025-12-31T00:00:00Z"}}`)
+	w.write(t, handFile, `{"first_seen": {"cask:com.example.editor": "2025-12-31T00:00:00Z"}}`)
 	w.fake.On("brew", "info", "--json=v2", "--cask", "editor").Prints(`{"formulae": [], "casks": [{"token": "editor", "full_token": "editor", "old_tokens": [], "artifacts": [{"app": ["Editor.app"]}]}]}`)
 	return w
 }
@@ -205,8 +205,8 @@ func TestReconcileLeavesAnAppByHand(t *testing.T) {
 }
 
 // Left by hand, by its id, nothing's committed; once kit cask add has
-// declared its cask, adopting the app, it's drift no more, and kit forgets
-// it was left.
+// declared its cask, adopting the app, it's drift no more, nor installed by
+// hand, and kit forgets it was left.
 func TestALeaveByHandEndsOnceItsCaskIsDeclared(t *testing.T) {
 	w := handWorld(t)
 	out, _, code := w.run(t, "reconcile", "cask:editor", "--leave")
@@ -220,6 +220,7 @@ func TestALeaveByHandEndsOnceItsCaskIsDeclared(t *testing.T) {
 	f.On("brew", "update", "--quiet")
 	f.On("brew", "install", "--cask", "--adopt", "editor").Does(func() {
 		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\neditor\n")
+		w.caskroom(t, map[string]string{"editor": "Editor.app"})
 	})
 	w.expectSync(t, []string{"laptop/declarations"}, "kit cask add editor (laptop)")
 	if out, errOut, code := w.run(t, "cask", "add", "editor"); code != 0 {
@@ -249,8 +250,67 @@ func TestALeaveOutlastsItsCasksRename(t *testing.T) {
 			t.Errorf("kit status printed\n%s exit %d; want it to hold %q", out, code, want)
 		}
 	}
-	if got := w.read(t, handFile); !strings.Contains(got, `"com.example.editor": "2026-01-02T03:04:05Z"`) || strings.Contains(got, `"cask:editor"`) {
-		t.Errorf("by-hand.json = %s, want the editor's app still left, the old cask's id forgotten", got)
+	if got := w.read(t, handFile); !strings.Contains(got, `"com.example.editor": "2026-01-02T03:04:05Z"`) || !strings.Contains(got, `"cask:com.example.editor": "2025-12-31T00:00:00Z"`) {
+		t.Errorf("by-hand.json = %s, want the editor's app still left, first seen as before", got)
+	}
+}
+
+// installAppOf installs, in the world, the app name, with bundle id id, of
+// version.
+func (w *world) installAppOf(t *testing.T, name, id, version string) {
+	t.Helper()
+	w.write(t, filepath.Join("Applications", name+".app", "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>`+id+`</string>
+	<key>CFBundleShortVersionString</key>
+	<string>`+version+`</string>
+</dict>
+</plist>
+`)
+}
+
+// A leave lasts while its app is installed by hand, a cask's or not: an
+// app that updates itself past its cask, which then takes it over no more,
+// is left still when the cask catches up, first seen as before.
+func TestALeaveOutlastsTheAppOutgrowingItsCask(t *testing.T) {
+	w := handWorld(t)
+	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
+{"casks": {"editor": {"version": "2.0", "raw_artifacts": [[":uninstall", {":quit": "com.example.Editor"}], [":app", ["Editor.app"]]]}}}`)
+	w.installAppOf(t, "Editor", "com.example.Editor", "2.0")
+	if _, errOut, code := w.run(t, "reconcile", "cask:editor", "--leave"); code != 0 {
+		t.Fatalf("kit reconcile --leave exit %d: %s", code, errOut)
+	}
+	want := `"cask:com.example.editor": "2025-12-31T00:00:00Z"` + "\n  },\n" + `  "left": {` + "\n" + `    "com.example.editor": "2026-01-02T03:04:05Z"`
+	for _, step := range []struct{ version, status string }{
+		{"3.0", "cask extra firefox\nhost-key"},
+		{"2.0", "cask by-hand:left editor (installed by hand as Editor.app)\n"},
+	} {
+		w.installAppOf(t, "Editor", "com.example.Editor", step.version)
+		if out, _, code := w.run(t, "status"); !strings.Contains(out, step.status) || code != 0 {
+			t.Errorf("the editor at %s, kit status printed\n%s exit %d; want it to hold %q", step.version, out, code, step.status)
+		}
+		if got := w.read(t, handFile); !strings.Contains(got, want) {
+			t.Errorf("the editor at %s, by-hand.json = %s; want it left, first seen as before", step.version, got)
+		}
+	}
+}
+
+// A leave ends once its app is gone from the Mac, with what's known of it.
+func TestALeaveEndsWithItsApp(t *testing.T) {
+	w := handWorld(t)
+	if _, errOut, code := w.run(t, "reconcile", "cask:editor", "--leave"); code != 0 {
+		t.Fatalf("kit reconcile --leave exit %d: %s", code, errOut)
+	}
+	if err := os.RemoveAll(filepath.Join(w.home, "Applications", "Editor.app")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := w.run(t, "status"); code != 0 {
+		t.Fatalf("kit status exit %d", code)
+	}
+	if got := w.read(t, handFile); strings.Contains(got, "editor") {
+		t.Errorf("by-hand.json = %s, want the editor forgotten, gone", got)
 	}
 }
 
@@ -270,7 +330,7 @@ func TestALeftAppAnsweredAgain(t *testing.T) {
 	}
 	leave()
 	out, _, code := w.run(t, "reconcile", "cask:editor", "--snooze")
-	if got := w.read(t, handFile); !strings.Contains(out, "cask:editor ok snoozed till 9 Jan\n") || code != 0 || strings.Contains(got, "com.example.editor") || !strings.Contains(got, `"snoozed_until": {`+"\n"+`    "cask:editor"`) {
+	if got := w.read(t, handFile); !strings.Contains(out, "cask:editor ok snoozed till 9 Jan\n") || code != 0 || strings.Contains(got, `"left"`) || !strings.Contains(got, `"snoozed_until": {`+"\n"+`    "cask:com.example.editor"`) {
 		t.Errorf("kit reconcile --snooze printed\n%s exit %d, by-hand.json %s; want the editor snoozed, left no more", out, code, got)
 	}
 	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "cask by-hand:snoozed editor (installed by hand as Editor.app)\n") {
@@ -284,7 +344,7 @@ func TestALeftAppAnsweredAgain(t *testing.T) {
 	})
 	w.expectSync(t, []string{"laptop/declarations"}, "kit reconcile (laptop): adopt cask:editor")
 	out, _, code = w.run(t, "reconcile", "cask:editor", "--adopt")
-	if got := w.read(t, handFile); !strings.Contains(out, "cask:editor ok installed; declared in laptop\n") || code != 0 || strings.Contains(got, "com.example.editor") {
+	if got := w.read(t, handFile); !strings.Contains(out, "cask:editor ok installed; declared in laptop\n") || code != 0 || strings.Contains(got, `"left"`) {
 		t.Errorf("kit reconcile --adopt printed\n%s exit %d, by-hand.json %s; want the editor adopted, left no more", out, code, got)
 	}
 }
@@ -305,7 +365,7 @@ func TestALeaveOutlastsALookThatFails(t *testing.T) {
 	if _, _, code := w.run(t, "status"); code != 0 {
 		t.Fatalf("kit status exit %d", code)
 	}
-	if got := w.read(t, handFile); !strings.Contains(got, `"com.example.editor": "2026-01-02T03:04:05Z"`) || !strings.Contains(got, `"cask:editor": "2025-12-31T00:00:00Z"`) {
+	if got := w.read(t, handFile); !strings.Contains(got, `"com.example.editor": "2026-01-02T03:04:05Z"`) || !strings.Contains(got, `"cask:com.example.editor": "2025-12-31T00:00:00Z"`) {
 		t.Errorf("by-hand.json = %s, want the editor still left, first seen as before", got)
 	}
 	if got := w.read(t, driftFile); strings.Contains(got, "cask:firefox") || !strings.Contains(got, "brew:ffmpeg") {

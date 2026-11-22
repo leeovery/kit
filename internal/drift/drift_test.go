@@ -62,15 +62,16 @@ func TestQuieten(t *testing.T) {
 }
 
 // A thing installed by hand whose app is left so is quiet for good,
-// however old, its snooze ended or never seen, its id in any case; it's
-// first seen, and snoozed, as the Hand remembers it. A leave holds for
+// however old, its snooze ended or never seen, its id in any case, as its
+// cask renamed; it's first seen, and snoozed, as the Hand remembers its
+// app, not as the record remembers its id. A leave holds for
 // nothing but a thing installed by hand, as the cask installed since.
 func TestQuietenWhatsLeftByHand(t *testing.T) {
 	r := drift.Record{
-		FirstSeen: map[string]time.Time{"cask:since": ago(30 * 24 * time.Hour), "cask:snoozed": ago(time.Hour)},
+		FirstSeen: map[string]time.Time{"cask:renamed-since": ago(30 * 24 * time.Hour), "cask:renamed-snoozed": ago(time.Hour)},
 		Hand: drift.Hand{
-			FirstSeen: map[string]time.Time{"cask:left": ago(30 * 24 * time.Hour), "cask:woke": ago(30 * 24 * time.Hour), "cask:snoozed": ago(30 * 24 * time.Hour), "cask:old": ago(30 * 24 * time.Hour)},
-			Snoozed:   map[string]time.Time{"cask:woke": ago(time.Minute), "cask:snoozed": now.Add(time.Hour)},
+			FirstSeen: map[string]time.Time{"cask:com.example.left": ago(30 * 24 * time.Hour), "cask:com.example.woke": ago(30 * 24 * time.Hour), "cask:com.example.snoozed": ago(30 * 24 * time.Hour), "cask:com.example.old": ago(30 * 24 * time.Hour)},
+			Snoozed:   map[string]time.Time{"cask:com.example.woke": ago(time.Minute), "cask:com.example.snoozed": now.Add(time.Hour)},
 			Left:      map[string]time.Time{"com.example.left": ago(20 * 24 * time.Hour), "com.example.woke": ago(20 * 24 * time.Hour), "com.example.unseen": ago(time.Hour), "com.example.since": ago(20 * 24 * time.Hour)},
 		},
 	}
@@ -81,12 +82,12 @@ func TestQuietenWhatsLeftByHand(t *testing.T) {
 		{"left", kind.ByHand, "com.example.left", drift.Left, ago(30 * 24 * time.Hour)},
 		{"woke", kind.ByHand, "com.example.woke", drift.Left, ago(30 * 24 * time.Hour)},
 		{"unseen", kind.ByHand, "COM.Example.Unseen", drift.Left, time.Time{}},
-		{"snoozed", kind.ByHand, "com.example.snoozed", drift.Snoozed, ago(30 * 24 * time.Hour)},
+		{"snoozed", kind.ByHand, "com.example.Snoozed", drift.Snoozed, ago(30 * 24 * time.Hour)},
 		{"old", kind.ByHand, "com.example.old", "", ago(30 * 24 * time.Hour)},
 		{"since", kind.Extra, "com.example.since", "", ago(30 * 24 * time.Hour)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			res := drift.Quieten(check.Result{State: check.Attention, Items: []check.Item{{ID: "cask:" + tt.name, Name: tt.name, State: tt.state, App: tt.app}}}, r, now, nil)
+			res := drift.Quieten(check.Result{State: check.Attention, Items: []check.Item{{ID: "cask:renamed-" + tt.name, Name: tt.name, State: tt.state, App: tt.app}}}, r, now, nil)
 			if it := res.Items[0]; it.Quiet != tt.quiet || !it.Since.Equal(tt.since) {
 				t.Errorf("item = %+v, want quiet %q since %v", it, tt.quiet, tt.since)
 			}
@@ -136,32 +137,41 @@ func TestSeen(t *testing.T) {
 	}
 }
 
-// The Hand keeps the items installed by hand, and the apps left so, while
-// a kind's look at them goes well: those it no longer reports go, and the
-// leaves of apps no longer among them, as one reported otherwise, as the
-// cask installed since, whatever its cask's name now. A look that failed,
-// or none, as of a kind that can take over nothing, keeps all it had of
-// them, but the snoozes ended; and the record goes on pruning the rest of
-// the kind, as an extra cask uninstalled.
+// The Hand keeps what it has of each app installed by hand while a kind's
+// look sees it installed by hand, whether or not the kind can take it over
+// now, as it's updated itself past its cask, and whatever its cask's name:
+// first seen, snoozed and left. Once the look no longer sees the app, as
+// it's gone or a cask's now, that goes. A look that failed, or none, as of
+// a kind that can take over nothing, keeps all it had, but the snoozes
+// ended; and the record goes on pruning the rest of the kind, as an extra
+// cask uninstalled.
 func TestSeenByHand(t *testing.T) {
 	editor := check.Item{ID: "cask:editor-renamed", Name: "editor-renamed", State: kind.ByHand, App: "com.example.Editor"}
 	hand := func() drift.Hand {
 		return drift.Hand{
-			FirstSeen: map[string]time.Time{"cask:editor": ago(48 * time.Hour), "cask:gone": ago(48 * time.Hour)},
-			Snoozed:   map[string]time.Time{"cask:gone": now.Add(time.Hour), "cask:ended": ago(time.Second)},
-			Left:      map[string]time.Time{"com.example.editor": ago(time.Hour), "com.example.gone": ago(time.Hour), "com.example.since": ago(time.Hour)},
+			FirstSeen: map[string]time.Time{"cask:com.example.editor": ago(48 * time.Hour), "cask:com.example.ahead": ago(48 * time.Hour), "cask:com.example.gone": ago(48 * time.Hour)},
+			Snoozed:   map[string]time.Time{"cask:com.example.ahead": now.Add(time.Hour), "cask:com.example.gone": now.Add(time.Hour), "cask:com.example.ended": ago(time.Second)},
+			Left:      map[string]time.Time{"com.example.editor": ago(time.Hour), "com.example.ahead": ago(time.Hour), "com.example.gone": ago(time.Hour), "com.example.since": ago(time.Hour)},
 		}
 	}
 	h := hand()
 	h.Seen(map[string]check.Result{
-		"cask": {State: check.Attention, HandLook: &check.Look{}, Items: []check.Item{editor, {ID: "cask:since", Name: "since", State: kind.Extra}}},
+		"cask": {State: check.Attention, HandLook: &check.Look{Apps: []string{"com.example.Editor", "com.example.Ahead", "com.example.kubius"}}, Items: []check.Item{editor, {ID: "cask:since", Name: "since", State: kind.Extra}}},
 		"brew": {State: check.Attention, Items: []check.Item{extra("ffmpeg")}},
 	}, now)
-	if want := map[string]time.Time{"cask:editor-renamed": now}; fmt.Sprint(h.FirstSeen) != fmt.Sprint(want) {
-		t.Errorf("FirstSeen = %v, want %v of it, the rest gone", h.FirstSeen, want)
+	if want := map[string]time.Time{"cask:com.example.editor": ago(48 * time.Hour), "cask:com.example.ahead": ago(48 * time.Hour)}; fmt.Sprint(h.FirstSeen) != fmt.Sprint(want) {
+		t.Errorf("FirstSeen = %v, want %v, the app gone forgotten", h.FirstSeen, want)
 	}
-	if want := map[string]time.Time{"com.example.editor": ago(time.Hour)}; fmt.Sprint(h.Left) != fmt.Sprint(want) || len(h.Snoozed) != 0 {
-		t.Errorf("Hand = %+v, want the editor's leave alone, the snoozes gone", h)
+	if want := map[string]time.Time{"com.example.editor": ago(time.Hour), "com.example.ahead": ago(time.Hour)}; fmt.Sprint(h.Left) != fmt.Sprint(want) {
+		t.Errorf("Left = %v, want %v: the apps still installed by hand left, matched or not", h.Left, want)
+	}
+	if want := map[string]time.Time{"cask:com.example.ahead": now.Add(time.Hour)}; fmt.Sprint(h.Snoozed) != fmt.Sprint(want) {
+		t.Errorf("Snoozed = %v, want %v", h.Snoozed, want)
+	}
+	h = drift.Hand{}
+	h.Seen(map[string]check.Result{"cask": {State: check.Attention, HandLook: &check.Look{Apps: []string{"com.example.Editor"}}, Items: []check.Item{editor}}}, now)
+	if want := map[string]time.Time{"cask:com.example.editor": now}; fmt.Sprint(h.FirstSeen) != fmt.Sprint(want) {
+		t.Errorf("FirstSeen = %v, want %v: the editor first seen now", h.FirstSeen, want)
 	}
 
 	for name, res := range map[string]check.Result{
@@ -171,7 +181,7 @@ func TestSeenByHand(t *testing.T) {
 	} {
 		h := hand()
 		h.Seen(map[string]check.Result{"cask": res}, now)
-		if len(h.FirstSeen) != 2 || len(h.Left) != 3 || len(h.Snoozed) != 1 {
+		if len(h.FirstSeen) != 3 || len(h.Left) != 4 || len(h.Snoozed) != 2 {
 			t.Errorf("after %s, Hand = %+v; want all it had kept, but the ended snooze", name, h)
 		}
 	}
@@ -180,7 +190,7 @@ func TestSeenByHand(t *testing.T) {
 		"cask": {State: check.OK, HandLook: &check.Look{Unseen: "kit can't tell which apps are installed by hand: no catalogue"}},
 		"mas":  {State: check.OK, HandLook: &check.Look{}},
 	}, now)
-	if len(h.Left) != 3 || len(h.FirstSeen) != 2 {
+	if len(h.Left) != 4 || len(h.FirstSeen) != 3 {
 		t.Errorf("one kind's look failing, another's well, Hand = %+v; want every leave kept, the casks' items", h)
 	}
 	r := drift.Record{FirstSeen: map[string]time.Time{"cask:firefox": ago(48 * time.Hour), "cask:zoom": ago(48 * time.Hour)}}
@@ -257,8 +267,8 @@ func TestForget(t *testing.T) {
 		t.Errorf("Forget(npm, go) left %+v, want npm's gone and the rest kept", rec)
 	}
 	h := drift.Hand{
-		FirstSeen: map[string]time.Time{"cask:editor": ago(time.Hour), "brew:x": ago(time.Hour)},
-		Snoozed:   map[string]time.Time{"cask:editor": now.Add(time.Hour)},
+		FirstSeen: map[string]time.Time{"cask:com.example.editor": ago(time.Hour), "brew:x": ago(time.Hour)},
+		Snoozed:   map[string]time.Time{"cask:com.example.editor": now.Add(time.Hour)},
 		Left:      map[string]time.Time{"com.example.editor": ago(time.Hour)},
 	}
 	h.Forget([]string{"cask"})
@@ -298,18 +308,18 @@ func TestLeave(t *testing.T) {
 	}
 }
 
-// Snoozing a thing installed by hand snoozes it in the Hand, and anything
-// else in the record.
+// Snoozing a thing installed by hand snoozes its app in the Hand, and
+// anything else in the record.
 func TestSnooze(t *testing.T) {
 	state := t.TempDir()
-	if err := drift.Snooze(state, check.Item{ID: "cask:editor", State: kind.ByHand}, now); err != nil {
+	if err := drift.Snooze(state, check.Item{ID: "cask:editor", State: kind.ByHand, App: "com.example.Editor"}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := drift.Snooze(state, extra("ffmpeg"), now); err != nil {
 		t.Fatal(err)
 	}
 	r, err := drift.Load(state)
-	if err != nil || !r.Hand.Snoozed["cask:editor"].Equal(now.Add(drift.SnoozeFor)) || !r.Snoozed["brew:ffmpeg"].Equal(now.Add(drift.SnoozeFor)) || len(r.Snoozed) != 1 {
+	if err != nil || !r.Hand.Snoozed["cask:com.example.editor"].Equal(now.Add(drift.SnoozeFor)) || !r.Snoozed["brew:ffmpeg"].Equal(now.Add(drift.SnoozeFor)) || len(r.Snoozed) != 1 {
 		t.Errorf("Load() = %+v, %v; want the editor snoozed in the Hand, ffmpeg in the record", r, err)
 	}
 }

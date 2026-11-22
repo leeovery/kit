@@ -1315,10 +1315,12 @@ the snoozes (7 days) and the temporary installs (quiet for 7 days) in
 `$XDG_STATE_HOME/kit/drift.json`, written whole under a lock; it forgets an item once a check
 of its kind no longer finds it. What's installed by hand is kept beside it, in `by-hand.json`,
 which a kit from before it, writing drift.json whole, never touches: when each such item was
-first seen and its snooze, by item, and the apps left by hand (quiet for good, this Mac's
-alone), by bundle id, so a cask renamed in the catalogue keeps its app's leave. Those are
-forgotten only on a look at what's installed by hand that went well, a leave once its app is
-installed by hand no more or answered otherwise; a look that fails keeps them, the rest of its
+first seen and its snooze, by kind and app, and the apps left by hand (quiet for good, this
+Mac's alone), by bundle id, so a cask renamed in the catalogue keeps its app's leave, as does
+an app that updates itself past its cask, matching it no more for a while. Those are
+forgotten only on a look at what's installed by hand that went well, once the app is
+installed by hand no more, gone or a cask's, the look seeing every app installed by hand,
+matched or not; a leave too once answered otherwise; a look that fails keeps them, the rest of its
 kind forgotten as ever, and status says, greyed, that kit can't tell which apps are installed
 by hand, and why. What applying was given to act on and left still to act on, as
 a formula whose install ended well but isn't there, is never quiet, whatever its age: its step

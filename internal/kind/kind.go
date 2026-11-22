@@ -136,8 +136,17 @@ type Misser interface {
 // folder: kit reconcile adopts one, declaring it, its install taking it
 // over, or leaves it by hand.
 type Adoptable interface {
-	// InstalledByHand finds them, by name.
-	InstalledByHand(ctx context.Context) (map[string]HandInstalled, error)
+	// InstalledByHand finds them.
+	InstalledByHand(ctx context.Context) (HandFound, error)
+}
+
+// HandFound is what an Adoptable kind finds installed by hand: the things
+// it could take over, by name; and the bundle ids of every app installed
+// by hand, those or not, as one it can't take over for now, as it's
+// updated itself past what its kind installs.
+type HandFound struct {
+	Things map[string]HandInstalled
+	Apps   []string
 }
 
 // HandInstalled is a thing installed by hand that an Adoptable kind could
@@ -1442,13 +1451,13 @@ func Taken(ctx context.Context, k Kind, declared config.List) (Taking, error) {
 // result's HandLook; when they can't be told, there are none, and the
 // HandLook, and the run's log, say why.
 func Drift(ctx context.Context, k Kind, declared config.List) check.Result {
-	return drift(ctx, k, declared, func(ctx context.Context, a Adoptable) (map[string]HandInstalled, error) {
+	return drift(ctx, k, declared, func(ctx context.Context, a Adoptable) (HandFound, error) {
 		return a.InstalledByHand(ctx)
 	})
 }
 
 // drift is Drift, looking at what's installed by hand with look.
-func drift(ctx context.Context, k Kind, declared config.List, look func(context.Context, Adoptable) (map[string]HandInstalled, error)) check.Result {
+func drift(ctx context.Context, k Kind, declared config.List, look func(context.Context, Adoptable) (HandFound, error)) check.Result {
 	c := compare(ctx, k, declared)
 	res := c.res
 	a, ok := k.(Adoptable)
@@ -1462,10 +1471,10 @@ func drift(ctx context.Context, k Kind, declared config.List, look func(context.
 		res.HandLook = &check.Look{Unseen: unseen}
 		return res
 	}
-	res.HandLook = &check.Look{}
+	res.HandLook = &check.Look{Apps: found.Apps}
 	key := keyOf(k)
 	var names []string
-	for name := range found {
+	for name := range found.Things {
 		if !c.taken[key(name)] {
 			names = append(names, name)
 		}
@@ -1475,7 +1484,7 @@ func drift(ctx context.Context, k Kind, declared config.List, look func(context.
 	}
 	byHand := items(k, names, ByHand, "")
 	for i, it := range byHand {
-		byHand[i].Detail, byHand[i].App = "installed by hand as "+found[it.Name].As, found[it.Name].App
+		byHand[i].Detail, byHand[i].App = "installed by hand as "+found.Things[it.Name].As, found.Things[it.Name].App
 	}
 	res.Items, res.State = append(res.Items, byHand...), check.Attention
 	res.Counts["by_hand"] = len(byHand)
@@ -1489,12 +1498,12 @@ func drift(ctx context.Context, k Kind, declared config.List, look func(context.
 type handLook struct {
 	mu           sync.Mutex
 	held, looked bool
-	found        map[string]HandInstalled
+	found        HandFound
 	err          error
 }
 
 // look is a's look at what's installed by hand, as h holds it.
-func (h *handLook) look(ctx context.Context, a Adoptable) (map[string]HandInstalled, error) {
+func (h *handLook) look(ctx context.Context, a Adoptable) (HandFound, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.held || !h.looked {

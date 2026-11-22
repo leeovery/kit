@@ -65,9 +65,12 @@ type Item struct {
 
 // Look is how a check's look went at something besides what it checks:
 // Unseen says why it couldn't look, when it couldn't, so what it doesn't
-// report of that may be there still.
+// report of that may be there still. Apps are the bundle ids of every app
+// installed by hand it saw, reported or not: what's remembered of each
+// lasts while it's there. They're kit's own, never in its JSON.
 type Look struct {
-	Unseen string `json:"unseen,omitempty"`
+	Unseen string   `json:"unseen,omitempty"`
+	Apps   []string `json:"-"`
 }
 
 // ToDo is something for the person at the Mac to do, as applying raises it

@@ -69,7 +69,7 @@ func Update(stateDir string, change func(*Record)) error {
 // when it was first seen: installed by hand, its app left so, for good;
 // new, first seen under Grace ago, or now; snoozed, until a time still
 // ahead; temporary, installed so under TemporaryFor ago. What's installed
-// by hand goes by r's Hand.
+// by hand goes by r's Hand, by its app.
 // A step whose items are all quiet stands ok. One whose check couldn't look,
 // as macOS hasn't let it (check.Result's Refused), isn't drift, so is never
 // quiet. Nor is an item applying the step was given to act on, by id in
@@ -82,11 +82,11 @@ func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) c
 	items := slices.Clone(res.Items)
 	loud, left := false, false
 	for i, it := range items {
-		firstSeen, snoozed := r.FirstSeen, r.Snoozed
+		firstSeen, snoozed, key := r.FirstSeen, r.Snoozed, it.ID
 		if it.State == kind.ByHand {
-			firstSeen, snoozed = r.Hand.FirstSeen, r.Hand.Snoozed
+			firstSeen, snoozed, key = r.Hand.FirstSeen, r.Hand.Snoozed, handKey(it)
 		}
-		since, seen := firstSeen[it.ID]
+		since, seen := firstSeen[key]
 		if seen {
 			items[i].Since = since
 		}
@@ -95,7 +95,7 @@ func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) c
 			loud, left = true, true
 		case it.State == kind.ByHand && r.Hand.left(it.App):
 			items[i].Quiet = Left
-		case snoozed[it.ID].After(now):
+		case snoozed[key].After(now):
 			items[i].Quiet = Snoozed
 		case !r.Temporary[it.ID].IsZero() && now.Sub(r.Temporary[it.ID]) < TemporaryFor:
 			items[i].Quiet = Temporary
@@ -217,10 +217,11 @@ func (r *Record) Temporarily(id string, now time.Time) {
 }
 
 // Snooze quiets it until SnoozeFor from now, in the record in the state
-// directory its sort is kept in: the Hand's, for a thing installed by hand.
+// directory its sort is kept in: the Hand's, by its app, for a thing
+// installed by hand.
 func Snooze(stateDir string, it check.Item, now time.Time) error {
 	if it.State == kind.ByHand {
-		return UpdateHand(stateDir, func(h *Hand) { h.Snoozed = snoozed(h.Snoozed, it.ID, now) })
+		return UpdateHand(stateDir, func(h *Hand) { h.Snoozed = snoozed(h.Snoozed, handKey(it), now) })
 	}
 	return Update(stateDir, func(r *Record) { r.Snooze(it.ID, now) })
 }
@@ -233,9 +234,11 @@ const handFile = "by-hand.json"
 // could take over, in a file of its own, as a kit from before it, still
 // running hourly on a Mac mid-upgrade, writes the drift record back whole
 // without what it doesn't know: when each item was first seen and when its
-// snooze ends, by item id; and when each app was left installed by hand,
-// for good, by its bundle id, lower case, which outlasts the cask it's
-// matched with being renamed, or its kind not being looked after.
+// snooze ends, by its kind and app (handKey); and when each app was left
+// installed by hand, for good, by its bundle id, lower case. Going by the
+// app, each outlasts the cask it's matched with being renamed, or matching
+// it no more for a while, as the app updates itself past the cask; a leave
+// outlasts its kind not being looked after too.
 type Hand struct {
 	FirstSeen map[string]time.Time `json:"first_seen,omitempty"`
 	Snoozed   map[string]time.Time `json:"snoozed_until,omitempty"`
@@ -251,12 +254,14 @@ func UpdateHand(stateDir string, change func(*Hand)) error {
 // Seen notes, in h, each item installed by hand of results (by kind)
 // first seen now that wasn't seen before. For each kind whose look at
 // what's installed by hand went well (check.Result's HandLook), it forgets
-// the items no longer reported; a kind that made no look, or whose look
-// failed, keeps what it had. Once a look was made and none failed, the
-// leaves of apps no longer installed by hand go, as an app may be any
-// kind's. Snoozes that have ended go.
+// the items whose app is no longer installed by hand at all, as it's gone,
+// or a cask's now; an app still installed by hand that its kind can't take
+// over for now keeps what it had, as does a kind that made no look, or
+// whose look failed. Once a look was made and none failed, the leaves of
+// apps no longer installed by hand go, as an app may be any kind's.
+// Snoozes that have ended go.
 func (h *Hand) Seen(results map[string]check.Result, now time.Time) {
-	present, apps := make(map[string]bool), make(map[string]bool)
+	present, there, apps := make(map[string]bool), make(map[string]bool), make(map[string]bool)
 	ran := make(map[string]bool)
 	failed := false
 	for kindName, res := range results {
@@ -268,19 +273,29 @@ func (h *Hand) Seen(results map[string]check.Result, now time.Time) {
 			continue
 		}
 		ran[kindName] = true
+		for _, app := range res.HandLook.Apps {
+			there[kindName+":"+appKey(app)], apps[appKey(app)] = true, true
+		}
 		for _, it := range res.Items {
 			if it.State == kind.ByHand {
-				present[it.ID], apps[appKey(it.App)] = true, true
+				key := handKey(it)
+				present[key], there[key], apps[appKey(it.App)] = true, true, true
 			}
 		}
 	}
 	h.FirstSeen = seen(h.FirstSeen, present, now)
-	gone := func(id string) bool { return ran[kindOf(id)] && !present[id] }
-	maps.DeleteFunc(h.FirstSeen, func(id string, _ time.Time) bool { return gone(id) })
-	maps.DeleteFunc(h.Snoozed, func(id string, until time.Time) bool { return gone(id) || !until.After(now) })
+	gone := func(key string) bool { return ran[kindOf(key)] && !there[key] }
+	maps.DeleteFunc(h.FirstSeen, func(key string, _ time.Time) bool { return gone(key) })
+	maps.DeleteFunc(h.Snoozed, func(key string, until time.Time) bool { return gone(key) || !until.After(now) })
 	if len(ran) > 0 && !failed {
 		maps.DeleteFunc(h.Left, func(app string, _ time.Time) bool { return !apps[app] })
 	}
+}
+
+// handKey is what the Hand keeps it by, a thing installed by hand: its
+// kind and its app's bundle id, lower case, as in cask:com.example.editor.
+func handKey(it check.Item) string {
+	return kindOf(it.ID) + ":" + appKey(it.App)
 }
 
 // Forget forgets the items of the kinds named, but the apps left by hand,

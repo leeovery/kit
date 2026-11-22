@@ -24,9 +24,12 @@ type ByHand struct {
 
 // HandApps are the apps installed by hand, and why which casks install
 // them couldn't be told, when it couldn't: they're there all the same.
+// Uncasked are, when only the apps a cask installs are asked for, the
+// rest, which no cask installs: pkgutil's asked nothing of them.
 type HandApps struct {
 	Apps      []ByHand
 	Unmatched error
+	Uncasked  []ByHand
 }
 
 // AppsByHand are the apps in the folders apps are installed in (AppDirs)
@@ -43,8 +46,8 @@ func (h *Homebrew) AppsByHand(ctx context.Context) (HandApps, error) {
 }
 
 // appsByHand is AppsByHand; with casksOnly, only the apps a cask installs,
-// the rest dropped before pkgutil's asked about any: none, when the
-// catalogue can't be read.
+// the rest put apart as Uncasked before pkgutil's asked about any: none,
+// when the catalogue can't be read.
 func (h *Homebrew) appsByHand(ctx context.Context, casksOnly bool) (HandApps, error) {
 	var found HandApps
 	for _, app := range apps.Installed(h.AppDirs) {
@@ -64,6 +67,11 @@ func (h *Homebrew) appsByHand(ctx context.Context, casksOnly bool) (HandApps, er
 		return found, nil
 	}
 	if found.Unmatched = h.matched(ctx, found.Apps); casksOnly {
+		for _, app := range found.Apps {
+			if app.Cask == "" {
+				found.Uncasked = append(found.Uncasked, app)
+			}
+		}
 		found.Apps = slices.DeleteFunc(found.Apps, func(app ByHand) bool { return app.Cask == "" })
 	}
 	if len(found.Apps) == 0 || len(casked.Receipts) == 0 {
@@ -94,23 +102,29 @@ func (h *Homebrew) matched(ctx context.Context, hand []ByHand) error {
 
 // InstalledByHand finds the apps installed by hand that a cask installs
 // (AppsByHand), by the cask's token, each as its app's name, as in
-// Example.app, and its bundle id: none, and why, when which casks install
-// them couldn't be told, as without brew on kit's PATH.
-func (c casks) InstalledByHand(ctx context.Context) (map[string]kind.HandInstalled, error) {
+// Example.app, and its bundle id; with the bundle ids of every app
+// installed by hand, a cask's or not: none, and why, when which casks
+// install them couldn't be told, as without brew on kit's PATH.
+func (c casks) InstalledByHand(ctx context.Context) (kind.HandFound, error) {
 	if !runner.Has(c.run, "brew") {
-		return nil, fmt.Errorf("brew isn't on kit's PATH: %w", runner.ErrNotFound)
+		return kind.HandFound{}, fmt.Errorf("brew isn't on kit's PATH: %w", runner.ErrNotFound)
 	}
 	hand, err := c.appsByHand(ctx, true)
 	if err == nil {
 		err = hand.Unmatched
 	}
 	if err != nil {
-		return nil, err
+		return kind.HandFound{}, err
 	}
-	found := map[string]kind.HandInstalled{}
+	found := kind.HandFound{Things: map[string]kind.HandInstalled{}}
 	for _, app := range hand.Apps {
-		if _, had := found[app.Cask]; !had {
-			found[app.Cask] = kind.HandInstalled{As: filepath.Base(app.Path), App: app.ID}
+		if _, had := found.Things[app.Cask]; !had {
+			found.Things[app.Cask] = kind.HandInstalled{As: filepath.Base(app.Path), App: app.ID}
+		}
+	}
+	for _, app := range slices.Concat(hand.Apps, hand.Uncasked) {
+		if app.ID != "" {
+			found.Apps = append(found.Apps, app.ID)
 		}
 	}
 	return found, nil

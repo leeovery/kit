@@ -586,28 +586,32 @@ func TestCompareWithoutTheProgram(t *testing.T) {
 // take over, counting how often it's asked.
 type adoptingKind struct {
 	*fakeKind
-	byHand map[string]kind.HandInstalled
+	byHand kind.HandFound
 	err    error
 	asked  int
 }
 
-func (a *adoptingKind) InstalledByHand(context.Context) (map[string]kind.HandInstalled, error) {
+func (a *adoptingKind) InstalledByHand(context.Context) (kind.HandFound, error) {
 	a.asked++
 	return a.byHand, a.err
 }
 
 // What a kind could take over, installed by hand, is drift of its own,
 // saying what it's on the Mac as, the app it is its App, with nothing
-// applying would do, the look said to have gone well: but not
+// applying would do, the look said to have gone well, with every app it
+// saw installed by hand: but not
 // what's declared, on or off, by any name it goes by, nor what's installed,
 // whose id it would share, which Compare alone says nothing of. It's
 // looked for once a check.
 func TestDriftFindsWhatsInstalledByHand(t *testing.T) {
 	k := &adoptingKind{
 		fakeKind: &fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}, {Name: "ffmpeg", Explicit: true}}, aliases: map[string]string{"old-editor": "editor"}},
-		byHand: map[string]kind.HandInstalled{
-			"spaceman": {As: "Spaceman.app", App: "dev.example.Spaceman"}, "editor": {As: "Editor.app"}, "zoom": {As: "zoom.us.app", App: "us.zoom.xos"},
-			"off": {As: "Off.app"}, "jq": {As: "jq.app"}, "ffmpeg": {As: "ffmpeg.app"},
+		byHand: kind.HandFound{
+			Things: map[string]kind.HandInstalled{
+				"spaceman": {As: "Spaceman.app", App: "dev.example.Spaceman"}, "editor": {As: "Editor.app"}, "zoom": {As: "zoom.us.app", App: "us.zoom.xos"},
+				"off": {As: "Off.app"}, "jq": {As: "jq.app"}, "ffmpeg": {As: "ffmpeg.app"},
+			},
+			Apps: []string{"dev.example.Spaceman", "us.zoom.xos", "com.example.kubius"},
 		},
 	}
 	list := declared("jq", "old-editor", "off")
@@ -619,7 +623,7 @@ func TestDriftFindsWhatsInstalledByHand(t *testing.T) {
 		{ID: "brew:spaceman", Name: "spaceman", State: kind.ByHand, Detail: "installed by hand as Spaceman.app", App: "dev.example.Spaceman"},
 		{ID: "brew:zoom", Name: "zoom", State: kind.ByHand, Detail: "installed by hand as zoom.us.app", App: "us.zoom.xos"},
 	}
-	if got.State != check.Attention || got.Counts["by_hand"] != 2 || got.HandLook == nil || got.HandLook.Unseen != "" || !slices.Equal(got.Items, want) {
+	if got.State != check.Attention || got.Counts["by_hand"] != 2 || got.HandLook == nil || got.HandLook.Unseen != "" || !slices.Equal(got.HandLook.Apps, k.byHand.Apps) || !slices.Equal(got.Items, want) {
 		t.Errorf("Drift() = %+v\nwant items %+v", got, want)
 	}
 	if k.asked != 1 {
@@ -628,7 +632,7 @@ func TestDriftFindsWhatsInstalledByHand(t *testing.T) {
 	if got := kind.Compare(t.Context(), k, list); slices.ContainsFunc(got.Items, func(it check.Item) bool { return it.State == kind.ByHand }) || k.asked != 1 {
 		t.Errorf("Compare() = %+v, asking %d times; want nothing of what's installed by hand", got, k.asked)
 	}
-	k.byHand = nil
+	k.byHand = kind.HandFound{}
 	if got := kind.Drift(t.Context(), k, declared("jq")); len(got.Items) != 1 || got.Counts["by_hand"] != 0 || got.HandLook == nil {
 		t.Errorf("Drift() with nothing by hand = %+v, want ffmpeg alone, the look made", got)
 	}
@@ -711,7 +715,7 @@ func TestTaken(t *testing.T) {
 // afresh at each check till applying begins, then going by the look made
 // before: installing what's declared changes nothing of it.
 func TestAKindsStepFindsWhatsInstalledByHand(t *testing.T) {
-	k := &adoptingKind{fakeKind: &fakeKind{}, byHand: map[string]kind.HandInstalled{"editor": {As: "Editor.app"}}}
+	k := &adoptingKind{fakeKind: &fakeKind{}, byHand: kind.HandFound{Things: map[string]kind.HandInstalled{"editor": {As: "Editor.app"}}}}
 	s := kind.Step(k, declared())
 	for range 2 {
 		if got := s.Check(t.Context()); got.State != check.Attention || len(got.Items) != 1 || got.Items[0].State != kind.ByHand {

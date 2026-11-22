@@ -366,6 +366,9 @@ func TestTheCasksAppsInstalledByHandAreDrift(t *testing.T) {
 	if got.State != check.Attention || !slices.Equal(got.Items, want) || got.HandLook == nil || got.HandLook.Unseen != "" {
 		t.Errorf("Drift() = %+v\nwant items %+v", got, want)
 	}
+	if want := []string{"com.1password.1password", "com.example.kubius", "com.google.Chrome", "dev.original.Spaceman"}; got.HandLook == nil || !slices.Equal(slices.Sorted(slices.Values(got.HandLook.Apps)), want) {
+		t.Errorf("its look saw %+v, want every app installed by hand: %q", got.HandLook, want)
+	}
 }
 
 // When which casks install the apps installed by hand can't be told,
@@ -421,7 +424,7 @@ func TestTheCasksAppsByHandWithoutBrew(t *testing.T) {
 	apps := t.TempDir()
 	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
 	found, err := withApps(runnertest.New(t), apps).Casks().(kind.Adoptable).InstalledByHand(t.Context())
-	if !errors.Is(err, runner.ErrNotFound) || found != nil {
+	if !errors.Is(err, runner.ErrNotFound) || found.Things != nil || found.Apps != nil {
 		t.Errorf("InstalledByHand() = %v, %v; want brew not found", found, err)
 	}
 }
@@ -443,8 +446,8 @@ func TestFindingAppsByHandRunsLittle(t *testing.T) {
 	catalogued(t, fake)
 	fake.On("pkgutil", "--pkgs").Prints("com.apple.pkg.Core\n")
 	found, err := withApps(fake, apps).Casks().(kind.Adoptable).InstalledByHand(t.Context())
-	if err != nil || len(found) != 0 {
-		t.Errorf("InstalledByHand() = %v, %v; want none", found, err)
+	if err != nil || len(found.Things) != 0 || !slices.Equal(found.Apps, []string{"com.example.kubius"}) {
+		t.Errorf("InstalledByHand() = %v, %v; want none to take over, the Kubius installed by hand", found, err)
 	}
 	if want := []string{"brew --caskroom", "brew --cache"}; !slices.Equal(fake.Calls(), want) {
 		t.Errorf("ran %q, want %q", fake.Calls(), want)
