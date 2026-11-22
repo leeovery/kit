@@ -195,6 +195,20 @@
         [":binary", ["$APPDIR/KeePassXC.app/Contents/MacOS/keepassxc-cli"]]
       ]
     },
+    "dropbox": {
+      "auto_updates": true, "names": ["Dropbox"], "tap_string": "homebrew/cask", "version": "280.4.5053",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["com.dropbox.DropboxMacUpdate.agent"], ":quit": "com.getdropbox.dropbox"}],
+        [":app", ["Dropbox.app"]]
+      ]
+    },
+    "dropbox@beta": {
+      "auto_updates": true, "names": ["Dropbox"], "tap_string": "homebrew/cask", "version": "281.3.5397",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["com.dropbox.DropboxMacUpdate.agent"], ":quit": "com.getdropbox.dropbox"}],
+        [":app", ["Dropbox.app"]]
+      ]
+    },
     "nightly": {
       "names": ["Nightly"], "tap_string": "homebrew/cask", "version": "latest",
       "raw_artifacts": [

@@ -181,35 +181,40 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 	}
 }
 
-// Of the casks putting an app where it is, the one whose version is the
-// app's is the one, if one alone is: an older line's, an LTS, a beta, its
-// build after a comma aside. Else one without @ is, as ever, but only if
-// installing it would take the app over: as it updates itself, which
-// Homebrew adopts whatever its version, or is the app's version, or kit
-// would replace the app, as an older copy of the same major version. Never
-// one whose install would refuse it.
+// Of the casks putting an app where it is, the one without @ is the one
+// when it updates itself, whatever the app's version: Homebrew adopts the
+// app as it is, deleting nothing, and the app runs ahead of the catalogue.
+// Else the one whose version shares the most of the app's numbers it
+// starts with is: the app's own version most of all, its build after a
+// comma aside, as an older line's, an LTS or a beta; a tie going to the
+// one without @. And only if installing it would take the app over: the
+// app is its version, or an older copy of the same major version, which
+// kit replaces. Never one whose install would refuse it.
 func TestTheCaskOfTheAppsVersion(t *testing.T) {
 	for _, tt := range []struct {
 		name, app, id, version, want string
 	}{
 		{"an older major version, its line's", "Charles.app", "com.xk72.Charles", "4.6.8", "charles@4"},
-		{"an older major version, of no line", "Charles.app", "com.xk72.Charles", "4.5.0", ""},
+		{"an older copy of an older line", "Charles.app", "com.xk72.Charles", "4.5.0", "charles@4"},
+		{"an older major version, of no line", "Charles.app", "com.xk72.Charles", "3.11.6", ""},
 		{"an older copy of the same major version", "Charles.app", "com.xk72.Charles", "5.1.0", "charles"},
 		{"an older line's, as 4.2 is 4.2.0", "Godot.app", "org.godotengine.godot", "3.6.3.0", "godot@3"},
 		{"the current version", "Godot.app", "org.godotengine.godot", "4.7.2", "godot"},
 		{"an LTS", "Blender.app", "org.blenderfoundation.blender", "5.2.4", "blender@lts"},
+		{"an older copy of an LTS, its major the current one's", "Blender.app", "org.blenderfoundation.blender", "5.2.3", "blender@lts"},
 		{"an older LTS", "Blender.app", "org.blenderfoundation.blender", "4.5.6", ""},
 		{"a beta", "KeePassXC.app", "org.keepassxc.keepassxc", "2.8.0-beta1", "keepassxc@beta"},
 		{"a version, its build aside", "KeePassXC.app", "org.keepassxc.keepassxc", "2.8.0", "keepassxc"},
+		{"as near the beta as the cask without @", "KeePassXC.app", "org.keepassxc.keepassxc", "2.7.10", "keepassxc"},
 		{"newer than the cask's", "Example Editor.app", "com.example.editor", "3.3", ""},
 		{"a prerelease", "Example Editor.app", "com.example.editor", "3.2-rc1", ""},
 		{"no version", "Example Editor.app", "com.example.editor", "", ""},
 		{"a cask of the latest", "Nightly.app", "com.example.nightly", "1.0", ""},
 		{"a cask that updates itself, another major version", "Google Chrome.app", "com.google.Chrome", "120.0", "google-chrome"},
 		{"a cask that updates itself, a newer copy", "Spaceman.app", "dev.original.Spaceman", "1.1", "spaceman"},
-		{"the beta's, by its version", "1Password.app", "com.1password.1password", "8.12.48-24.BETA", "1password@beta"},
-		{"the plain token's, by its version", "1Password.app", "com.1password.1password", "8.12.46", "1password"},
-		{"of neither's version, the plain token, updating itself", "1Password.app", "com.1password.1password", "7.9", "1password"},
+		{"a cask that updates itself, at the beta's version", "Dropbox.app", "com.getdropbox.dropbox", "281.3.5397", "dropbox"},
+		{"a cask that updates itself, a beta build", "1Password.app", "com.1password.1password", "8.12.48-24.BETA", "1password"},
+		{"a cask that updates itself, another major version than either", "1Password.app", "com.1password.1password", "7.9", "1password"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)

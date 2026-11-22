@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -66,6 +67,32 @@ var prerelease = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:alpha|beta|preview|pre|r
 func sameVersion(have, version string) bool {
 	mine, theirs := dotted(have), dotted(version)
 	return have != "" && (have == version || mine != nil && theirs != nil && compare(mine, theirs) == 0)
+}
+
+// nearness is how much of version, a cask's, an app's version have shares:
+// the most when it's the same version (sameVersion), else how many of the
+// numbers each starts with are the same, in order, as 5.2 of 5.2.3 and
+// 5.2.4.
+func nearness(have, version string) int {
+	if sameVersion(have, version) {
+		return math.MaxInt
+	}
+	mine, theirs := leading(have), leading(version)
+	n := 0
+	for n < len(mine) && n < len(theirs) && mine[n] == theirs[n] {
+		n++
+	}
+	return n
+}
+
+// leadingNumbers are the dotted numbers a version starts with, as 2.8.0 of
+// 2.8.0-beta1.
+var leadingNumbers = regexp.MustCompile(`^\d+(?:\.\d+)*`)
+
+// leading is the numbers version starts with, as [2 8 0] for 2.8.0-beta1:
+// none when it starts otherwise.
+func leading(version string) []int {
+	return dotted(leadingNumbers.FindString(version))
 }
 
 // dottedNumbers is a version of numbers alone, as in 4.6.8.

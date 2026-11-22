@@ -68,11 +68,13 @@ for this Mac: state `by-hand`, its `detail` saying what it's installed as,
 
 There's no `--remove`: kit deletes no app it didn't install. Adopting may
 replace the app, so ask the person before you adopt. Of the casks
-installing an app, the one whose version is the app's is offered
-(`blender@lts` for Blender's LTS), else the one without `@`, and never one
-whose install would leave the app and fail. Casks from taps, and apps whose
-cask can't be told, as Homebrew's catalogue can't be read, are never
-offered.
+installing an app, the one without `@` is offered if it updates itself,
+whatever the app's version; else the one whose version is nearest the
+app's, by the numbers it starts with (`blender@lts` for Blender's LTS), a
+tie going to the one without `@`; and never one whose install would leave
+the app and fail, as a cask of `latest` that doesn't update itself would.
+Casks from taps, and apps whose cask can't be told, as Homebrew's catalogue
+can't be read, are never offered.
 
 ## Private downloads
 

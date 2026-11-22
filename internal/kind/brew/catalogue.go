@@ -231,22 +231,38 @@ func (k catalogued) takesOver(have string) bool {
 	return k.autoUpdates || sameVersion(have, k.version) || replaces(have, k.version)
 }
 
-// pick is the one of tokens that's the app's, of version have: the one
-// whose version is have, if one alone is (blender@lts for Blender's LTS);
-// else the one without @ in its token, over those with (1password over
-// 1password@beta).
+// pick is the one of tokens that's the app's, of version have. The one
+// without @ in its token, when it updates itself: Homebrew adopts the app
+// whatever its version, deleting nothing, and an app that updates itself
+// runs ahead of the catalogue, as Dropbox does of dropbox, at
+// dropbox@beta's version. Else the one whose version shares the most of
+// have (nearness), as blender@lts for Blender's LTS, a tie going to the one
+// without @. None when more than one is without @.
 func (c *catalogue) pick(tokens []string, have string) (string, bool) {
-	same := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return !sameVersion(have, c.casks[token].version) })
-	if len(same) == 1 {
-		return same[0], true
-	}
-	if plain := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return strings.Contains(token, "@") }); len(plain) > 0 {
-		tokens = plain
-	}
-	if len(tokens) != 1 {
+	plain := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return strings.Contains(token, "@") })
+	switch {
+	case len(plain) > 1:
 		return "", false
+	case len(plain) == 1 && c.casks[plain[0]].autoUpdates:
+		return plain[0], true
 	}
-	return tokens[0], true
+	var nearest []string
+	most := -1
+	for _, token := range tokens {
+		switch n := nearness(have, c.casks[token].version); {
+		case n > most:
+			nearest, most = []string{token}, n
+		case n == most:
+			nearest = append(nearest, token)
+		}
+	}
+	switch {
+	case len(nearest) == 1:
+		return nearest[0], true
+	case len(plain) == 1 && slices.Contains(nearest, plain[0]):
+		return plain[0], true
+	}
+	return "", false
 }
 
 // states reports whether the cask states the bundle id id, in any case.
