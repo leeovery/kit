@@ -106,25 +106,24 @@ func (a *app) keptSettings(r *run, kindName string) (func(context.Context, func(
 		}
 		added := slices.DeleteFunc(p.Apps(), func(id string) bool { return slices.Contains(before, id) })
 		report, err := p.RestoreKept(ctx, added)
-		res.Summary += keptSaid(report, err)
-		return res
+		return res.Adding(keptSaid(report, err))
 	}, nil
 }
 
 // keptSaid is what became of the settings kept for an app just installed,
-// as report, or err, says, after a semicolon: "" when none were kept.
+// as report, or err, says: "" when none were kept.
 func keptSaid(report prefs.RestoreReport, err error) string {
 	switch {
 	case err != nil:
-		return "; its saved settings weren't restored: " + err.Error()
+		return "its saved settings weren't restored: " + err.Error()
 	case len(report.Failed) > 0:
-		return "; its saved settings didn't come back: " + report.Failed[slices.Sorted(maps.Keys(report.Failed))[0]]
+		return "its saved settings didn't come back: " + report.Failed[slices.Sorted(maps.Keys(report.Failed))[0]]
 	case len(report.ToOpen) > 0:
-		return "; its saved settings come back once it's been opened and quit"
+		return "its saved settings come back once it's been opened and quit"
 	case len(report.Waiting) > 0:
-		return "; its saved settings come back once it's quit"
+		return "its saved settings come back once it's quit"
 	case len(report.Restored) > 0:
-		return "; its saved settings restored"
+		return "its saved settings restored"
 	}
 	return ""
 }
@@ -269,7 +268,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 		verb = installs.Done
 	}
 	if len(p.mine) > 0 {
-		return check.Result{State: check.OK, Summary: verb + "; declared already, in " + p.mine[0].Scope}
+		return check.Result{State: check.OK}.Saying(verb, "declared already, in "+p.mine[0].Scope)
 	}
 	if opts.temp {
 		return temporarily(ctx, r, c, k, scope, name, verb)
@@ -287,7 +286,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
-	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s%s", verb, scope, said, p.said)}
+	return check.Result{State: check.OK}.Saying(verb, "declared in "+scope+said, p.said)
 }
 
 // holdLine has p's line, declared in scope's declarations, held for the
@@ -336,7 +335,7 @@ func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, na
 	if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Temporarily(kindName+":"+full, r.now) }); err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	summary := verb + ", for now: not declared, quiet for 7 days, then kit reconcile asks"
+	says := []string{verb + ", for now: not declared, quiet for 7 days, then kit reconcile asks"}
 	// reconcile asks only of a kind looked after: one this Mac declares.
 	if !r.lists[kindName].Declared {
 		added, err := r.cfg.AddSection(kindName, scope)
@@ -345,10 +344,10 @@ func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, na
 		}
 		if added {
 			c.changed(config.DeclFile(scope))
-			summary += "; [" + descriptorOf(k).Section.Header + "] added to " + scope + ", empty"
+			says = append(says, "["+descriptorOf(k).Section.Header+"] added to "+scope+", empty")
 		}
 	}
-	return check.Result{State: check.OK, Summary: summary}
+	return check.Result{State: check.OK}.Saying(says...)
 }
 
 // notInstalled are which of names k doesn't find installed.

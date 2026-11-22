@@ -109,7 +109,7 @@ func (a *app) addRestore(ctx context.Context, r *run, name string, opts restoreO
 		if err != nil {
 			return failed(err)
 		}
-		return check.Result{State: check.OK, Summary: "declared in " + scope + said + "; nothing copied"}
+		return check.Result{State: check.OK}.Saying("declared in "+scope+said, "nothing copied")
 	})
 	c.sync(ctx, commitMessage("add", config.RestoreKind, []string{line.Path}, r.machine, opts.note))
 	return c.finish()
@@ -144,15 +144,15 @@ func (a *app) removeRestore(ctx context.Context, r *run, names []string, shared 
 			case len(written) == 0:
 				return check.Result{State: check.Failed, Reason: p + " isn't on this Mac's " + restoreList}
 			}
-			said := make([]string, 0, len(written))
+			var said []string
 			for _, name := range written {
 				res := c.undeclare(config.RestoreKind, name, shared, restoreList)
 				if res.State != check.OK {
 					return res
 				}
-				said = append(said, res.Summary)
+				said = append(said, res.Says()...)
 			}
-			return check.Result{State: check.OK, Summary: strings.Join(said, "; ")}
+			return check.Result{State: check.OK}.Saying(said...)
 		})
 	}
 	c.sync(ctx, commitMessage("remove", config.RestoreKind, paths, r.machine, ""))

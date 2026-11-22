@@ -217,7 +217,8 @@ func saving(rec prefs.Record, now func() time.Time) check.Result {
 	case now().Sub(rec.Captured) > prefsEvery:
 		return problem(PrefsName, "last capture "+check.Ago(rec.Captured, now()), [3]string{"stale", "apps' settings haven't been saved for over a day", "kit prefs capture says why"})
 	case rec.Errors > 0:
-		return problem(PrefsName, rec.Summary, [3]string{"errors", fmt.Sprintf("the last capture couldn't save %d", rec.Errors), "kit prefs capture lists them"})
+		res := problem(PrefsName, "", [3]string{"errors", fmt.Sprintf("the last capture couldn't save %d", rec.Errors), "kit prefs capture lists them"})
+		return res.Saying(check.Result{Summary: rec.Summary, Parts: rec.Parts}.Says()...)
 	case !rec.Unpushed.IsZero() && now().Sub(rec.Unpushed) > prefsEvery:
 		return problem(PrefsName, "not pushed since "+check.Ago(rec.Unpushed, now()), [3]string{"unpushed", rec.PushError, "the next capture pushes again; kit prefs capture shows it"})
 	}
@@ -254,7 +255,7 @@ func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.R
 		return res
 	}
 	if res.State == check.OK {
-		res = check.Result{State: check.Attention, Summary: strings.Join(says, "; ")}
+		res = check.Result{State: check.Attention}.Saying(says...)
 	}
 	res.Items = append(res.Items, items...)
 	return res

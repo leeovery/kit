@@ -66,12 +66,15 @@ type RestoreReport struct {
 }
 
 // Summary is what the restore did, or would, in a line, as prefsync's.
-func (r RestoreReport) Summary() string {
+func (r RestoreReport) Summary() string { return strings.Join(r.Says(), "; ") }
+
+// Says is what the restore did, or would, in parts.
+func (r RestoreReport) Says() []string {
 	if r.As != "" {
 		if r.DryRun {
-			return fmt.Sprintf("would import %s as %s", r.Restored[0], r.As)
+			return []string{fmt.Sprintf("would import %s as %s", r.Restored[0], r.As)}
 		}
-		return fmt.Sprintf("imported %s as %s", r.Restored[0], r.As)
+		return []string{fmt.Sprintf("imported %s as %s", r.Restored[0], r.As)}
 	}
 	verb := "restored"
 	if r.DryRun {
@@ -84,22 +87,23 @@ func (r RestoreReport) Summary() string {
 	if r.At != "" {
 		s += " as it was at " + r.At
 	}
+	says := []string{s}
 	if len(r.Waiting) > 0 {
-		s += fmt.Sprintf("; %d waiting for their apps", len(r.Waiting))
+		says = append(says, fmt.Sprintf("%d waiting for their apps", len(r.Waiting)))
 	}
 	if len(r.Kept) > 0 {
-		s += fmt.Sprintf("; %d kept for apps not installed", len(r.Kept))
+		says = append(says, fmt.Sprintf("%d kept for apps not installed", len(r.Kept)))
 	}
 	if len(r.ToOpen) > 0 {
-		s += fmt.Sprintf("; %d to open once", len(r.ToOpen))
+		says = append(says, fmt.Sprintf("%d to open once", len(r.ToOpen)))
 	}
 	if n := r.Failures(); n > 0 {
-		s += fmt.Sprintf("; %d failed", n)
+		says = append(says, fmt.Sprintf("%d failed", n))
 	}
 	if r.Saved != "" {
-		s += "; previous settings saved in " + r.Saved
+		says = append(says, "previous settings saved in "+r.Saved)
 	}
-	return s
+	return says
 }
 
 // Failures counts the domains and settings files that failed.

@@ -98,7 +98,7 @@ func privacy(ctx context.Context, repo gitrepo.Repo, urls []string) check.Result
 	}
 	says = append(says, unproven...)
 	if len(says) > 0 {
-		return check.Result{State: check.Attention, Summary: strings.Join(says, "; "), Items: items}
+		return check.Result{State: check.Attention, Items: items}.Saying(says...)
 	}
 	return check.Result{State: check.OK, Summary: "private on GitHub (" + strings.Join(private, ", ") + ")", Glance: "private"}
 }

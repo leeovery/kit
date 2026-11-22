@@ -530,16 +530,16 @@ func (p *Pretty) printedFailing(f event.StepFinished, kept int) (string, failing
 
 // saying is a result's words as a row says them: the parts of a summary
 // after dots, the first in the state's colour.
-func saying(s look.State, text string) string {
-	parts := strings.Split(text, "; ")
+func saying(s look.State, parts ...string) string {
+	said := make([]string, len(parts))
 	for i, part := range parts {
 		if i == 0 {
-			parts[i] = look.Words(s, part)
+			said[i] = look.Words(s, part)
 		} else {
-			parts[i] = look.Muted(part)
+			said[i] = look.Muted(part)
 		}
 	}
-	return look.Says(parts...)
+	return look.Says(said...)
 }
 
 // todo is what to do about something: one of kit's commands in white, other

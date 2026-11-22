@@ -658,7 +658,7 @@ func (a *app) addStep(ctx context.Context, r *run, args []string, opts stepOptio
 		if err := r.finishStepFolder(c, s, folders); err != nil {
 			return failed(err)
 		}
-		return check.Result{State: check.OK, Summary: "declared in " + scope + said + "; " + made}
+		return check.Result{State: check.OK}.Saying("declared in "+scope+said, made)
 	})
 	c.sync(ctx, commitMessage("add", stepCommand, []string{name}, r.machine, opts.note))
 	return c.finish()

@@ -128,10 +128,11 @@ func (w *world) clones(t *testing.T, repo string, files map[string]string) {
 type setupDocument struct {
 	Machine string `json:"machine"`
 	Steps   []struct {
-		ID      string `json:"id"`
-		State   string `json:"state"`
-		Summary string `json:"summary"`
-		Reason  string `json:"reason"`
+		ID      string   `json:"id"`
+		State   string   `json:"state"`
+		Summary string   `json:"summary"`
+		Parts   []string `json:"parts"`
+		Reason  string   `json:"reason"`
 		Items   []struct {
 			Name   string `json:"name"`
 			State  string `json:"state"`
@@ -295,6 +296,11 @@ func TestSetupCarriesOnFromAPushThatFailed(t *testing.T) {
 	}
 	if carryOn := "; kit setup again carries on; never delete ~/.config/kit part-way, as files are moved into it and linked back"; !slices.ContainsFunc(stood, func(s string) bool { return strings.HasSuffix(s, carryOn) }) {
 		t.Errorf("the push failing, kit setup stood\n%s\nwant the commit's row to end %q", strings.Join(stood, "\n"), carryOn)
+	}
+	for _, s := range readSetup(t, out).Steps {
+		if s.ID == "commit" && (strings.Join(s.Parts, "; ") != s.Summary || len(s.Parts) < 3 || !strings.HasPrefix(s.Parts[0], "1 declared · ") || s.Parts[len(s.Parts)-2] != "kit setup again carries on") {
+			t.Errorf("the commit's parts are %q; want them to say its summary, %q, a part each", s.Parts, s.Summary)
+		}
 	}
 	if got := w.read(t, prefsRecord); !strings.Contains(got, `"on": "started fresh `) {
 		t.Errorf("prefs.json says\n%s\nwant capture started afresh", got)

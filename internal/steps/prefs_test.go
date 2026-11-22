@@ -51,6 +51,31 @@ func TestPrefs(t *testing.T) {
 	}
 }
 
+// A capture with errors says what it found in its parts, as the record
+// keeps them; a record from before it kept them says its summary whole.
+func TestPrefsErrorsSayTheCapturesParts(t *testing.T) {
+	recent := now().Add(-2 * time.Hour).Format(time.RFC3339)
+	for _, tt := range []struct {
+		name, parts string
+		want        []string
+	}{
+		{"parts kept", `, "parts": ["57 domains, 2 changed", "1056 files, 0 changed", "1 errors"]`, []string{"57 domains, 2 changed", "1056 files, 0 changed", "1 errors"}},
+		{"from before", "", []string{"57 domains, 2 changed; 1056 files, 0 changed; 1 errors"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			state := t.TempDir()
+			record := `{"on": "started fresh", "captured": "` + recent + `", "summary": "57 domains, 2 changed; 1056 files, 0 changed; 1 errors"` + tt.parts + `, "errors": 1}`
+			if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(record), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			p := prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now)
+			if got := steps.Prefs(p, "", now).Check(t.Context()).Says(); !slices.Equal(got, tt.want) {
+				t.Errorf("says %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // kitConfig is where kit-config's clone fetches from, and so the store.
 const kitConfig = "git@github.com:someone/kit-config.git"
 

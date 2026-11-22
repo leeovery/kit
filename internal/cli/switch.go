@@ -125,7 +125,7 @@ func switchOne(ctx context.Context, r *run, c *changes, d kind.Descriptor, k swi
 	if len(done) == 0 {
 		return check.Result{State: check.OK, Summary: "already " + verb}
 	}
-	return check.Result{State: check.OK, Summary: strings.Join(done, "; ")}
+	return check.Result{State: check.OK}.Saying(done...)
 }
 
 // installNew installs name, of k, as it's declared now: a kind whose lines

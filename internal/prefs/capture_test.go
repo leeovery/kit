@@ -288,7 +288,7 @@ claimed: the folder, for this Mac's hardware`
 		}
 	}
 	rec, _ := w.p.Load()
-	if rec.Summary != report.Summary() || !rec.Captured.Equal(time.Date(2026, 10, 6, 3, 0, 0, 0, time.UTC)) || rec.Errors != 1 || rec.PushError != "" {
+	if rec.Summary != report.Summary() || !slices.Equal(rec.Parts, report.Says()) || !rec.Captured.Equal(time.Date(2026, 10, 6, 3, 0, 0, 0, time.UTC)) || rec.Errors != 1 || rec.PushError != "" {
 		t.Errorf("record = %+v", rec)
 	}
 }

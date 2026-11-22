@@ -59,7 +59,7 @@ func Reinstall(r reinstall.Reinstaller) engine.Step {
 			paths, todo := reinstall.Unsearched(restored, rec), toRun(rec)
 			switch {
 			case len(paths) > 0 || len(todo) > 0:
-				return check.Result{State: check.Attention, Summary: toReinstall(paths, len(todo))}
+				return check.Result{State: check.Attention}.Saying(toReinstall(paths, len(todo))...)
 			case len(rec.Searched) == 0 && restored.Settled.IsZero():
 				return check.Result{State: check.Deferred, Reason: "waits for the restore"}
 			case len(rec.Searched) == 0:
@@ -85,8 +85,8 @@ func Reinstall(r reinstall.Reinstaller) engine.Step {
 }
 
 // toReinstall says what's left to do: the restored paths to find projects
-// in, and how many installs are to run.
-func toReinstall(paths []string, todo int) string {
+// in, and how many installs are to run, a part each.
+func toReinstall(paths []string, todo int) []string {
 	var says []string
 	if len(paths) > 0 {
 		says = append(says, "projects to find in "+strings.Join(paths, ", "))
@@ -94,7 +94,7 @@ func toReinstall(paths []string, todo int) string {
 	if todo > 0 {
 		says = append(says, fmt.Sprintf("%d to install", todo))
 	}
-	return strings.Join(says, "; ")
+	return says
 }
 
 // The items of the installs left, as check.Item's Quiet has it: failed,
@@ -141,6 +141,5 @@ func reinstalled(rec reinstall.Record) check.Result {
 	for _, t := range slices.Sorted(maps.Keys(waiting)) {
 		says = append(says, fmt.Sprintf("%d %s for %s", waiting[t], look.Plural(waiting[t], "waits", "wait"), t))
 	}
-	res.Summary = strings.Join(says, "; ")
-	return res
+	return res.Saying(says...)
 }

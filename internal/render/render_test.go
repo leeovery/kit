@@ -223,6 +223,27 @@ func TestPrettyStatusSaysWhatsNotAllowed(t *testing.T) {
 	}
 }
 
+// What a check printed comes through whole, whatever it holds, as dig's
+// semicolons; kit's own parts of a summary show apart, after dots.
+func TestPrettyShowsWhatACheckPrintedWhole(t *testing.T) {
+	dig := ";; connection timed out; no servers could be reached"
+	steps := []event.Step{{Name: "dns", Title: "dns", Area: "Steps"}, {Name: "db", Title: "db", Area: "Steps"}}
+	printed := check.Result{State: check.Attention, Summary: dig, Items: []check.Item{{ID: "dns:dns", Name: "dns", State: "problem", Detail: "kit apply dns"}}}
+	parts := check.Result{State: check.OK}.Saying("declared in laptop", "it fails now: ;; timed out; no servers")
+	var out bytes.Buffer
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
+		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: steps},
+		event.StepFinished{Time: at, Step: "dns", Result: printed},
+		event.StepFinished{Time: at, Step: "db", Result: parts},
+		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.OK: 1, check.Attention: 1}},
+	})
+	for _, want := range []string{"  ▲ dns  " + dig + "\n", "  ● db  declared in laptop · it fails now: ;; timed out; no servers\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("printed\n%s\nwant a row\n%s", out.String(), want)
+		}
+	}
+}
+
 // Status's details under a row are what's acted on, so they wrap, never
 // cut, what to do under its words past the arrow, and so do the rows of
 // what needs attention in Config, what to run on its own line, each
@@ -467,7 +488,7 @@ func TestPrettyTimeline(t *testing.T) {
 	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
 		event.RunStarted{Command: "brew add", Machine: "laptop", Steps: []event.Step{{Name: "jq", Title: "jq"}, {Name: "ripgrap", Title: "ripgrap"}, {Name: "kit-config", Title: "kit-config"}}},
 		event.StepFinished{Step: "ripgrap", Result: check.Result{State: check.Failed, Reason: `couldn't install: No available formula with the name "ripgrap"`}},
-		event.StepFinished{Step: "jq", Result: check.Result{State: check.OK, Summary: "already installed; declared already, in laptop"}},
+		event.StepFinished{Step: "jq", Result: check.Result{State: check.OK}.Saying("already installed", "declared already, in laptop")},
 		event.StepFinished{Step: "kit-config", Result: check.Result{State: check.OK, Summary: "nothing changed"}},
 		event.RunFinished{Counts: map[check.State]int{check.OK: 2, check.Failed: 1}},
 	})
@@ -488,7 +509,7 @@ func TestPrettyWholeOrNamed(t *testing.T) {
 	var out bytes.Buffer
 	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
 		event.RunStarted{Time: at, Command: "reconcile", Machine: "laptop", Steps: []event.Step{{Name: "brew:ffmpeg", Title: "ffmpeg"}, {Name: "kit-config", Title: "kit-config"}}},
-		event.StepFinished{Step: "brew:ffmpeg", Result: check.Result{State: check.OK, Summary: "already installed; declared in laptop"}},
+		event.StepFinished{Step: "brew:ffmpeg", Result: check.Result{State: check.OK}.Saying("already installed", "declared in laptop")},
 		event.StepFinished{Step: "kit-config", Result: check.Result{State: check.OK, Summary: "committed and pushed laptop/declarations"}},
 		event.RunFinished{Duration: 6100 * time.Millisecond, Counts: map[check.State]int{check.OK: 2}},
 	})
@@ -551,7 +572,7 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 	if got := turned(screen(out.String())); got != want {
 		t.Errorf("while jq installs, the screen is\n%s\nwant\n%s", got, want)
 	}
-	face.Emit(event.StepFinished{Step: "jq", Result: check.Result{State: check.OK, Summary: "installed; declared in laptop"}})
+	face.Emit(event.StepFinished{Step: "jq", Result: check.Result{State: check.OK}.Saying("installed", "declared in laptop")})
 	face.Emit(event.StepStarted{Step: "ripgrap", Doing: "changing"})
 	face.Emit(event.Output{Step: "ripgrap", Command: "brew install --formula ripgrap", Line: "\x1b[31mWarning:\x1b[0m No available formula with the name \"ripgrap\"."})
 	face.Emit(event.StepFinished{Step: "ripgrap", Result: check.Result{State: check.Failed, Reason: "couldn't install: Warning: No available formula with the name \"ripgrap\"."}})

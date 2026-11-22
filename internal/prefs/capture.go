@@ -244,7 +244,11 @@ func (r Report) Changes() []string {
 
 // Summary is the capture in a line, as prefsync's: "57 domains, 2 changed;
 // 1056 files, 0 changed".
-func (r Report) Summary() string {
+func (r Report) Summary() string { return strings.Join(r.Says(), "; ") }
+
+// Says is the capture's summary in parts: "57 domains, 2 changed", "1056
+// files, 0 changed".
+func (r Report) Says() []string {
 	counts := func(isFile bool) string {
 		changed, isNew := 0, 0
 		for _, c := range r.changes {
@@ -261,20 +265,23 @@ func (r Report) Summary() string {
 		}
 		return s
 	}
-	s := fmt.Sprintf("%d %s, %s; %d %s, %s", r.Domains, look.Plural(r.Domains, "domain", "domains"), counts(false), r.Files, look.Plural(r.Files, "file", "files"), counts(true))
+	says := []string{
+		fmt.Sprintf("%d %s, %s", r.Domains, look.Plural(r.Domains, "domain", "domains"), counts(false)),
+		fmt.Sprintf("%d %s, %s", r.Files, look.Plural(r.Files, "file", "files"), counts(true)),
+	}
 	if len(r.Removed) > 0 {
-		s += fmt.Sprintf("; %d removed", len(r.Removed))
+		says = append(says, fmt.Sprintf("%d removed", len(r.Removed)))
 	}
 	if r.Pending > 0 {
-		s += fmt.Sprintf("; %d pending restore", r.Pending)
+		says = append(says, fmt.Sprintf("%d pending restore", r.Pending))
 	}
 	if r.Kept > 0 {
-		s += fmt.Sprintf("; %d kept for apps not installed", r.Kept)
+		says = append(says, fmt.Sprintf("%d kept for apps not installed", r.Kept))
 	}
 	if len(r.Errors) > 0 {
-		s += fmt.Sprintf("; %d errors", len(r.Errors))
+		says = append(says, fmt.Sprintf("%d errors", len(r.Errors)))
 	}
-	return s
+	return says
 }
 
 // message is a capture's commit message: a line counting the changes, then
@@ -525,7 +532,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		report.PushError = "not pushed: " + err.Error()
 	}
 	return report, p.update(func(r *Record) {
-		r.Captured, r.Summary, r.Errors, r.NotOwner = p.Now(), report.Summary(), len(report.Errors), ""
+		r.Captured, r.Summary, r.Parts, r.Errors, r.NotOwner = p.Now(), report.Summary(), report.Says(), len(report.Errors), ""
 		if report.PushError == "" {
 			r.Unpushed, r.PushError = time.Time{}, ""
 			return

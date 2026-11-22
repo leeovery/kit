@@ -49,7 +49,7 @@ func (p Pulled) into(res check.Result) check.Result {
 	failed := res.State == check.Failed
 	switch {
 	case p.Brought > 0 && !failed:
-		res.Summary += fmt.Sprintf("; %d %s brought in", p.Brought, look.Plural(p.Brought, "commit", "commits"))
+		res = res.Adding(fmt.Sprintf("%d %s brought in", p.Brought, look.Plural(p.Brought, "commit", "commits")))
 		res.Counts = map[string]int{BroughtIn: p.Brought}
 	case p.Missed != nil:
 		res.Items = append(res.Items, check.Item{ID: ConfigPullID, Name: "the remote's commits not brought in", State: Problem, Detail: p.Missed.Error(), Since: p.Since, Quiet: p.Quiet})

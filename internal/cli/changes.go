@@ -154,7 +154,7 @@ func (s syncing) push(ctx context.Context) check.Result {
 	err := s.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
-		return check.Result{State: check.OK, Summary: "committed; no remote to push to"}
+		return check.Result{State: check.OK}.Saying("committed", "no remote to push to")
 	case err != nil:
 		return check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}
 	}
@@ -171,7 +171,7 @@ func (s syncing) pushWaiting(ctx context.Context) check.Result {
 	case errors.Is(err, gitrepo.ErrNoRemote), err == nil && len(made) == 0:
 		return nothing
 	case err != nil:
-		return check.Result{State: check.Attention, Summary: "nothing changed; couldn't tell what's waiting to be pushed: " + err.Error()}
+		return check.Result{State: check.Attention}.Saying("nothing changed", "couldn't tell what's waiting to be pushed: "+err.Error())
 	}
 	n := len(made)
 	waiting := fmt.Sprintf("%d %s waiting", n, look.Plural(n, "commit", "commits"))
@@ -180,9 +180,9 @@ func (s syncing) pushWaiting(ctx context.Context) check.Result {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return nothing
 	case err != nil:
-		return check.Result{State: check.Attention, Summary: "nothing changed; " + waiting + ", not pushed: " + err.Error()}
+		return check.Result{State: check.Attention}.Saying("nothing changed", waiting+", not pushed: "+err.Error())
 	}
-	return check.Result{State: check.OK, Summary: "nothing changed; pushed " + waiting}
+	return check.Result{State: check.OK}.Saying("nothing changed", "pushed "+waiting)
 }
 
 // finish ends the run, returning failure when a step didn't stand ok: each

@@ -103,11 +103,11 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		if err := k.Put(e.Name, placed); err != nil {
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't put it in place: " + err.Error()}
 		}
-		summary := "declared in " + at.scope + said + ", put in place"
+		says := []string{"declared in " + at.scope + said + ", put in place"}
 		if so.ref == "" {
-			summary = "kept in " + d.About().Name + " (" + d.Join(item, at.short) + ") and read back; " + summary
+			says = append([]string{"kept in " + d.About().Name + " (" + d.Join(item, at.short) + ") and read back"}, says...)
 		}
-		return check.Result{State: check.OK, Summary: summary}
+		return check.Result{State: check.OK}.Saying(says...)
 	})
 	c.sync(ctx, commitMessage("add", secretKind, []string{at.entry.Name}, r.machine, opts.note))
 	return c.finish()
@@ -449,8 +449,7 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 			case !ok:
 				return res
 			case e.Item == "":
-				res.Summary += fmt.Sprintf("; its value is outside every item a secrets block is for (%s), so kit leaves it", e.Value)
-				return res
+				return res.Adding(fmt.Sprintf("its value is outside every item a secrets block is for (%s), so kit leaves it", e.Value))
 			}
 			d, err := secret.ItemStore(e.Item)
 			if err == nil {
@@ -459,8 +458,7 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: res.Summary + ", but " + err.Error()}
 			}
-			res.Summary += "; its value deleted from " + d.About().Name
-			return res
+			return res.Adding("its value deleted from " + d.About().Name)
 		})
 	}
 	c.sync(ctx, commitMessage("remove", secretKind, names, r.machine, ""))

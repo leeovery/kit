@@ -135,6 +135,32 @@ func TestStacked(t *testing.T) {
 	)
 }
 
+// A line wraps at its spaces, or after a / in a path, never at a hyphen in
+// a word that fits a line of its own, as a flag's; a word wider than the
+// line is broken, after a / or a hyphen where it has one, or else where it
+// fills the line.
+func TestFoldKeepsWordsThatFitWhole(t *testing.T) {
+	for _, c := range []struct {
+		name, line string
+		want       []string
+	}{
+		{"a flag that fits", "gh repo edit owner/repo --visibility private --accept-visibility-change-consequences",
+			[]string{"gh repo edit owner/repo --visibility", "private", "--accept-visibility-change-consequences"}},
+		{"hyphens that fit", "installed, declared as some-long-hyphenated-name",
+			[]string{"installed, declared as", "some-long-hyphenated-name"}},
+		{"a path, after a /", "copied from ~/Library/Application Support/Some App/Data",
+			[]string{"copied from ~/Library/Application", "Support/Some App/Data"}},
+		{"a hyphenated word wider than the line", "then a-hyphenated-word-far-wider-than-the-line-is",
+			[]string{"then a-hyphenated-word-far-wider-than-", "the-line-is"}},
+		{"a word wider than the line, nothing to break it after", "x abcdefghijklmnopqrstuvwxyzabcdefghijklmnop y",
+			[]string{"x", "abcdefghijklmnopqrstuvwxyzabcdefghijklmn", "op y"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			same(t, look.Fold("  ", 44, look.Muted(c.line)), c.want...)
+		})
+	}
+}
+
 // Lines folded to go under a row are never cut: each wraps, its
 // continuation under its own start, or, for what to do, under its words
 // past the arrow, a dot never ending or starting a line; one that fits is

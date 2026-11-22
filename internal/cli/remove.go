@@ -59,7 +59,7 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 		c.step(ctx, name, func(ctx context.Context) check.Result {
 			res := removeOne(ctx, r, c, k, name, opts.shared, how[name])
 			if opts.zap && leaves && res.State == check.OK && !slices.Contains(removing, name) {
-				res.Summary += "; nothing for --zap to remove"
+				res = res.Adding("nothing for --zap to remove")
 			}
 			return res
 		})
@@ -69,8 +69,8 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 }
 
 // uninstaller uninstalls a thing otherwise than its kind's Remove, saying
-// how it went, as in uninstalled with its files.
-type uninstaller func(ctx context.Context) (string, error)
+// how it went, in parts, as in uninstalled with its files.
+type uninstaller func(ctx context.Context) ([]string, error)
 
 // everyMac is why removing what's declared for every Mac is refused
 // without --shared.
@@ -144,23 +144,23 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 func (lo leftover) uninstaller(p *prefs.Prefs, k kind.Kind, l kind.Leaver, name string, zap, said bool) uninstaller {
 	switch {
 	case zap:
-		return func(ctx context.Context) (string, error) {
+		return func(ctx context.Context) ([]string, error) {
 			forgot := p.Forget(ctx, lo.saved)
 			if err := l.RemoveAll(ctx, []string{name}); err != nil {
-				return "", putBack(ctx, p, lo.saved, err)
+				return nil, putBack(ctx, p, lo.saved, err)
 			}
 			forgot = cmp.Or(forgot, p.Forget(ctx, p.Unowned(lo.zapped)))
 			if forgot != nil {
-				return lo.removed() + ", but its settings are still held to be restored: " + forgot.Error(), nil
+				return []string{lo.removed() + ", but its settings are still held to be restored: " + forgot.Error()}, nil
 			}
-			return lo.removed(), nil
+			return []string{lo.removed()}, nil
 		}
 	case said:
-		return func(ctx context.Context) (string, error) {
+		return func(ctx context.Context) ([]string, error) {
 			if err := k.Remove(ctx, []string{name}); err != nil {
-				return "", err
+				return nil, err
 			}
-			return lo.done + ", " + lo.kept(), nil
+			return []string{lo.done + ", " + lo.kept()}, nil
 		}
 	}
 	return nil
@@ -171,19 +171,19 @@ func (lo leftover) uninstaller(p *prefs.Prefs, k kind.Kind, l kind.Leaver, name 
 // were taken out of it.
 func unreadSaid(do uninstaller, k kind.Kind, name string, why error) uninstaller {
 	if do == nil {
-		do = func(ctx context.Context) (string, error) {
+		do = func(ctx context.Context) ([]string, error) {
 			if err := k.Remove(ctx, []string{name}); err != nil {
-				return "", err
+				return nil, err
 			}
-			return descriptorOf(k).Removes().Done, nil
+			return []string{descriptorOf(k).Removes().Done}, nil
 		}
 	}
-	return func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) ([]string, error) {
 		done, err := do(ctx)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return done + "; its saved settings weren't looked at: " + why.Error(), nil
+		return append(done, "its saved settings weren't looked at: "+why.Error()), nil
 	}
 }
 
@@ -291,26 +291,26 @@ func (lo leftover) kept() string {
 
 // takeOff takes name off the Mac, when it's on it (isIn), as how does, or,
 // nil, as its kind does, and says so in its kind's words: uninstalled, or
-// wasn't installed.
-func takeOff(ctx context.Context, k kind.Kind, name string, isIn bool, how uninstaller) (string, error) {
+// wasn't installed, in parts.
+func takeOff(ctx context.Context, k kind.Kind, name string, isIn bool, how uninstaller) ([]string, error) {
 	d := descriptorOf(k)
 	if !isIn {
-		return "wasn't " + d.Installs().Done, nil
+		return []string{"wasn't " + d.Installs().Done}, nil
 	}
 	ctx = event.WithChanging(ctx)
 	if how == nil {
-		how = func(ctx context.Context) (string, error) {
+		how = func(ctx context.Context) ([]string, error) {
 			if err := k.Remove(ctx, []string{name}); err != nil {
-				return "", err
+				return nil, err
 			}
-			return d.Removes().Done, nil
+			return []string{d.Removes().Done}, nil
 		}
 	}
-	verb, err := how(ctx)
+	said, err := how(ctx)
 	if err != nil {
-		return "", errors.New(couldnt(d.Removes()) + engine.Reason(err))
+		return nil, errors.New(couldnt(d.Removes()) + engine.Reason(err))
 	}
-	return verb, nil
+	return said, nil
 }
 
 // descriptorOf is the descriptor of k's kind.
@@ -340,19 +340,19 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	verb, err := takeOff(ctx, k, name, isIn, how)
+	said, err := takeOff(ctx, k, name, isIn, how)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	from, err := c.undeclareHere(kindName, name, shared)
 	if err != nil {
-		return check.Result{State: check.Failed, Reason: verb + ", but couldn't undeclare: " + err.Error()}
+		return check.Result{State: check.Failed, Reason: strings.Join(said, "; ") + ", but couldn't undeclare: " + err.Error()}
 	}
 	switch {
 	case len(from) > 0:
-		return check.Result{State: check.OK, Summary: verb + "; out of " + strings.Join(from, " and ")}
+		return check.Result{State: check.OK}.Saying(append(said, "out of "+strings.Join(from, " and "))...)
 	case isIn:
-		return check.Result{State: check.OK, Summary: verb + "; it wasn't declared"}
+		return check.Result{State: check.OK}.Saying(append(said, "it wasn't declared")...)
 	}
 	return check.Result{State: check.OK, Summary: "neither installed nor declared: nothing to do"}
 }
