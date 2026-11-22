@@ -555,8 +555,9 @@ func todo(detail string) string {
 // what's wrong, for how long and what to run; then a row a part counting
 // what's well, and the config repository's row, marked as needing you
 // while a part of it does; then a row each for the remote's commits
-// brought in as the run began, and what isn't drift and doesn't need you
-// yet, as those not brought in, greyed as what didn't happen.
+// brought in as the run began, what isn't drift and doesn't need you yet,
+// as those not brought in, and a step's look at what's installed by hand
+// that couldn't be made, greyed as what didn't happen.
 func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 	var rows, aside []look.Row
 	counts := map[string]int{}
@@ -591,6 +592,9 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 		}
 		if r.State == check.Failed || r.State == check.Deferred {
 			continue
+		}
+		if r.HandLook != nil && r.HandLook.Unseen != "" {
+			aside = append(aside, look.Row{State: look.Skipped, Name: p.title(f.Step), Says: look.Muted(r.HandLook.Unseen), Whole: true})
 		}
 		switch part {
 		case PartConfig:

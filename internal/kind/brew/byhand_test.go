@@ -325,7 +325,8 @@ func TestAppsByHandWithoutHomebrewsCache(t *testing.T) {
 }
 
 // The apps installed by hand that a cask installs are the casks' drift,
-// each by its cask, saying what the app is; not one whose cask is declared,
+// each by its cask, saying what the app is, its bundle id the item's App,
+// the look said to have gone well; not one whose cask is declared,
 // which stays missing, its install adopting the app; nor one no cask
 // installs.
 func TestTheCasksAppsInstalledByHandAreDrift(t *testing.T) {
@@ -342,17 +343,18 @@ func TestTheCasksAppsInstalledByHandAreDrift(t *testing.T) {
 	got := kind.Drift(t.Context(), withApps(fake, apps).Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "1password"}}})
 	want := []check.Item{
 		{ID: "cask:1password", Name: "1password", State: kind.Missing, Action: kind.Install},
-		{ID: "cask:google-chrome", Name: "google-chrome", State: kind.ByHand, Detail: "installed by hand as Google Chrome.app"},
-		{ID: "cask:spaceman", Name: "spaceman", State: kind.ByHand, Detail: "installed by hand as Spaceman.app"},
+		{ID: "cask:google-chrome", Name: "google-chrome", State: kind.ByHand, Detail: "installed by hand as Google Chrome.app", App: "com.google.Chrome"},
+		{ID: "cask:spaceman", Name: "spaceman", State: kind.ByHand, Detail: "installed by hand as Spaceman.app", App: "dev.original.Spaceman"},
 	}
-	if got.State != check.Attention || !slices.Equal(got.Items, want) {
+	if got.State != check.Attention || !slices.Equal(got.Items, want) || got.HandLook == nil || got.HandLook.Unseen != "" {
 		t.Errorf("Drift() = %+v\nwant items %+v", got, want)
 	}
 }
 
 // When which casks install the apps installed by hand can't be told,
-// however that fails, none is drift, and the casks' check stands as ever
-// but partial, so what it couldn't see is kept, the run's log saying why.
+// however that fails, none is drift, and the casks' check stands as ever,
+// its HandLook saying why, so what it couldn't see is kept, as does the
+// run's log.
 func TestTheCasksAppsByHandThatCantBeTold(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -385,13 +387,25 @@ func TestTheCasksAppsByHandThatCantBeTold(t *testing.T) {
 			var logged []string
 			ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
 			got := kind.Drift(ctx, withApps(fake, apps).Casks(), config.List{Kind: "cask"})
-			if got.State != check.OK || len(got.Items) != 0 || !got.Partial {
-				t.Errorf("Drift() = %+v, want ok, nothing by hand, partial", got)
+			why := "kit can't tell which apps are installed by hand: " + tt.why
+			if got.State != check.OK || len(got.Items) != 0 || got.HandLook == nil || !strings.HasPrefix(got.HandLook.Unseen, why) {
+				t.Errorf("Drift() = %+v, want ok, nothing by hand, the look unseen: %s", got, tt.why)
 			}
-			if len(logged) != 1 || !strings.HasPrefix(logged[0], "kit can't tell what's installed by hand: "+tt.why) {
+			if len(logged) != 1 || !strings.HasPrefix(logged[0], why) {
 				t.Errorf("logged %q, want why: %s", logged, tt.why)
 			}
 		})
+	}
+}
+
+// Without brew on kit's PATH, which casks install the apps installed by
+// hand can't be told: that's no look that found none.
+func TestTheCasksAppsByHandWithoutBrew(t *testing.T) {
+	apps := t.TempDir()
+	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+	found, err := withApps(runnertest.New(t), apps).Casks().(kind.Adoptable).InstalledByHand(t.Context())
+	if !errors.Is(err, runner.ErrNotFound) || found != nil {
+		t.Errorf("InstalledByHand() = %v, %v; want brew not found", found, err)
 	}
 }
 

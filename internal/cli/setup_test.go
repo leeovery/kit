@@ -295,8 +295,8 @@ func TestSetupAdoptsAsItsFlagsSay(t *testing.T) {
 	if got := w.readSection(t, "laptop", "homebrew casks"); got != "ghostty\ntally\n" {
 		t.Errorf("laptop's casks = %q, want ghostty and tally", got)
 	}
-	if left := w.read(t, driftFile); !strings.Contains(left, `"left_by_hand": {`+"\n"+`    "cask:editor": "2026-01-02T03:04:05Z"`+"\n  }") {
-		t.Errorf("drift.json = %s, want the editor alone left by hand", left)
+	if left := w.read(t, handFile); !strings.Contains(left, `"left": {`+"\n"+`    "com.example.editor": "2026-01-02T03:04:05Z"`+"\n  }") {
+		t.Errorf("by-hand.json = %s, want the editor alone left by hand", left)
 	}
 }
 

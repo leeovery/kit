@@ -456,6 +456,24 @@ func TestAppsInstalledByHand(t *testing.T) {
 	golden(t, "pretty-by-hand.golden", pretty.String())
 }
 
+// When which apps are installed by hand can't be told, the casks' check
+// stands as ever, and a greyed row says why, once: nothing to settle.
+func TestAppsByHandThatCantBeTold(t *testing.T) {
+	unseen := "kit can't tell which apps are installed by hand: no catalogue of casks in Homebrew's cache"
+	events := []event.Event{
+		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages}}},
+		event.StepFinished{Time: at, Step: "cask", Result: check.Result{State: check.OK, Summary: "3 declared, all installed", Counts: map[string]int{"installed": 3}, HandLook: &check.Look{Unseen: unseen}}},
+		event.RunFinished{Time: at, Counts: map[check.State]int{check.OK: 1}},
+	}
+	var plain, pretty bytes.Buffer
+	show(t, render.NewPlain(&plain), events)
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &pretty, Profile: colorprofile.NoTTY}, 80, false), events)
+	if want := "kit status · laptop\ncask ok 3 declared, all installed\ncask unseen " + unseen + "\nNothing needs attention\n"; plain.String() != want {
+		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), want)
+	}
+	golden(t, "pretty-by-hand-unseen.golden", pretty.String())
+}
+
 func TestActionsAndWhatWasDone(t *testing.T) {
 	brew := check.Result{State: check.OK, Summary: "3 declared, all installed", Done: []check.Item{
 		{ID: "brew:jq", Name: "jq", State: "missing", Action: "install"},

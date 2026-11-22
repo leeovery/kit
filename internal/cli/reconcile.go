@@ -378,18 +378,18 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 // an item left by hand ends the leave: the last answer holds.
 func carryOutOne(ctx context.Context, r *run, c *changes, d decision, note string) check.Result {
 	if d.item.Quiet == drift.Left && d.action != leave {
-		if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Unleave(d.item.ID) }); err != nil {
+		if err := drift.Unleave(r.stateDir, d.item.App); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 	}
 	switch d.action {
 	case snooze:
-		if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Snooze(d.item.ID, r.now) }); err != nil {
+		if err := drift.Snooze(r.stateDir, d.item.Item, r.now); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "snoozed till " + r.now.Add(drift.SnoozeFor).Format("2 Jan")}
 	case leave:
-		if err := drift.Leave(r.stateDir, r.now, d.item.ID); err != nil {
+		if err := drift.Leave(r.stateDir, r.now, d.item.App); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "left installed by hand"}

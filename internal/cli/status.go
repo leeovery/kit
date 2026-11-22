@@ -168,10 +168,7 @@ func (r *run) remember(report engine.Report) error {
 		results[steps.ConfigSyncName] = pullOf(res)
 	}
 	unmanaged := slices.DeleteFunc(slices.Clone(r.allKinds), func(k string) bool { return slices.Contains(r.kinds, k) })
-	return drift.Update(r.stateDir, func(rec *drift.Record) {
-		rec.Seen(results, r.now)
-		rec.Forget(unmanaged)
-	})
+	return drift.Remember(r.stateDir, results, r.now, unmanaged)
 }
 
 func (r *run) options(a *app, only []string) engine.Options {

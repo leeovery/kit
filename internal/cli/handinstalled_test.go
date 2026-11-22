@@ -24,6 +24,10 @@ func (w *world) caskroom(t *testing.T, apps map[string]string) {
 	w.fake.On("brew", "--caskroom").Prints(filepath.Join(w.home, room) + "\n")
 }
 
+// handFile is kit's record of what's installed by hand, in the world's
+// state directory.
+var handFile = filepath.Join(".local", "state", "kit", "by-hand.json")
+
 // handWorld is laptop with the editor installed by hand, a cask installing
 // it in Homebrew's catalogue, and first seen two days ago, so it needs
 // attention; and the Kubius, which no cask installs.
@@ -31,10 +35,11 @@ func handWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
 	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
-{"casks": {"editor": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]}}}`)
-	w.installApp(t, "Editor", "com.example.editor")
+{"casks": {"editor": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.Editor"}], [":app", ["Editor.app"]]]}}}`)
+	w.installApp(t, "Editor", "com.example.Editor")
 	w.installApp(t, "Kubius", "com.example.kubius")
-	w.write(t, driftFile, `{"first_seen": {"brew:ffmpeg": "2025-12-31T00:00:00Z", "brew:node@20": "2025-12-31T00:00:00Z", "cask:firefox": "2025-12-31T00:00:00Z", "cask:editor": "2025-12-31T00:00:00Z"}}`)
+	w.write(t, driftFile, `{"first_seen": {"brew:ffmpeg": "2025-12-31T00:00:00Z", "brew:node@20": "2025-12-31T00:00:00Z", "cask:firefox": "2025-12-31T00:00:00Z"}}`)
+	w.write(t, handFile, `{"first_seen": {"cask:editor": "2025-12-31T00:00:00Z"}}`)
 	w.fake.On("brew", "info", "--json=v2", "--cask", "editor").Prints(`{"formulae": [], "casks": [{"token": "editor", "full_token": "editor", "old_tokens": [], "artifacts": [{"app": ["Editor.app"]}]}]}`)
 	return w
 }
@@ -59,15 +64,30 @@ func TestStatusShowsAnAppInstalledByHand(t *testing.T) {
 	}
 	cask := doc.Steps[i]
 	it := cask.Items[len(cask.Items)-1]
-	if cask.Counts["by_hand"] != 1 || it.ID != "cask:editor" || it.State != "by-hand" || it.Detail != "installed by hand as Editor.app" || it.Since.IsZero() || it.Action != "" {
+	if cask.Counts["by_hand"] != 1 || it.ID != "cask:editor" || it.State != "by-hand" || it.Detail != "installed by hand as Editor.app" || it.App != "com.example.Editor" || it.Since.IsZero() || it.Action != "" {
 		t.Errorf("cask = %+v, want the editor installed by hand, nothing applying would do", cask)
+	}
+}
+
+// When which apps are installed by hand can't be told, as Homebrew's
+// catalogue is gone, status says why once, of the casks, which need no
+// attention for it.
+func TestStatusSaysWhenWhatsByHandCantBeTold(t *testing.T) {
+	w := handWorld(t)
+	if err := os.RemoveAll(filepath.Join(w.home, "Library", "Caches", "Homebrew", "api")); err != nil {
+		t.Fatal(err)
+	}
+	out, _, code := w.run(t, "status")
+	want := "cask attention 1 declared, all installed\ncask extra firefox\ncask unseen kit can't tell which apps are installed by hand: no catalogue of casks in Homebrew's cache\n"
+	if !strings.Contains(out, want) || strings.Count(out, "installed by hand") != 1 || code != 0 {
+		t.Errorf("kit status printed\n%s exit %d; want it to hold, once\n%s", out, code, want)
 	}
 }
 
 // New, it's quiet for a day, as other drift is.
 func TestAnAppInstalledByHandIsNewForADay(t *testing.T) {
 	w := handWorld(t)
-	w.write(t, driftFile, "{}")
+	w.write(t, handFile, "{}")
 	out, _, code := w.run(t, "status")
 	if want := "cask by-hand:new editor (installed by hand as Editor.app)\n"; !strings.Contains(out, want) || code != 0 {
 		t.Errorf("kit status printed\n%s exit %d; want it to hold %q", out, code, want)
@@ -169,8 +189,8 @@ func TestReconcileLeavesAnAppByHand(t *testing.T) {
 	if want := []string{"Adopt", "Adopt everywhere", "Leave by hand", "Snooze", "Skip"}; !slices.Equal(offered, want) {
 		t.Errorf("offered %q, want %q", offered, want)
 	}
-	if got := w.read(t, driftFile); !strings.Contains(got, `"left_by_hand": {`+"\n"+`    "cask:editor": "2026-01-02T03:04:05Z"`) {
-		t.Errorf("drift.json = %s, want the editor left by hand now", got)
+	if got := w.read(t, handFile); !strings.Contains(got, `"left": {`+"\n"+`    "com.example.editor": "2026-01-02T03:04:05Z"`) {
+		t.Errorf("by-hand.json = %s, want the editor's app left by hand now", got)
 	}
 
 	w.asked = nil
@@ -193,8 +213,8 @@ func TestALeaveByHandEndsOnceItsCaskIsDeclared(t *testing.T) {
 	if !strings.Contains(out, "cask:editor ok left installed by hand\n") || !strings.Contains(out, "kit-config ok nothing changed\n") || code != 0 {
 		t.Errorf("kit reconcile printed\n%s exit %d", out, code)
 	}
-	if got := w.read(t, driftFile); !strings.Contains(got, `"cask:editor": "2026-01-02T03:04:05Z"`) {
-		t.Errorf("drift.json = %s, want the editor left by hand", got)
+	if got := w.read(t, handFile); !strings.Contains(got, `"com.example.editor": "2026-01-02T03:04:05Z"`) {
+		t.Errorf("by-hand.json = %s, want the editor left by hand", got)
 	}
 	f := w.fake
 	f.On("brew", "update", "--quiet")
@@ -208,8 +228,29 @@ func TestALeaveByHandEndsOnceItsCaskIsDeclared(t *testing.T) {
 	if _, _, code := w.run(t, "status"); code != 0 {
 		t.Fatalf("kit status exit %d", code)
 	}
-	if got := w.read(t, driftFile); strings.Contains(got, "cask:editor") {
-		t.Errorf("drift.json = %s, want the editor forgotten once declared", got)
+	if got := w.read(t, handFile); strings.Contains(got, "editor") {
+		t.Errorf("by-hand.json = %s, want the editor forgotten once declared", got)
+	}
+}
+
+// A leave goes by the app, so it holds whatever the cask matched with it
+// is called: the catalogue's cask renamed, the app is left all the same.
+func TestALeaveOutlastsItsCasksRename(t *testing.T) {
+	w := handWorld(t)
+	if _, errOut, code := w.run(t, "reconcile", "cask:editor", "--leave"); code != 0 {
+		t.Fatalf("kit reconcile --leave exit %d: %s", code, errOut)
+	}
+	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
+{"casks": {"editor-app": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.Editor"}], [":app", ["Editor.app"]]]}}}`)
+	w.fake.On("brew", "info", "--json=v2", "--cask", "editor-app").Prints(`{"formulae": [], "casks": [{"token": "editor-app", "full_token": "editor-app", "old_tokens": ["editor"], "artifacts": [{"app": ["Editor.app"]}]}]}`)
+	for range 2 {
+		out, _, code := w.run(t, "status")
+		if want := "cask by-hand:left editor-app (installed by hand as Editor.app)\n"; !strings.Contains(out, want) || code != 0 {
+			t.Errorf("kit status printed\n%s exit %d; want it to hold %q", out, code, want)
+		}
+	}
+	if got := w.read(t, handFile); !strings.Contains(got, `"com.example.editor": "2026-01-02T03:04:05Z"`) || strings.Contains(got, `"cask:editor"`) {
+		t.Errorf("by-hand.json = %s, want the editor's app still left, the old cask's id forgotten", got)
 	}
 }
 
@@ -229,8 +270,11 @@ func TestALeftAppAnsweredAgain(t *testing.T) {
 	}
 	leave()
 	out, _, code := w.run(t, "reconcile", "cask:editor", "--snooze")
-	if got := w.read(t, driftFile); !strings.Contains(out, "cask:editor ok snoozed till 9 Jan\n") || code != 0 || strings.Contains(got, "left_by_hand") || !strings.Contains(got, `"snoozed_until": {`) {
-		t.Errorf("kit reconcile --snooze printed\n%s exit %d, drift.json %s; want the editor snoozed, left no more", out, code, got)
+	if got := w.read(t, handFile); !strings.Contains(out, "cask:editor ok snoozed till 9 Jan\n") || code != 0 || strings.Contains(got, "com.example.editor") || !strings.Contains(got, `"snoozed_until": {`+"\n"+`    "cask:editor"`) {
+		t.Errorf("kit reconcile --snooze printed\n%s exit %d, by-hand.json %s; want the editor snoozed, left no more", out, code, got)
+	}
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "cask by-hand:snoozed editor (installed by hand as Editor.app)\n") {
+		t.Errorf("kit status printed\n%s; want the editor snoozed", out)
 	}
 	leave()
 	f := w.fake
@@ -240,14 +284,15 @@ func TestALeftAppAnsweredAgain(t *testing.T) {
 	})
 	w.expectSync(t, []string{"laptop/declarations"}, "kit reconcile (laptop): adopt cask:editor")
 	out, _, code = w.run(t, "reconcile", "cask:editor", "--adopt")
-	if got := w.read(t, driftFile); !strings.Contains(out, "cask:editor ok installed; declared in laptop\n") || code != 0 || strings.Contains(got, "left_by_hand") {
-		t.Errorf("kit reconcile --adopt printed\n%s exit %d, drift.json %s; want the editor adopted, left no more", out, code, got)
+	if got := w.read(t, handFile); !strings.Contains(out, "cask:editor ok installed; declared in laptop\n") || code != 0 || strings.Contains(got, "com.example.editor") {
+		t.Errorf("kit reconcile --adopt printed\n%s exit %d, by-hand.json %s; want the editor adopted, left no more", out, code, got)
 	}
 }
 
 // When what's installed by hand can't be told, as Homebrew's catalogue is
 // gone, a leave and when the app was first seen are kept, for when it can
-// be told again.
+// be told again; the rest of the casks' drift is kept as ever, an extra
+// cask uninstalled forgotten.
 func TestALeaveOutlastsALookThatFails(t *testing.T) {
 	w := handWorld(t)
 	if _, errOut, code := w.run(t, "reconcile", "cask:editor", "--leave"); code != 0 {
@@ -256,10 +301,14 @@ func TestALeaveOutlastsALookThatFails(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(w.home, "Library", "Caches", "Homebrew", "api")); err != nil {
 		t.Fatal(err)
 	}
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n")
 	if _, _, code := w.run(t, "status"); code != 0 {
 		t.Fatalf("kit status exit %d", code)
 	}
-	if got := w.read(t, driftFile); !strings.Contains(got, `"left_by_hand": {`+"\n"+`    "cask:editor"`) || !strings.Contains(got, `"cask:editor": "2025-12-31T00:00:00Z"`) {
-		t.Errorf("drift.json = %s, want the editor still left, first seen as before", got)
+	if got := w.read(t, handFile); !strings.Contains(got, `"com.example.editor": "2026-01-02T03:04:05Z"`) || !strings.Contains(got, `"cask:editor": "2025-12-31T00:00:00Z"`) {
+		t.Errorf("by-hand.json = %s, want the editor still left, first seen as before", got)
+	}
+	if got := w.read(t, driftFile); strings.Contains(got, "cask:firefox") || !strings.Contains(got, "brew:ffmpeg") {
+		t.Errorf("drift.json = %s, want firefox, uninstalled, forgotten, the rest kept", got)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/apps"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -92,10 +93,13 @@ func (h *Homebrew) matched(ctx context.Context, hand []ByHand) error {
 }
 
 // InstalledByHand finds the apps installed by hand that a cask installs
-// (AppsByHand), by the cask's token, each with the app's name, as in
-// Example.app: none, and why, when which casks install them couldn't be
-// told.
-func (c casks) InstalledByHand(ctx context.Context) (map[string]string, error) {
+// (AppsByHand), by the cask's token, each as its app's name, as in
+// Example.app, and its bundle id: none, and why, when which casks install
+// them couldn't be told, as without brew on kit's PATH.
+func (c casks) InstalledByHand(ctx context.Context) (map[string]kind.HandInstalled, error) {
+	if !runner.Has(c.run, "brew") {
+		return nil, fmt.Errorf("brew isn't on kit's PATH: %w", runner.ErrNotFound)
+	}
 	hand, err := c.appsByHand(ctx, true)
 	if err == nil {
 		err = hand.Unmatched
@@ -103,10 +107,10 @@ func (c casks) InstalledByHand(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	found := map[string]string{}
+	found := map[string]kind.HandInstalled{}
 	for _, app := range hand.Apps {
 		if _, had := found[app.Cask]; !had {
-			found[app.Cask] = filepath.Base(app.Path)
+			found[app.Cask] = kind.HandInstalled{As: filepath.Base(app.Path), App: app.ID}
 		}
 	}
 	return found, nil

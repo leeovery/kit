@@ -344,8 +344,8 @@ func TestSetupScreen(t *testing.T) {
 	if code := <-ended; code != 0 {
 		t.Errorf("kit setup exited %d, want 0", code)
 	}
-	if left := w.read(t, driftFile); !strings.Contains(left, `"left_by_hand": {`+"\n"+`    "cask:tally": "2026-01-02T03:04:05Z"`) {
-		t.Errorf("drift.json = %s, want Tally left by hand", left)
+	if left := w.read(t, handFile); !strings.Contains(left, `"left": {`+"\n"+`    "com.example.tally": "2026-01-02T03:04:05Z"`) {
+		t.Errorf("by-hand.json = %s, want Tally left by hand", left)
 	}
 }
 

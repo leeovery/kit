@@ -467,14 +467,14 @@ func (m *mac) ended(t *testing.T) ended {
 	return e
 }
 
-// left is what drift's record has left by hand, by id, sorted.
+// left is what drift's record has left by hand, by bundle id, sorted.
 func (m *mac) left(t *testing.T) []string {
 	t.Helper()
 	rec, err := drift.Load(m.dirs.State)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return slices.Sorted(maps.Keys(rec.Left))
+	return slices.Sorted(maps.Keys(rec.Hand.Left))
 }
 
 // At a terminal, a person with no kit-config is offered one, created
@@ -772,7 +772,7 @@ func TestSetupStoppedAnywhereEndsAsOneNeverStopped(t *testing.T) {
 				flow.github(t, unbroken)
 				unbroken.runSetup(t, flow.given)
 				want := unbroken.ended(t)
-				if !want.Record.Done || !slices.Equal(want.Adopted, tally) || !slices.Equal(want.Left, []string{"cask:editor"}) || !slices.Equal(want.ByHand, []string{"Kubius", "Editor", "Sendhit"}) {
+				if !want.Record.Done || !slices.Equal(want.Adopted, tally) || !slices.Equal(want.Left, []string{"com.example.editor"}) || !slices.Equal(want.ByHand, []string{"Kubius", "Editor", "Sendhit"}) {
 					t.Fatalf("unbroken, setup ended %+v", want)
 				}
 
@@ -1001,7 +1001,7 @@ func TestModel(t *testing.T) {
 var found = snapshot.Snapshot{
 	Folders: []snapshot.Folder{{Path: "~/Code", Size: 48.2e9, Whole: true, Ticked: true}, {Path: "~/Movies", Size: 31e9, Whole: true}},
 	Files:   []string{"~/.zshrc"},
-	ByHand:  []brew.ByHand{{Name: "Kubius"}, {Name: "Editor", Cask: "editor"}, {Name: "Sendhit"}, {Name: "Tally", Cask: "tally"}},
+	ByHand:  []brew.ByHand{{Name: "Kubius"}, {Name: "Editor", ID: "com.example.Editor", Cask: "editor"}, {Name: "Sendhit"}, {Name: "Tally", ID: "com.example.tally", Cask: "tally"}},
 }
 
 // snapshotted is setup on laptop, joined, the snapshot taken; laptop
@@ -1244,7 +1244,7 @@ func adopting(t *testing.T, ask Asker) (*Setup, *mac) {
 		t.Fatal(err)
 	}
 	s.mac.Config = cfg
-	s.found = &snapshot.Snapshot{ByHand: []brew.ByHand{{Name: "Kubius"}, {Name: "Editor", Cask: "editor"}, {Name: "Tally", Cask: "tally"}, {Name: "Viewer", Cask: "viewer"}}}
+	s.found = &snapshot.Snapshot{ByHand: []brew.ByHand{{Name: "Kubius"}, {Name: "Editor", ID: "com.example.Editor", Cask: "editor"}, {Name: "Tally", Cask: "tally"}, {Name: "Viewer", Cask: "viewer"}}}
 	return s, m
 }
 
@@ -1273,7 +1273,7 @@ func TestSetupAdoptsTheAppsTicked(t *testing.T) {
 
 	m.pushes = []check.State{check.Failed, check.Attention}
 	commit := s.commitStep()
-	for _, want := range [][]string{nil, {"cask:editor"}} {
+	for _, want := range [][]string{nil, {"com.example.editor"}} {
 		if err := commit.Apply(t.Context(), check.Result{}); err != nil {
 			t.Fatal(err)
 		}

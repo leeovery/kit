@@ -728,7 +728,7 @@ add` moves and links them), the apps installed by hand Homebrew takes over (`--a
 To Homebrew: a row a cask of those that install them, as `brew.Homebrew` matches them, its apps
 named and the cask only when its name says more, all ticked, a cask the Mac declares already
 never offered; the ticked declared with the snapshot, so the `kit apply` after setup takes their
-apps over, the rest left by hand for good in drift.json, `kit reconcile` never asking of them),
+apps over, the rest left by hand for good, by their apps' bundle ids, `kit reconcile` never asking of them),
 and, joining, what kit-config declares that this Mac hasn't:
 installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`); a kind
 whose check couldn't tell is asked about too, saying so and why, never taken for nothing to
@@ -1301,10 +1301,16 @@ as quiet.
 **Drift counts after a day.** An item a kind's check finds (missing, extra, an unused
 dependency) is new for its first 24 hours: shown, quiet, without needing attention, so a
 throwaway install that's soon removed never does. kit remembers when it first saw each item,
-the snoozes (7 days), the temporary installs (quiet for 7 days) and what's left by hand (quiet
-for good, this Mac's alone, till it's drift no more or answered otherwise) in
+the snoozes (7 days) and the temporary installs (quiet for 7 days) in
 `$XDG_STATE_HOME/kit/drift.json`, written whole under a lock; it forgets an item once a check
-of its kind no longer finds it. What applying was given to act on and left still to act on, as
+of its kind no longer finds it. What's installed by hand is kept beside it, in `by-hand.json`,
+which a kit from before it, writing drift.json whole, never touches: when each such item was
+first seen and its snooze, by item, and the apps left by hand (quiet for good, this Mac's
+alone), by bundle id, so a cask renamed in the catalogue keeps its app's leave. Those are
+forgotten only on a look at what's installed by hand that went well, a leave once its app is
+installed by hand no more or answered otherwise; a look that fails keeps them, the rest of its
+kind forgotten as ever, and status says, greyed, that kit can't tell which apps are installed
+by hand, and why. What applying was given to act on and left still to act on, as
 a formula whose install ended well but isn't there, is never quiet, whatever its age: its step
 needs attention, and the next apply tries it again.
 

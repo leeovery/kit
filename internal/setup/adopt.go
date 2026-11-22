@@ -187,6 +187,22 @@ func casksTaken(ctx context.Context, m snapshot.Mac) (kind.Taking, error) {
 	return kind.Taken(ctx, k, list)
 }
 
+// appIDs are the bundle ids of the apps installed by hand found that cask
+// installs.
+func (s *Setup) appIDs(cask string) []string {
+	found, _ := s.snapshot()
+	if found == nil {
+		return nil
+	}
+	var ids []string
+	for _, app := range found.ByHand {
+		if app.Cask == cask && app.ID != "" {
+			ids = append(ids, app.ID)
+		}
+	}
+	return ids
+}
+
 // appsOf are the names of the apps installed by hand found that cask
 // installs.
 func appsOf(found *snapshot.Snapshot, cask string) []string {
@@ -268,9 +284,10 @@ func adoptFlags(offered []offer) string {
 
 // adopting are the casks rec's answer has Homebrew take over apps
 // installed by hand with, but those the Mac declares already; and, by
-// their drift's ids, those offered and not taken, which are left by hand,
-// so kit never asks of them. When which could be taken over couldn't be
-// told, the answer stands as recorded, and nothing more is left.
+// their bundle ids, the apps of those offered and not taken, which are
+// left by hand, so kit never asks of them. When which could be taken over
+// couldn't be told, the answer stands as recorded, and nothing more is
+// left.
 func (s *Setup) adopting(ctx context.Context, rec record) (adopt, left []string) {
 	if rec.Adopt == nil {
 		return nil, nil
@@ -288,7 +305,7 @@ func (s *Setup) adopting(ctx context.Context, rec record) (adopt, left []string)
 		if slices.Contains(*rec.Adopt, o.cask) {
 			adopt = append(adopt, o.cask)
 		} else {
-			left = append(left, brew.CasksDescriptor.Name+":"+o.cask)
+			left = append(left, s.appIDs(o.cask)...)
 		}
 	}
 	return adopt, left
