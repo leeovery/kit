@@ -1253,7 +1253,7 @@ func TestSkippingAChoiceWhileItsKeyIsDone(t *testing.T) {
 	if l.Up != 1 || l.List[0].Skipped || l.List[0].Settling {
 		t.Errorf("the settings brought back, the list said %+v, up %d; want it done there and then, the scanner up", l.List, l.Up)
 	}
-	l = c.listUntil(t, func(l event.ToDos) bool { return len(l.List) == 3 })
+	l = c.listUntil(t, func(l event.ToDos) bool { return len(l.List) == 3 && l.List[0].Done })
 	if ids := toDoIDs(l.List); l.Up != 1 || !slices.Equal(ids, []string{"prefs:none", "manual:scanner", "prefs:open"}) {
 		t.Errorf("the settings brought back, the list said %+v, up %d; want the scanner up, the app to open at the end", l.List, l.Up)
 	}

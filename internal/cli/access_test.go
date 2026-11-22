@@ -136,7 +136,7 @@ func TestBackupExclusionsRefusedFullDiskAccess(t *testing.T) {
 		after, before string
 	}{
 		{"kit apply", []string{"apply"}, "full-disk-access", "not granted: tmutil needs it", "Give Ghostty Full Disk Access, then reopen it", "needs Full Disk Access\n", "backup-exclusion", "full-disk-access"},
-		{"the hourly run", []string{"nightly", "--scheduled"}, "kit-app-access", "not granted: the hourly run at 03:04 couldn't read what it protects", "Give kit.app Full Disk Access", "needs kit.app's Full Disk Access", "kit-app-access", "backup-exclusion"},
+		{"the hourly run", []string{"nightly", "--scheduled"}, "kit-app-access", "not granted: the hourly run at 03:04 couldn't read what it protects", "Give kit.app Full Disk Access", "needs kit.app's Full Disk Access\n", "kit-app-access", "backup-exclusion"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := exclusionsWorld(t)
@@ -188,7 +188,7 @@ func TestTheHourlyRunsExclusionsWaitForKitApp(t *testing.T) {
 			}
 			w.fake.On("tmutil", "addexclusion", filepath.Join(w.home, "Library/Caches/one"))
 			out, errOut, _ := w.run(t, "nightly", "--scheduled")
-			if held := strings.Contains(out, "backup-exclusion deferred needs kit.app's Full Disk Access"); held != tt.denied {
+			if held := strings.Contains(out, "backup-exclusion deferred needs kit.app's Full Disk Access\n"); held != tt.denied {
 				t.Errorf("kit nightly --scheduled printed\n%s%s\nwant the exclusions held %v", out, errOut, tt.denied)
 			}
 			if got := excluded(w); len(got) != tt.excluded {
