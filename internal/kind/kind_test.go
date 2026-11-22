@@ -582,6 +582,88 @@ func TestCompareWithoutTheProgram(t *testing.T) {
 	}
 }
 
+// adoptingKind is a fakeKind that finds things installed by hand it could
+// take over, counting how often it's asked.
+type adoptingKind struct {
+	*fakeKind
+	byHand map[string]string
+	err    error
+	asked  int
+}
+
+func (a *adoptingKind) InstalledByHand(context.Context) (map[string]string, error) {
+	a.asked++
+	return a.byHand, a.err
+}
+
+// What a kind could take over, installed by hand, is drift of its own,
+// saying what it's on the Mac as, with nothing applying would do: but not
+// what's declared, on or off, by any name it goes by, which Compare
+// alone says nothing of. It's looked for once a check.
+func TestDriftFindsWhatsInstalledByHand(t *testing.T) {
+	k := &adoptingKind{
+		fakeKind: &fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}}, aliases: map[string]string{"old-editor": "editor"}},
+		byHand:   map[string]string{"spaceman": "Spaceman.app", "editor": "Editor.app", "zoom": "zoom.us.app", "off": "Off.app", "jq": "jq.app"},
+	}
+	list := declared("jq", "old-editor", "off")
+	list.Entries[2].Off = true
+	got := kind.Drift(t.Context(), k, list)
+	want := []check.Item{
+		{ID: "brew:old-editor", Name: "old-editor", State: kind.Missing, Action: kind.Install},
+		{ID: "brew:spaceman", Name: "spaceman", State: kind.ByHand, Detail: "installed by hand as Spaceman.app"},
+		{ID: "brew:zoom", Name: "zoom", State: kind.ByHand, Detail: "installed by hand as zoom.us.app"},
+	}
+	if got.State != check.Attention || got.Counts["by_hand"] != 2 || !slices.Equal(got.Items, want) {
+		t.Errorf("Drift() = %+v\nwant items %+v", got, want)
+	}
+	if k.asked != 1 {
+		t.Errorf("asked %d times what's installed by hand, want once", k.asked)
+	}
+	if got := kind.Compare(t.Context(), k, list); slices.ContainsFunc(got.Items, func(it check.Item) bool { return it.State == kind.ByHand }) || k.asked != 1 {
+		t.Errorf("Compare() = %+v, asking %d times; want nothing of what's installed by hand", got, k.asked)
+	}
+	k.byHand = nil
+	if got := kind.Drift(t.Context(), k, declared("jq")); got.State != check.OK || got.Counts["by_hand"] != 0 {
+		t.Errorf("Drift() with nothing by hand = %+v, want ok", got)
+	}
+}
+
+// When what's installed by hand can't be told, there's none, the kind's
+// check standing as Compare has it, and the run's log says why; nor is it
+// asked when the kind couldn't look at what's installed.
+func TestDriftWhenWhatsByHandCantBeTold(t *testing.T) {
+	k := &adoptingKind{fakeKind: &fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}}}, err: errors.New("no catalogue of casks in Homebrew's cache")}
+	var logged []string
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+	got := kind.Drift(ctx, k, declared("jq"))
+	if got.State != check.OK || len(got.Items) != 0 {
+		t.Errorf("Drift() = %+v, want ok, nothing by hand", got)
+	}
+	if want := []string{"kit can't tell what's installed by hand: no catalogue of casks in Homebrew's cache"}; !slices.Equal(logged, want) {
+		t.Errorf("logged %q, want %q", logged, want)
+	}
+	k.asked = 0
+	for _, failing := range []*fakeKind{
+		{err: errors.New("brew list exited 1")},
+		{err: fmt.Errorf("brew: %w on kit's PATH", runner.ErrNotFound)},
+		{err: &kind.NotAllowed{What: "macOS hasn't let kit look", Where: "System Settings"}},
+	} {
+		k.fakeKind = failing
+		_ = kind.Drift(t.Context(), k, declared())
+	}
+	if k.asked != 0 {
+		t.Errorf("asked %d times what's installed by hand, want never once listing failed", k.asked)
+	}
+}
+
+// A kind's step finds what it could take over, installed by hand.
+func TestAKindsStepFindsWhatsInstalledByHand(t *testing.T) {
+	k := &adoptingKind{fakeKind: &fakeKind{}, byHand: map[string]string{"editor": "Editor.app"}}
+	if got := kind.Step(k, declared()).Check(t.Context()); got.State != check.Attention || len(got.Items) != 1 || got.Items[0].State != kind.ByHand {
+		t.Errorf("its check = %+v, want the editor installed by hand", got)
+	}
+}
+
 // differingKind is a fakeKind whose things can be installed otherwise than
 // declared.
 type differingKind struct {

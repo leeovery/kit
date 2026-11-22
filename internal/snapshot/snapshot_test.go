@@ -470,6 +470,7 @@ func TestWithoutHomebrew(t *testing.T) {
 // told, the snapshot says why, and everything else is found.
 func TestAppsByHandThatCantBeToldSayWhy(t *testing.T) {
 	m, fake := newMac(t, "")
+	write(t, m.AppDirs[0], map[string]string{"Tool.app/Contents/Info.plist": app("com.example.tool")})
 	homebrew(fake, "", "", "ghostty\n")
 	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Exits(1).PrintsToStderr("Error: something broke\n")
 	s, _, err := snapshot.Find(t.Context(), m)

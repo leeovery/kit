@@ -34,29 +34,28 @@ type HandApps struct {
 // put in place, as its app, in its suite's folder, or through its package
 // (pkgutil's receipts); each with the cask that installs it, if one does,
 // as Homebrew's catalogue has it (match). Without Homebrew, every app but
-// those is by hand, and none has a cask.
+// those is by hand, and none has a cask. With no app but those, Homebrew
+// is asked nothing.
 func (h *Homebrew) AppsByHand(ctx context.Context) (HandApps, error) {
-	brewed := runner.Has(h.run, "brew")
-	var casked Casked
-	var packaged map[string]bool
-	if brewed {
-		var err error
-		if casked, err = h.Casked(ctx); err != nil {
-			return HandApps{}, fmt.Errorf("find the casks' apps: %w", err)
-		}
-		if packaged, err = installedBy(ctx, h.run, casked.Receipts); err != nil {
-			return HandApps{}, fmt.Errorf("find the casks' packages' apps: %w", err)
-		}
-	}
 	var found HandApps
 	for _, app := range apps.Installed(h.AppDirs) {
-		id := apps.BundleID(app)
-		if !h.byHand(app, id, casked, packaged) {
-			continue
+		if id := apps.BundleID(app); h.byHand(app, id, Casked{}, nil) {
+			found.Apps = append(found.Apps, ByHand{Path: app, Name: strings.TrimSuffix(filepath.Base(app), ".app"), ID: id})
 		}
-		found.Apps = append(found.Apps, ByHand{Path: app, Name: strings.TrimSuffix(filepath.Base(app), ".app"), ID: id})
 	}
-	if !brewed || len(found.Apps) == 0 {
+	if len(found.Apps) == 0 || !runner.Has(h.run, "brew") {
+		return found, nil
+	}
+	casked, err := h.Casked(ctx)
+	if err != nil {
+		return HandApps{}, fmt.Errorf("find the casks' apps: %w", err)
+	}
+	packaged, err := installedBy(ctx, h.run, casked.Receipts)
+	if err != nil {
+		return HandApps{}, fmt.Errorf("find the casks' packages' apps: %w", err)
+	}
+	found.Apps = slices.DeleteFunc(found.Apps, func(app ByHand) bool { return !h.byHand(app.Path, app.ID, casked, packaged) })
+	if len(found.Apps) == 0 {
 		return found, nil
 	}
 	cat, err := h.catalogue(ctx)
@@ -67,6 +66,27 @@ func (h *Homebrew) AppsByHand(ctx context.Context) (HandApps, error) {
 	for i, app := range found.Apps {
 		if at, err := filepath.Rel(h.AppDirs[0], app.Path); err == nil && filepath.IsLocal(at) {
 			found.Apps[i].Cask, _ = cat.match(at, app.ID)
+		}
+	}
+	return found, nil
+}
+
+// InstalledByHand finds the apps installed by hand that a cask installs
+// (AppsByHand), by the cask's token, each with the app's name, as in
+// Example.app: none, and why, when which casks install them couldn't be
+// told.
+func (c casks) InstalledByHand(ctx context.Context) (map[string]string, error) {
+	hand, err := c.AppsByHand(ctx)
+	if err == nil {
+		err = hand.Unmatched
+	}
+	if err != nil {
+		return nil, err
+	}
+	found := map[string]string{}
+	for _, app := range hand.Apps {
+		if _, had := found[app.Cask]; app.Cask != "" && !had {
+			found[app.Cask] = filepath.Base(app.Path)
 		}
 	}
 	return found, nil

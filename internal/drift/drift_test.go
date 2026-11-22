@@ -23,9 +23,11 @@ func TestQuieten(t *testing.T) {
 		FirstSeen: map[string]time.Time{
 			"brew:recent": ago(2 * time.Hour), "brew:old": ago(25 * time.Hour), "brew:snoozed": ago(30 * 24 * time.Hour),
 			"brew:woke": ago(30 * 24 * time.Hour), "brew:temp": ago(26 * time.Hour), "brew:stale-temp": ago(9 * 24 * time.Hour),
+			"brew:left": ago(30 * 24 * time.Hour), "brew:left-woke": ago(30 * 24 * time.Hour),
 		},
-		Snoozed:   map[string]time.Time{"brew:snoozed": now.Add(time.Hour), "brew:woke": ago(time.Minute)},
+		Snoozed:   map[string]time.Time{"brew:snoozed": now.Add(time.Hour), "brew:woke": ago(time.Minute), "brew:left-woke": ago(time.Minute)},
 		Temporary: map[string]time.Time{"brew:temp": ago(26 * time.Hour), "brew:stale-temp": ago(8 * 24 * time.Hour)},
+		Left:      map[string]time.Time{"brew:left": ago(20 * 24 * time.Hour), "brew:left-woke": ago(20 * 24 * time.Hour), "brew:left-unseen": ago(time.Hour)},
 	}
 	tests := []struct {
 		name      string
@@ -40,6 +42,9 @@ func TestQuieten(t *testing.T) {
 		{name: "woke", stillLoud: true, since: ago(30 * 24 * time.Hour)},
 		{name: "temp", quiet: drift.Temporary, since: ago(26 * time.Hour)},
 		{name: "stale-temp", stillLoud: true, since: ago(9 * 24 * time.Hour)},
+		{name: "left", quiet: drift.Left, since: ago(30 * 24 * time.Hour)},
+		{name: "left-woke", quiet: drift.Left, since: ago(30 * 24 * time.Hour)},
+		{name: "left-unseen", quiet: drift.Left},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -81,6 +86,7 @@ func TestSeen(t *testing.T) {
 		FirstSeen: map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:gone": ago(48 * time.Hour), "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour), "login-item:unseen": ago(48 * time.Hour)},
 		Snoozed:   map[string]time.Time{"brew:kept": now.Add(time.Hour), "brew:ended": ago(time.Second), "brew:gone": now.Add(time.Hour)},
 		Temporary: map[string]time.Time{"brew:gone": ago(time.Hour), "brew:kept": ago(time.Hour)},
+		Left:      map[string]time.Time{"brew:gone": ago(time.Hour), "brew:kept": ago(time.Hour), "cask:unchecked": ago(time.Hour), "mas:failed": ago(time.Hour)},
 	}
 	r.Seen(map[string]check.Result{
 		"brew":       {State: check.Attention, Items: []check.Item{extra("kept"), extra("fresh"), extra("ended")}},
@@ -97,6 +103,9 @@ func TestSeen(t *testing.T) {
 	}
 	if wantTemp := map[string]time.Time{"brew:kept": ago(time.Hour)}; fmt.Sprint(r.Temporary) != fmt.Sprint(wantTemp) {
 		t.Errorf("Temporary = %v, want %v", r.Temporary, wantTemp)
+	}
+	if wantLeft := map[string]time.Time{"brew:kept": ago(time.Hour), "cask:unchecked": ago(time.Hour), "mas:failed": ago(time.Hour)}; fmt.Sprint(r.Left) != fmt.Sprint(wantLeft) {
+		t.Errorf("Left = %v, want %v", r.Left, wantLeft)
 	}
 }
 
@@ -154,16 +163,34 @@ func TestSnoozeAndTemporarily(t *testing.T) {
 	}
 }
 
-// Forgetting kinds forgets everything of theirs, and nothing of others'.
+// Forgetting kinds forgets everything of theirs, and nothing of others',
+// but what's left by hand: the app it's for stays on the Mac.
 func TestForget(t *testing.T) {
 	rec := drift.Record{
 		FirstSeen: map[string]time.Time{"npm:docx": ago(time.Hour), "brew:jq": ago(time.Hour), "npmish:x": ago(time.Hour)},
 		Snoozed:   map[string]time.Time{"npm:docx": now.Add(time.Hour), "brew:jq": now.Add(time.Hour)},
 		Temporary: map[string]time.Time{"npm:left-pad": ago(time.Hour), "cask:zoom": ago(time.Hour)},
+		Left:      map[string]time.Time{"npm:docx": ago(time.Hour)},
 	}
 	rec.Forget([]string{"npm", "go"})
-	if len(rec.FirstSeen) != 2 || len(rec.Snoozed) != 1 || len(rec.Temporary) != 1 || rec.Snoozed["brew:jq"].IsZero() || rec.Temporary["cask:zoom"].IsZero() {
-		t.Errorf("Forget(npm, go) left %+v, want npm's gone and the rest kept", rec)
+	if len(rec.FirstSeen) != 2 || len(rec.Snoozed) != 1 || len(rec.Temporary) != 1 || rec.Snoozed["brew:jq"].IsZero() || rec.Temporary["cask:zoom"].IsZero() || rec.Left["npm:docx"].IsZero() {
+		t.Errorf("Forget(npm, go) left %+v, want npm's gone, but what's left by hand, and the rest kept", rec)
+	}
+}
+
+// Leaving things by hand notes when, in the record in the state directory,
+// beside what it held.
+func TestLeave(t *testing.T) {
+	state := t.TempDir()
+	if err := drift.Update(state, func(r *drift.Record) { r.Snooze("cask:zoom", now) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := drift.Leave(state, now, "cask:editor", "cask:spaceman"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := drift.Load(state)
+	if err != nil || len(r.Left) != 2 || !r.Left["cask:editor"].Equal(now) || !r.Left["cask:spaceman"].Equal(now) || r.Snoozed["cask:zoom"].IsZero() {
+		t.Errorf("Load() after Leave() = %+v, %v; want both left now, the snooze kept", r, err)
 	}
 }
 

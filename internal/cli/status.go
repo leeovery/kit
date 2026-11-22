@@ -433,7 +433,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		kindSteps = append(kindSteps, quietened(step, record, now))
 		r.kinds = append(r.kinds, d.Name)
 		r.drift = append(r.drift, d.Name)
-		r.drifters[d.Name] = kindDrifter{k: k, list: list, installing: d.Installs(), removing: d.Removes(), held: func() []kind.Held { return r.placing[d.Name].Held }}
+		r.drifters[d.Name] = kindDrifter{k: k, list: list, installing: d.Installs(), removing: d.Removes(), tool: d.Tool, held: func() []kind.Held { return r.placing[d.Name].Held }}
 		needed = withNeeded(needed, d, deps)
 	}
 	// One needing an administrator's password, as installing Homebrew

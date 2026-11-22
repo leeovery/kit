@@ -619,7 +619,7 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 			continue
 		}
 		says := []string{look.Muted(fmt.Sprintf("%d %s", counts[ru.part], ru.verb))}
-		for _, reason := range []string{"new", "snoozed", "temporary"} {
+		for _, reason := range []string{"new", "snoozed", "temporary", "left"} {
 			if n := quiet[ru.part][reason]; n > 0 {
 				says = append(says, look.Dim(fmt.Sprintf("%d %s", n, quietWords[reason])))
 			}
@@ -633,14 +633,14 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 }
 
 // quietWords say why things don't need attention yet, after their count.
-var quietWords = map[string]string{"new": "new", "snoozed": "snoozed", "temporary": "for now"}
+var quietWords = map[string]string{"new": "new", "snoozed": "snoozed", "temporary": "for now", "left": "left by hand"}
 
 // thing is a row for something that needs attention, of step s: its name,
 // what's wrong, for how long, and what to run about it.
 func (p *Pretty) thing(s event.Step, it check.Item) look.Row {
 	says := []string{look.Orange(wrong(s, it))}
-	if _, drift := driftStates[it.State]; drift && it.Detail != "" {
-		says = append(says, look.Muted(it.Detail))
+	if more := beyond(s, it); IsDrift(it) && more != "" {
+		says = append(says, look.Muted(more))
 	}
 	if !it.Since.IsZero() {
 		says = append(says, look.Muted(since(p.start.Time.Sub(it.Since))))
@@ -681,6 +681,8 @@ func wrong(s event.Step, it check.Item) string {
 		return "declared, not " + verb
 	case "unused-dependency":
 		return "installed for something since removed"
+	case "by-hand":
+		return cmp.Or(it.Detail, "installed by hand")
 	case "changed", "diverged":
 		return "changed from what's declared"
 	case "dead":
@@ -695,6 +697,15 @@ func wrong(s event.Step, it check.Item) string {
 		return "a repository of its own"
 	}
 	return cmp.Or(it.Detail, strings.ReplaceAll(it.State, "-", " "))
+}
+
+// beyond is what the detail of it says past what's wrong with it (wrong):
+// none when that's the detail whole, as of a thing installed by hand.
+func beyond(s event.Step, it check.Item) string {
+	if it.Detail == wrong(s, it) {
+		return ""
+	}
+	return it.Detail
 }
 
 // foot is how the run ended: what went wrong, counted, then what was well,
@@ -1081,6 +1092,7 @@ var driftStates = map[string]string{
 	"removed":           "removed",
 	"missing":           "missing",
 	"unused-dependency": "unused",
+	"by-hand":           "installed by hand",
 	"changed":           "changed",
 	"diverged":          "diverged",
 	"dead":              "dead link",

@@ -1,7 +1,8 @@
 // Package drift is what kit remembers of drift from run to run: when each
-// item was first seen, the snoozes, and the temporary installs; and how
-// that keeps items quiet for a while. Drift counts only after a day, so a
-// throwaway install that's soon removed never needs attention.
+// item was first seen, the snoozes, the temporary installs, and what's left
+// installed by hand; and how that keeps items quiet, for a while or for
+// good. Drift counts only after a day, so a throwaway install that's soon
+// removed never needs attention.
 package drift
 
 import (
@@ -28,6 +29,7 @@ const (
 	New       = "new"
 	Snoozed   = "snoozed"
 	Temporary = "temporary"
+	Left      = "left"
 )
 
 // file is the drift record, in kit's state directory.
@@ -40,6 +42,11 @@ type Record struct {
 	Snoozed map[string]time.Time `json:"snoozed_until,omitempty"`
 	// Temporary is when each temporary install was made.
 	Temporary map[string]time.Time `json:"temporary,omitempty"`
+	// Left is when each thing installed by hand was left so, for good:
+	// till it's no longer drift, as its app's gone or it's declared. It
+	// outlasts its kind not being looked after, as the app it's for stays
+	// on the Mac.
+	Left map[string]time.Time `json:"left_by_hand,omitempty"`
 }
 
 // Load reads the record in the state directory: an empty one when there's
@@ -55,8 +62,9 @@ func Update(stateDir string, change func(*Record)) error {
 }
 
 // Quieten marks each of res's items quiet while its time hasn't come, saying
-// when it was first seen: new, first seen under Grace ago, or now; snoozed,
-// until a time still ahead; temporary, installed so under TemporaryFor ago.
+// when it was first seen: left by hand, for good; new, first seen under
+// Grace ago, or now; snoozed, until a time still ahead; temporary,
+// installed so under TemporaryFor ago.
 // A step whose items are all quiet stands ok. One whose check couldn't look,
 // as macOS hasn't let it (check.Result's Refused), isn't drift, so is never
 // quiet. Nor is an item applying the step was given to act on, by id in
@@ -76,6 +84,8 @@ func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) c
 		switch {
 		case tried[it.ID] && it.Action != "":
 			loud, left = true, true
+		case !r.Left[it.ID].IsZero():
+			items[i].Quiet = Left
 		case r.Snoozed[it.ID].After(now):
 			items[i].Quiet = Snoozed
 		case !r.Temporary[it.ID].IsZero() && now.Sub(r.Temporary[it.ID]) < TemporaryFor:
@@ -98,9 +108,9 @@ func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) c
 
 // Seen notes, in r, each item of results (by kind) first seen now that
 // wasn't seen before. For each kind whose check ran, standing ok or needing
-// attention, it forgets what's no longer drifting; a kind not checked, or
-// whose check failed, was deferred or couldn't look, keeps what it had.
-// Snoozes that have ended go.
+// attention, it forgets what's no longer drifting, what's left by hand
+// among it; a kind not checked, or whose check failed, was deferred or
+// couldn't look, keeps what it had. Snoozes that have ended go.
 func (r *Record) Seen(results map[string]check.Result, now time.Time) {
 	present := make(map[string]bool)
 	ran := make(map[string]bool)
@@ -128,11 +138,12 @@ func (r *Record) Seen(results map[string]check.Result, now time.Time) {
 	maps.DeleteFunc(r.FirstSeen, func(id string, _ time.Time) bool { return gone(id) })
 	maps.DeleteFunc(r.Snoozed, func(id string, until time.Time) bool { return gone(id) || !until.After(now) })
 	maps.DeleteFunc(r.Temporary, func(id string, _ time.Time) bool { return gone(id) })
+	maps.DeleteFunc(r.Left, func(id string, _ time.Time) bool { return gone(id) })
 }
 
-// Forget forgets everything of the kinds named: kinds no longer looked
-// after, whose items would otherwise come back with old dates when they're
-// looked after again.
+// Forget forgets everything of the kinds named but what's left by hand:
+// kinds no longer looked after, whose items would otherwise come back with
+// old dates when they're looked after again.
 func (r *Record) Forget(kinds []string) {
 	of := func(id string, _ time.Time) bool {
 		kind, _, _ := strings.Cut(id, ":")
@@ -157,4 +168,20 @@ func (r *Record) Temporarily(id string, now time.Time) {
 		r.Temporary = make(map[string]time.Time)
 	}
 	r.Temporary[id] = now
+}
+
+// Leave leaves each item of ids installed by hand, quiet for good, from now.
+func (r *Record) Leave(now time.Time, ids ...string) {
+	if r.Left == nil {
+		r.Left = make(map[string]time.Time)
+	}
+	for _, id := range ids {
+		r.Left[id] = now
+	}
+}
+
+// Leave leaves each item of ids installed by hand, in the record in the
+// state directory, from now.
+func Leave(stateDir string, now time.Time, ids ...string) error {
+	return Update(stateDir, func(r *Record) { r.Leave(now, ids...) })
 }

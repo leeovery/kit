@@ -131,6 +131,16 @@ type Misser interface {
 	Missed(ctx context.Context, names []string) ([]Installed, error)
 }
 
+// Adoptable is a kind that can take over things put on the Mac by hand,
+// apart from it, as a cask installs an app dragged into the Applications
+// folder: kit reconcile adopts one, declaring it, its install taking it
+// over, or leaves it by hand.
+type Adoptable interface {
+	// InstalledByHand finds them, by name, each with what it's on the Mac
+	// as, as in Example.app.
+	InstalledByHand(ctx context.Context) (map[string]string, error)
+}
+
 // Blocker is a kind that can say why some things can't be installed now.
 type Blocker interface {
 	// Blocked says, of the things missing (declared names, by their full
@@ -436,12 +446,15 @@ const (
 	// Removed is a thing gone from the Mac, not declared: kit reconcile
 	// accepts it gone or puts it back.
 	Removed = "removed"
+	// ByHand is a thing an Adoptable kind could take over, installed by
+	// hand, not declared: kit reconcile adopts it or leaves it by hand.
+	ByHand = "by-hand"
 )
 
 // Step is the step that checks k, what declared lists against what's on
-// the Mac, and applies it: installing what's missing, as it can. It needs
-// the steps named in needs. An install that fails has failed for what's
-// still missing after it, named.
+// the Mac (Drift), and applies it: installing what's missing, as it can.
+// It needs the steps named in needs. An install that fails has failed for
+// what's still missing after it, named.
 func Step(k Kind, declared config.List, needs ...string) engine.Step {
 	return Placed(k, declared, nil, needs...)
 }
@@ -566,7 +579,7 @@ func Placed(k Kind, declared config.List, placed func(context.Context) Placing, 
 		Name:  k.Name(),
 		Did:   verbOf(k),
 		Needs: needs,
-		Check: func(ctx context.Context) check.Result { return unmet.mark(Compare(ctx, k, declared), declared) },
+		Check: func(ctx context.Context) check.Result { return unmet.mark(Drift(ctx, k, declared), declared) },
 		Apply: func(ctx context.Context, found check.Result) error {
 			var placing Placing
 			if placed != nil {
@@ -1373,17 +1386,67 @@ func keyOf(k Kind) func(string) string {
 // installed, nothing declared is fine, and anything declared defers the
 // step.
 func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
+	res, _ := compare(ctx, k, declared)
+	return res
+}
+
+// Drift is what Compare finds, with, for a kind that can take over things
+// installed by hand (Adoptable), each of those not declared, by any name it
+// goes by, as an item of its own: installed by hand. They're looked for
+// once a check, only once Compare could look at what's installed; when
+// they can't be told, there are none, and the run's log says why.
+func Drift(ctx context.Context, k Kind, declared config.List) check.Result {
+	res, fullNames := compare(ctx, k, declared)
+	a, ok := k.(Adoptable)
+	if !ok || fullNames == nil {
+		return res
+	}
+	found, err := a.InstalledByHand(ctx)
+	if err != nil {
+		event.Log(ctx, event.Logged{Line: "kit can't tell what's installed by hand: " + err.Error()})
+		return res
+	}
+	key := keyOf(k)
+	taken := make(map[string]bool, len(declared.Entries)+len(fullNames))
+	for _, e := range declared.Entries {
+		taken[key(e.Name)] = true
+	}
+	for _, full := range fullNames {
+		taken[key(full)] = true
+	}
+	var names []string
+	for name := range found {
+		if !taken[key(name)] {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return res
+	}
+	byHand := items(k, names, ByHand, "")
+	for i, it := range byHand {
+		byHand[i].Detail = "installed by hand as " + found[it.Name]
+	}
+	res.Items, res.State = append(res.Items, byHand...), check.Attention
+	res.Counts["by_hand"] = len(byHand)
+	return res
+}
+
+// compare is Compare, with the full names of the things declared and
+// missing, by declared name: none at all when it couldn't look at what's
+// installed.
+func compare(ctx context.Context, k Kind, declared config.List) (check.Result, map[string]string) {
 	installed, err := k.Installed(ctx)
 	switch {
 	case errors.Is(err, runner.ErrNotFound) && len(declared.Entries) == 0:
-		return check.Result{State: check.OK}.Saying("none declared", k.Program()+" isn't installed")
+		return check.Result{State: check.OK}.Saying("none declared", k.Program()+" isn't installed"), nil
 	case errors.Is(err, runner.ErrNotFound):
-		return check.Result{State: check.Deferred, Reason: "needs " + k.Program() + ", which isn't installed"}
+		return check.Result{State: check.Deferred, Reason: "needs " + k.Program() + ", which isn't installed"}, nil
 	case err != nil:
-		return failed(k, err)
+		return failed(k, err), nil
 	}
 	if installed, err = withMissed(ctx, k, installed, declared.On()); err != nil {
-		return failed(k, err)
+		return failed(k, err), nil
 	}
 	key := keyOf(k)
 	byKey := make(map[string]Installed, len(installed))
@@ -1415,7 +1478,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if len(unmatched) > 0 {
 		resolved, err := Resolve(ctx, k, unmatched)
 		if err != nil {
-			return failed(k, err)
+			return failed(k, err), nil
 		}
 		for _, name := range unmatched {
 			full, known := resolved[name]
@@ -1434,7 +1497,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if b, ok := k.(Blocker); ok && len(missing) > 0 {
 		var err error
 		if blocked, err = b.Blocked(ctx, fullNames, installed); err != nil {
-			return failed(k, err)
+			return failed(k, err), nil
 		}
 	}
 	var extra, removed, unused []string
@@ -1454,7 +1517,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if d, ok := k.(Differ); ok && len(installedDeclared) > 0 {
 		var err error
 		if changed, err = d.Differs(ctx, installedDeclared); err != nil {
-			return failed(k, err)
+			return failed(k, err), nil
 		}
 	}
 
@@ -1520,7 +1583,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if len(res.Items) > 0 {
 		res.State = check.Attention
 	}
-	return res
+	return res, fullNames
 }
 
 // failed is how k's step stands when looking at what's installed failed

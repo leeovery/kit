@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/runner"
@@ -166,7 +169,7 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 
 // When Homebrew's catalogue can't be read, which casks install the apps
 // installed by hand can't be told, and says why: the apps are found all
-// the same, with none. With no app by hand, it isn't looked for.
+// the same, with none. With no app by hand, Homebrew is asked nothing.
 func TestAppsByHandWithoutACatalogue(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -197,8 +200,8 @@ func TestAppsByHandWithoutACatalogue(t *testing.T) {
 	}
 	fake := runnertest.New(t)
 	noCasks(fake)
-	if found, err := withApps(fake, t.TempDir()).AppsByHand(t.Context()); found.Apps != nil || found.Unmatched != nil || err != nil || slices.Contains(fake.Calls(), "brew --cache") {
-		t.Errorf("AppsByHand() of none = %+v, %v, running %q; want none, the catalogue not looked for", found, err, fake.Calls())
+	if found, err := withApps(fake, t.TempDir()).AppsByHand(t.Context()); found.Apps != nil || found.Unmatched != nil || err != nil || len(fake.Calls()) > 0 {
+		t.Errorf("AppsByHand() of none = %+v, %v, running %q; want none, Homebrew asked nothing", found, err, fake.Calls())
 	}
 }
 
@@ -254,5 +257,51 @@ func TestAppsByHandWithoutHomebrewsCache(t *testing.T) {
 	found, err := withApps(fake, apps).AppsByHand(t.Context())
 	if exit, ok := errors.AsType[*runner.ExitError](found.Unmatched); err != nil || !ok || !strings.HasPrefix(found.Unmatched.Error(), "find Homebrew's cache") || exit.Code != 1 {
 		t.Errorf("AppsByHand() = unmatched %v, %v; want Homebrew's cache not found", found.Unmatched, err)
+	}
+}
+
+// The apps installed by hand that a cask installs are the casks' drift,
+// each by its cask, saying what the app is; not one whose cask is declared,
+// which stays missing, its install adopting the app; nor one no cask
+// installs.
+func TestTheCasksAppsInstalledByHandAreDrift(t *testing.T) {
+	fake := runnertest.New(t)
+	apps := t.TempDir()
+	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+	installApp(t, apps, "Spaceman.app", "dev.original.Spaceman")
+	installApp(t, apps, "1Password.app", "com.1password.1password")
+	installApp(t, apps, "Kubius.app", "com.example.kubius")
+	noCasks(fake)
+	catalogued(t, fake)
+	fake.On("brew", "list", "--cask", "--full-name", "-1")
+	fake.On("brew", "info", "--json=v2", "--cask", "1password").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password"}]}`)
+	got := kind.Drift(t.Context(), withApps(fake, apps).Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "1password"}}})
+	want := []check.Item{
+		{ID: "cask:1password", Name: "1password", State: kind.Missing, Action: kind.Install},
+		{ID: "cask:google-chrome", Name: "google-chrome", State: kind.ByHand, Detail: "installed by hand as Google Chrome.app"},
+		{ID: "cask:spaceman", Name: "spaceman", State: kind.ByHand, Detail: "installed by hand as Spaceman.app"},
+	}
+	if got.State != check.Attention || !slices.Equal(got.Items, want) {
+		t.Errorf("Drift() = %+v\nwant items %+v", got, want)
+	}
+}
+
+// When which casks install the apps installed by hand can't be told, none
+// is drift, and the casks' check stands as ever, the run's log saying why.
+func TestTheCasksWithoutACatalogueHaveNoAppsByHand(t *testing.T) {
+	fake := runnertest.New(t)
+	apps := t.TempDir()
+	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+	noCasks(fake)
+	fake.On("brew", "--cache").Prints(t.TempDir() + "\n")
+	fake.On("brew", "list", "--cask", "--full-name", "-1")
+	var logged []string
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+	got := kind.Drift(ctx, withApps(fake, apps).Casks(), config.List{Kind: "cask"})
+	if got.State != check.OK || len(got.Items) != 0 {
+		t.Errorf("Drift() = %+v, want ok, nothing by hand", got)
+	}
+	if want := []string{"kit can't tell what's installed by hand: no catalogue of casks in Homebrew's cache"}; !slices.Equal(logged, want) {
+		t.Errorf("logged %q, want %q", logged, want)
 	}
 }

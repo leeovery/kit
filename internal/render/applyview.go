@@ -224,8 +224,8 @@ func whatsLeft(r check.Result, s event.Step, start time.Time) []string {
 		case it.Quiet != "":
 		case IsDrift(it):
 			says := []string{look.Orange(it.Name), look.Muted(wrong(s, it))}
-			if it.Detail != "" {
-				says = append(says, look.Muted(it.Detail))
+			if more := beyond(s, it); more != "" {
+				says = append(says, look.Muted(more))
 			}
 			if !it.Since.IsZero() {
 				says = append(says, look.Muted(since(start.Sub(it.Since))))

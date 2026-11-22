@@ -1554,6 +1554,8 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 		fine(10, "homebrew", "4.6.1"),
 		finished(20, "brew", check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
 			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Detail: "installed, not declared"}}}),
+		finished(25, "cask", check.Result{State: check.Attention, Summary: "1 declared, all installed", Items: []check.Item{
+			{ID: "cask:editor", Name: "editor", State: "by-hand", Detail: "installed by hand as Editor.app"}}}),
 		finished(30, "mas", check.Result{State: check.OK, Summary: "2 declared, 1 installed", Items: []check.Item{
 			{ID: "mas:bear", Name: "bear", State: "missing", Quiet: "new", Detail: "needs an administrator's password"}}}),
 	)
@@ -1567,7 +1569,8 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 	}
 	record := screen(out.String())
 	for _, want := range []string{
-		"\n  NEEDS YOU  1\n  ▲ Homebrew formulae  3 declared, all installed\n  │ ffmpeg · ",
+		"\n  NEEDS YOU  2\n  ▲ Homebrew formulae  3 declared, all installed\n  │ ffmpeg · installed, not declared\n",
+		"\n  ▲ Homebrew casks  1 declared, all installed\n  │ editor · installed by hand as Editor.app\n",
 		"\n  ● App Store apps  2 declared, 1 installed\n  │ bear · needs an administrator's password\n",
 	} {
 		if !strings.Contains(record, want) {

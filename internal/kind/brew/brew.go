@@ -561,8 +561,9 @@ func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) 
 type formulae struct{ *Homebrew }
 
 var (
-	_ kind.Resolver = formulae{}
-	_ kind.Resolver = casks{}
+	_ kind.Resolver  = formulae{}
+	_ kind.Resolver  = casks{}
+	_ kind.Adoptable = casks{}
 )
 
 func (formulae) Name() string    { return formulaeName }

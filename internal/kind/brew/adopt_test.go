@@ -297,6 +297,7 @@ func TestAnAppAdoptedIsInstalled(t *testing.T) {
 	fake, apps, casks := adopting(t)
 	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
 	fake.On("brew", "list", "--cask", "--full-name", "-1")
+	noCasks(fake)
 	fake.On("brew", "info", "--json=v2", "--cask", "google-chrome").Prints(`{"formulae": [], "casks": [{"token": "google-chrome", "full_token": "google-chrome"}]}`)
 	fake.On("brew", "install", "--cask", "--adopt", "google-chrome").Prints(adoptingChrome)
 	var told []string
@@ -316,6 +317,7 @@ func TestAForkFailsItsCaskSayingWhy(t *testing.T) {
 	fake, apps, casks := adopting(t)
 	installApp(t, apps, "Spaceman.app", "dev.fork.Spaceman")
 	fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("").Then().Prints("google-chrome\n")
+	noCasks(fake)
 	fake.On("brew", "info", "--json=v2", "--cask", "google-chrome", "spaceman").Prints(`{"formulae": [], "casks": [{"token": "google-chrome", "full_token": "google-chrome"}, {"token": "spaceman", "full_token": "spaceman"}]}`)
 	fake.On("brew", "info", "--json=v2", "--cask", "spaceman").Prints(`{"formulae": [], "casks": [{"token": "spaceman", "full_token": "spaceman"}]}`)
 	fake.On("brew", "install", "--cask", "--adopt", "google-chrome")
