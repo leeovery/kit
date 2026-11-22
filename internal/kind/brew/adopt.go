@@ -84,17 +84,24 @@ func (c casks) adopting(ctx context.Context, batch []string) error {
 }
 
 // replace installs again, alone, with --force, each of a's casks whose
-// adopt failed, as failed says, while its own app is still there. It's an
-// install of its own as Homebrew refuses --adopt beside --force, and
-// --adopt never replaces. It keys on Homebrew's line saying the app
-// differs, never on the cask being missing: one that failed otherwise, as
-// its download, may yet be adopted in place, where --force would delete
-// the app. It returns what's still failed.
+// adopt failed, as failed says, while its own app is still there, and an
+// older copy of the same major version (replaceable): one that isn't fails
+// saying why, in place of Homebrew's line. It's an install of its own as
+// Homebrew refuses --adopt beside --force, and --adopt never replaces. It
+// keys on Homebrew's line saying the app differs, never on the cask being
+// missing: one that failed otherwise, as its download, may yet be adopted
+// in place, where --force would delete the app. It returns what's still
+// failed.
 func (c casks) replace(ctx context.Context, a adoption, failed error) []error {
 	var errs []error
+	var refused []string
 	replaced := false
 	for _, t := range a.notAdopted(failed) {
 		if there, err := t.cask.there(a.dir, c.Home); err != nil || !there {
+			continue
+		}
+		if err := t.cask.replaceable(a.dir); err != nil {
+			errs, refused = append(errs, err), append(refused, t.cask.token)
 			continue
 		}
 		if err := c.installs(ctx, []string{"--cask", "--force"}, []string{t.name}); err != nil {
@@ -106,7 +113,7 @@ func (c casks) replace(ctx context.Context, a adoption, failed error) []error {
 	if replaced {
 		failed = c.stillFailed(ctx, a, failed)
 	}
-	if failed != nil {
+	if failed = unsaid(failed, refused); failed != nil {
 		errs = append([]error{failed}, errs...)
 	}
 	return errs
@@ -162,14 +169,39 @@ func (c casks) stillFailed(ctx context.Context, a adoption, failed error) error 
 	case !ok:
 		return failed
 	}
+	said := saidOf(exit, func(token string) bool { return slices.Contains(missing, token) })
+	if said == nil {
+		return failed
+	}
+	return said
+}
+
+// unsaid is failed, brew install's failure, without why the casks refused
+// failed, which they say themselves: its lines of the other casks alone,
+// none when it names no other. As it is when none was refused, or it isn't
+// brew's.
+func unsaid(failed error, refused []string) error {
+	exit, ok := errors.AsType[*runner.ExitError](failed)
+	if len(refused) == 0 || !ok {
+		return failed
+	}
+	if said := saidOf(exit, func(token string) bool { return !slices.Contains(refused, token) }); said != nil {
+		return said
+	}
+	return nil
+}
+
+// saidOf is exit, brew install's failure, saying only the lines it fails
+// a cask on whose token keep keeps: nil when it has none.
+func saidOf(exit *runner.ExitError, keep func(token string) bool) *runner.ExitError {
 	var said []string
 	for _, line := range exit.Lines("Error:") {
-		if m := caskFailed.FindStringSubmatch(line); m != nil && slices.Contains(missing, m[1]) {
+		if m := caskFailed.FindStringSubmatch(line); m != nil && keep(m[1]) {
 			said = append(said, line)
 		}
 	}
 	if len(said) == 0 {
-		return failed
+		return nil
 	}
 	return runner.NewExitError(exit.Command, exit.Code, []byte(strings.Join(said, "\n")))
 }

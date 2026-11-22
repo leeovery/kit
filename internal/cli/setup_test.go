@@ -259,7 +259,7 @@ func withHandApps(t *testing.T) *world {
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n")
 	w.caskroom(t, map[string]string{"ghostty": "Ghostty.app"})
 	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
-{"casks": {"editor": {"raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]}, "tally": {"raw_artifacts": [[":uninstall", {":quit": "com.example.tally"}], [":app", ["Tally.app"]]]}}}`)
+{"casks": {"editor": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]}, "tally": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.tally"}], [":app", ["Tally.app"]]]}}}`)
 	w.installApp(t, "Editor", "com.example.editor")
 	w.installApp(t, "Tally", "com.example.tally")
 	w.installApp(t, "Kubius", "com.example.kubius")

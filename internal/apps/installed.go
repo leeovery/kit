@@ -131,6 +131,19 @@ func BundleID(app string) string {
 
 // bundleID is BundleID, or why its Info.plist doesn't read.
 func bundleID(app string) (string, error) {
+	return said(app, "CFBundleIdentifier")
+}
+
+// ShortVersion is the version of the app at app people are shown, as in
+// 4.6.8, from its Info.plist: "" when it doesn't say.
+func ShortVersion(app string) string {
+	version, _ := said(app, "CFBundleShortVersionString")
+	return version
+}
+
+// said is what the app at app's Info.plist says of key, or why it doesn't
+// read.
+func said(app, key string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(app, "Contents", "Info.plist"))
 	if err != nil {
 		return "", err
@@ -140,6 +153,6 @@ func bundleID(app string) (string, error) {
 		return "", err
 	}
 	m, _ := v.(map[string]any)
-	id, _ := m["CFBundleIdentifier"].(string)
-	return id, nil
+	value, _ := m[key].(string)
+	return value, nil
 }

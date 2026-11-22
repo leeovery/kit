@@ -153,7 +153,7 @@ func TestAnAppThatCantBeLookedAt(t *testing.T) {
 // there isn't the same as its download, as Homebrew 7 says it.
 const notAdopted = `==> Installing Cask example-editor
 ==> Adopting existing App at '/Applications/Example Editor.app'
-Error: The bundle short version of /opt/homebrew/Caskroom/example-editor/3.0/Example Editor.app is 3.0 but is 2.9 for /Applications/Example Editor.app!
+Error: The bundle short version of /opt/homebrew/Caskroom/example-editor/3.2/Example Editor.app is 3.2 but is 3.1 for /Applications/Example Editor.app!
 Error: example-editor: It seems the existing App is different from the one being installed.
 `
 
@@ -183,7 +183,7 @@ func TestAnAppNotAdoptedIsReplaced(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake, apps, casks := adopting(t)
-			app := installApp(t, apps, "Example Editor.app", "com.example.editor")
+			app := installVersion(t, apps, "Example Editor.app", "com.example.editor", "3.1")
 			fake.On("brew", "install", "--cask", "--adopt", "example-editor", "google-chrome").Does(func() {
 				if tt.meantime != nil {
 					tt.meantime(t, app)
@@ -207,17 +207,19 @@ func TestAnAppNotAdoptedIsReplaced(t *testing.T) {
 }
 
 // Replaced, a cask the adopt failed for otherwise is still missing, and the
-// adopt's failure stands; a replacing that fails says so too.
+// adopt's failure stands; a replacing that fails says so too. Refused, a
+// cask says why in place of Homebrew's line, beside what else failed.
 func TestReplacingLeavesWhatElseFailed(t *testing.T) {
 	for _, tt := range []struct {
-		name, listed, force, want string
+		name, version, listed, force, want string
 	}{
-		{"another failed", "example-editor\n", "", "Error: google-chrome: Download failed"},
-		{"replacing failed", "", "Error: example-editor: It seems there is already an App at '/Applications/Example Editor.app'; overwriting failed.", "Error: example-editor: It seems the existing App is different from the one being installed.; Error: example-editor: It seems there is already an App at '/Applications/Example Editor.app'; overwriting failed."},
+		{"another failed", "3.1", "example-editor\n", "", "Error: google-chrome: Download failed"},
+		{"replacing failed", "3.1", "", "Error: example-editor: It seems there is already an App at '/Applications/Example Editor.app'; overwriting failed.", "Error: example-editor: It seems the existing App is different from the one being installed.; Error: example-editor: It seems there is already an App at '/Applications/Example Editor.app'; overwriting failed."},
+		{"refused, another failed", "2.9", "", "", "Error: google-chrome: Download failed; Example Editor.app is 2.9 and the cask's is 3.2: kit replaces only an older copy of the same major version"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake, apps, casks := adopting(t)
-			installApp(t, apps, "Example Editor.app", "com.example.editor")
+			installVersion(t, apps, "Example Editor.app", "com.example.editor", tt.version)
 			fake.On("brew", "install", "--cask", "--adopt", "example-editor", "google-chrome").Exits(1).PrintsToStderr("Error: google-chrome: Download failed\n" + notAdopted)
 			force := fake.On("brew", "install", "--cask", "--force", "example-editor")
 			if tt.force != "" {
@@ -227,6 +229,55 @@ func TestReplacingLeavesWhatElseFailed(t *testing.T) {
 			err := casks.Install(t.Context(), []string{"example-editor", "google-chrome"})
 			if err == nil || engine.Reason(err) != tt.want {
 				t.Errorf("Install() = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// An app Homebrew didn't adopt is replaced only when it's an older copy of
+// the same major version than the cask's, as both say in dotted numbers,
+// its build after a comma aside, as --force deletes it. Any other, another
+// major version, a newer copy, a prerelease, the same version of another
+// build, an app of no version or one kit can't read, or a cask of the
+// latest, is left, and the cask fails saying why.
+func TestAnAppIsReplacedOnlyAsAnOlderCopyOfItsMajorVersion(t *testing.T) {
+	const why = ": kit replaces only an older copy of the same major version"
+	for _, tt := range []struct {
+		name, cask, app, id, version, refused string
+	}{
+		{"an older copy", "example-editor", "Example Editor.app", "com.example.editor", "3.1", ""},
+		{"an older copy, as 3.1 is 3.1.0", "example-editor", "Example Editor.app", "com.example.editor", "3.1.0.9", ""},
+		{"an older copy than a version and build", "keepassxc", "KeePassXC.app", "org.keepassxc.keepassxc", "2.7.10", ""},
+		{"an older major version", "charles", "Charles.app", "com.xk72.Charles", "4.6.8", "Charles.app is 4.6.8 and the cask's is 5.2.3" + why},
+		{"a newer copy", "example-editor", "Example Editor.app", "com.example.editor", "3.3", "Example Editor.app is 3.3 and the cask's is 3.2" + why + ", and this one is newer"},
+		{"a newer major version", "godot@3", "Godot.app", "org.godotengine.godot", "4.7.2", "Godot.app is 4.7.2 and the cask's is 3.6.3" + why + ", and this one is newer"},
+		{"the same version, another build", "example-editor", "Example Editor.app", "com.example.editor", "3.2", "Example Editor.app is 3.2 and the cask's is 3.2" + why + ", and can't tell whether this one is"},
+		{"a prerelease", "example-editor", "Example Editor.app", "com.example.editor", "3.2-rc1", "Example Editor.app is 3.2-rc1 and the cask's is 3.2" + why + ", and this one is a prerelease"},
+		{"the cask's a prerelease", "keepassxc@beta", "KeePassXC.app", "org.keepassxc.keepassxc", "2.7.10", "KeePassXC.app is 2.7.10 and the cask's is 2.8.0-beta1" + why + ", and the cask's is a prerelease"},
+		{"a cask of the latest", "nightly", "Nightly.app", "com.example.nightly", "1.0", "Nightly.app is 1.0 and the cask's is latest" + why + ", and latest says no version"},
+		{"no version", "example-editor", "Example Editor.app", "com.example.editor", "", "Example Editor.app says no version and the cask's is 3.2" + why + ", and can't tell whether this one is"},
+		{"a version kit can't read", "example-editor", "Example Editor.app", "com.example.editor", "3.1 (7)", "Example Editor.app is 3.1 (7) and the cask's is 3.2" + why + ", and can't tell whether this one is"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake, apps, casks := adopting(t)
+			installVersion(t, apps, tt.app, tt.id, tt.version)
+			fake.On("brew", "install", "--cask", "--adopt", tt.cask).Exits(1).PrintsToStderr("Error: " + tt.cask + ": It seems the existing App is different from the one being installed.\n")
+			fake.On("brew", "install", "--cask", "--force", tt.cask)
+			fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(tt.cask + "\n")
+			err := casks.Install(t.Context(), []string{tt.cask})
+			want := []string{"brew install --cask --adopt " + tt.cask}
+			if tt.refused == "" {
+				want = append(want, "brew install --cask --force "+tt.cask)
+			}
+			if got := installs(fake); !slices.Equal(got, want) {
+				t.Errorf("ran %q, want %q", got, want)
+			}
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != tt.refused {
+				t.Errorf("Install() = %q, want %q", got, tt.refused)
 			}
 		})
 	}

@@ -47,6 +47,11 @@ type catalogued struct {
 	// quits are the bundle ids its uninstall quits, lower case, for a cask
 	// installing through a package that says nowhere it puts an app.
 	quits []string
+	// version is its version, but its build after a comma, as in 5.2.3;
+	// autoUpdates, whether its app updates itself, which Homebrew adopts
+	// whatever its version.
+	version     string
+	autoUpdates bool
 	// disabled is whether Homebrew has disabled it, or will on a date set.
 	disabled bool
 	// unvetted is whether it moves into place anything kit can't tell to
@@ -130,12 +135,14 @@ func newest(pattern string) (stamp, error) {
 }
 
 // payload is the catalogue's file, as far as kit reads it: each cask's
-// artifacts, as written in its cask's source, and whether it's disabled;
-// and the casks renamed.
+// artifacts, as written in its cask's source, its version, whether its app
+// updates itself, and whether it's disabled; and the casks renamed.
 type payload struct {
 	Casks map[string]struct {
-		Artifacts []json.RawMessage `json:"raw_artifacts"`
-		Disable   json.RawMessage   `json:"disable_args"`
+		Artifacts   []json.RawMessage `json:"raw_artifacts"`
+		Version     string            `json:"version"`
+		AutoUpdates bool              `json:"auto_updates"`
+		Disable     json.RawMessage   `json:"disable_args"`
 	} `json:"casks"`
 	Renames map[string]string `json:"cask_renames"`
 }
@@ -163,6 +170,8 @@ func readCatalogue(path string) (*catalogue, error) {
 	for token, raw := range p.Casks {
 		k := caskOf(raw.Artifacts)
 		k.token, k.disabled = token, len(raw.Disable) > 0 && string(raw.Disable) != "null"
+		k.version, _, _ = strings.Cut(raw.Version, ",")
+		k.autoUpdates = raw.AutoUpdates
 		c.casks[token] = k
 		for _, at := range k.apps {
 			place := strings.ToLower(at)
@@ -188,14 +197,15 @@ func (c *catalogue) cask(name string) (catalogued, bool) {
 }
 
 // match is the cask that installs the app at at, from the Applications
-// folder, whose bundle id is id: of the casks putting an app there, the
-// one that states id, one without @ in its token over those with
-// (1password over 1password@beta). An app anywhere else is no cask's to
-// adopt: installing the cask would put a second copy in place. With none
-// putting an app there, an app at the folder's top is the one package's
-// whose uninstall quits id, though the package says nowhere it puts it: at
-// worst, it installs a second copy under another name.
-func (c *catalogue) match(at, id string) (string, bool) {
+// folder, whose bundle id is id and version have: of the casks putting an
+// app there that state id, the one that's the app's (pick). An app
+// anywhere else is no cask's to adopt: installing the cask would put a
+// second copy in place. With none putting an app there, an app at the
+// folder's top is the one package's whose uninstall quits id, though the
+// package says nowhere it puts it: at worst, it installs a second copy
+// under another name. Never one whose install would refuse the app
+// (takesOver).
+func (c *catalogue) match(at, id, have string) (string, bool) {
 	candidates := c.byPlace[strings.ToLower(at)]
 	if len(candidates) == 0 && filepath.Base(at) == at {
 		candidates = c.byQuit[strings.ToLower(id)]
@@ -206,13 +216,37 @@ func (c *catalogue) match(at, id string) (string, bool) {
 			stating = append(stating, token)
 		}
 	}
-	if plain := slices.DeleteFunc(slices.Clone(stating), func(token string) bool { return strings.Contains(token, "@") }); len(plain) > 0 {
-		stating = plain
-	}
-	if len(stating) != 1 {
+	token, ok := c.pick(stating, have)
+	if !ok || !c.casks[token].takesOver(have) {
 		return "", false
 	}
-	return stating[0], true
+	return token, true
+}
+
+// takesOver reports whether installing the cask takes over its app of
+// version have: Homebrew adopts it whatever its version when the app
+// updates itself, else when it's the cask's version, and kit replaces it
+// when it's an older copy of the same major version (replaces).
+func (k catalogued) takesOver(have string) bool {
+	return k.autoUpdates || sameVersion(have, k.version) || replaces(have, k.version)
+}
+
+// pick is the one of tokens that's the app's, of version have: the one
+// whose version is have, if one alone is (blender@lts for Blender's LTS);
+// else the one without @ in its token, over those with (1password over
+// 1password@beta).
+func (c *catalogue) pick(tokens []string, have string) (string, bool) {
+	same := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return !sameVersion(have, c.casks[token].version) })
+	if len(same) == 1 {
+		return same[0], true
+	}
+	if plain := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return strings.Contains(token, "@") }); len(plain) > 0 {
+		tokens = plain
+	}
+	if len(tokens) != 1 {
+		return "", false
+	}
+	return tokens[0], true
 }
 
 // states reports whether the cask states the bundle id id, in any case.
@@ -243,6 +277,22 @@ func (k catalogued) there(dir, home string) (bool, error) {
 		found = true
 	}
 	return found, nil
+}
+
+// replaceable is why the cask's apps already in dir aren't replaced by its
+// own: nil when each is an older copy of the same major version
+// (notReplacing).
+func (k catalogued) replaceable(dir string) error {
+	for _, at := range k.apps {
+		path := filepath.Join(dir, at)
+		if _, err := os.Lstat(path); err != nil {
+			continue
+		}
+		if err := notReplacing(at, apps.ShortVersion(path), k.version); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // caskOf is a cask as its raw artifacts have it: each a list of its sort,

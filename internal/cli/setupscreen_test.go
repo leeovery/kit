@@ -176,7 +176,7 @@ func settingUp(t *testing.T) *world {
 	w.fake.On("git", "-C", dir, "check-ignore", "--verbose", "--stdin", "-z").Exits(1)
 	w.fake.On("brew", "--prefix").Prints("/opt/homebrew\n")
 	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
-{"casks": {"tally": {"raw_artifacts": [[":uninstall", {":quit": "com.example.tally"}], [":app", ["Tally.app"]]]}}}`)
+{"casks": {"tally": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.tally"}], [":app", ["Tally.app"]]]}}}`)
 	w.fake.On("sudo", "-S", "-p", "[kit: sudo wants the password]", "-v")
 	w.fake.On("git", "-C", dir, "--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "laptop/home").Prints("laptop/home/.zshrc\x00")
 	return w

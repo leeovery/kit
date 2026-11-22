@@ -70,7 +70,7 @@
       ]
     },
     "example-editor": {
-      "names": ["Example Editor"], "tap_string": "homebrew/cask", "version": "3.0",
+      "names": ["Example Editor"], "tap_string": "homebrew/cask", "version": "3.2",
       "raw_artifacts": [
         [":uninstall", {":quit": ["com.example.editor", "com.example.editor.helper"]}],
         [":app", ["Example Editor.app"]],
@@ -129,6 +129,77 @@
       "raw_artifacts": [
         [":uninstall", {":quit": "com.example.relay", ":pkgutil": "com.example.relay.enterprise"}],
         [":pkg", ["RelayEnterprise.pkg"]]
+      ]
+    },
+    "charles": {
+      "names": ["Charles"], "tap_string": "homebrew/cask", "version": "5.2.3",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": "com.xk72.Charles.ProxyHelper", ":quit": "com.xk72.Charles", ":delete": "/Library/PrivilegedHelperTools/com.xk72.Charles.ProxyHelper"}],
+        [":app", ["Charles.app"]],
+        [":uninstall_postflight_steps", {":steps": [{":name": "Charles", ":type": "delete_keychain_certificate"}]}]
+      ]
+    },
+    "charles@4": {
+      "names": ["Charles"], "tap_string": "homebrew/cask", "version": "4.6.8",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": "com.xk72.Charles.ProxyHelper", ":quit": "com.xk72.Charles", ":delete": "/Library/PrivilegedHelperTools/com.xk72.Charles.ProxyHelper"}],
+        [":app", ["Charles.app"]],
+        [":uninstall_postflight_steps", {":steps": [{":name": "Charles", ":type": "delete_keychain_certificate"}]}]
+      ]
+    },
+    "godot": {
+      "names": ["Godot Engine"], "tap_string": "homebrew/cask", "version": "4.7.2",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.godotengine.godot"}],
+        [":app", ["Godot.app"]],
+        [":binary", ["$APPDIR/Godot.app/Contents/MacOS/Godot"], {":target": "godot"}]
+      ]
+    },
+    "godot@3": {
+      "names": ["Godot Engine"], "tap_string": "homebrew/cask", "version": "3.6.3",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.godotengine.godot"}],
+        [":app", ["Godot.app"]],
+        [":binary", ["$APPDIR/Godot.app/Contents/MacOS/Godot"], {":target": "godot"}]
+      ]
+    },
+    "blender": {
+      "names": ["Blender"], "tap_string": "homebrew/cask", "version": "5.3.0",
+      "raw_artifacts": [
+        [":app", ["Blender.app"]],
+        [":command_wrapper", ["blender"], {":executable": "$APPDIR/Blender.app/Contents/MacOS/Blender"}],
+        [":zap", {":trash": ["~/Library/Caches/Blender", "~/Library/Saved Application State/org.blenderfoundation.blender.savedState"]}]
+      ]
+    },
+    "blender@lts": {
+      "names": ["Blender"], "tap_string": "homebrew/cask", "version": "5.2.4",
+      "raw_artifacts": [
+        [":app", ["Blender.app"]],
+        [":command_wrapper", ["blender"], {":executable": "$APPDIR/Blender.app/Contents/MacOS/Blender"}],
+        [":zap", {":trash": ["~/Library/Caches/Blender", "~/Library/Saved Application State/org.blenderfoundation.blender.savedState"]}]
+      ]
+    },
+    "keepassxc": {
+      "names": ["KeePassXC"], "tap_string": "homebrew/cask", "version": "2.8.0,2.8.0-1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.keepassxc.keepassxc"}],
+        [":app", ["KeePassXC.app"]],
+        [":binary", ["$APPDIR/KeePassXC.app/Contents/MacOS/keepassxc-cli"]]
+      ]
+    },
+    "keepassxc@beta": {
+      "names": ["KeePassXC"], "tap_string": "homebrew/cask", "version": "2.8.0-beta1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.keepassxc.keepassxc"}],
+        [":app", ["KeePassXC.app"]],
+        [":binary", ["$APPDIR/KeePassXC.app/Contents/MacOS/keepassxc-cli"]]
+      ]
+    },
+    "nightly": {
+      "names": ["Nightly"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.nightly"}],
+        [":app", ["Nightly.app"]]
       ]
     }
   },

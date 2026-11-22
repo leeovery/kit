@@ -111,8 +111,8 @@ func TestApplyAdoptsTheAppsAlreadyThere(t *testing.T) {
 	w.writeSection(t, "laptop", "homebrew casks", "editor\nspaceman\n")
 	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
 {"casks": {
-	"editor": {"raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]},
-	"spaceman": {"raw_artifacts": [[":uninstall", {":quit": "dev.original.Spaceman"}], [":app", ["Spaceman.app"]]]}}}`)
+	"editor": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]},
+	"spaceman": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "dev.original.Spaceman"}], [":app", ["Spaceman.app"]]]}}}`)
 	w.installApp(t, "Editor", "com.example.editor")
 	w.installApp(t, "Spaceman", "dev.fork.Spaceman")
 	f := w.fake

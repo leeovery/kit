@@ -123,9 +123,10 @@ holds the Mac as it stands:
 
 **Installed by hand.** An app that no kind installed: not from Homebrew or the App Store, not
 Apple's, and not one Chrome made for a website. If a cask installs the same app, kit offers to
-adopt it, and Homebrew takes the app over. The cask must name the app's bundle id. An app
-that only shares the name, such as a fork, gets no offer. A package you install yourself
-through Homebrew isn't one: it comes up as drift.
+adopt it, and Homebrew takes the app over. The cask must name the app's bundle id, so a fork
+gets no offer. The app must be the cask's version, unless the cask updates itself or the app
+is an older copy of the same major version. A package you install yourself through Homebrew
+isn't one: it comes up as drift.
 
 ## A new Mac
 

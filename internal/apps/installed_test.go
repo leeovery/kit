@@ -118,3 +118,23 @@ func TestInstalledInOrder(t *testing.T) {
 		t.Errorf("WithHelpers() = %q, want %q", got, want)
 	}
 }
+
+// An app's short version is the one its Info.plist gives people: none when
+// it gives none, or there's no app.
+func TestShortVersion(t *testing.T) {
+	dir := t.TempDir()
+	versioned := filepath.Join(dir, "Versioned.app")
+	if err := os.MkdirAll(filepath.Join(versioned, "Contents"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	info := `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>4.6.8</string><key>CFBundleVersion</key><string>468</string></dict></plist>`
+	if err := os.WriteFile(filepath.Join(versioned, "Contents", "Info.plist"), []byte(info), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeApp(t, filepath.Join(dir, "Plain.app"), "com.example.plain")
+	for app, want := range map[string]string{"Versioned.app": "4.6.8", "Plain.app": "", "Missing.app": ""} {
+		if got := apps.ShortVersion(filepath.Join(dir, app)); got != want {
+			t.Errorf("ShortVersion() of %s = %q, want %q", app, got, want)
+		}
+	}
+}

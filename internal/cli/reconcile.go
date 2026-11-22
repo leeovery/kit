@@ -335,7 +335,6 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	installs, wanted := make(map[string][]string), make(map[string][]string)
 	for _, d := range decisions {
 		_, isKind := r.drifters[d.item.Kind].(kindDrifter)
-		// Adopting what's installed by hand installs it, taking it over.
 		if (isKind || r.isAdminStep(d.item.Kind)) && (d.action == install || d.action == adopt && d.item.State == kind.ByHand) {
 			installs[d.item.Kind] = append(installs[d.item.Kind], d.item.Name)
 			wanted[d.item.Kind] = append(wanted[d.item.Kind], d.item.Name)

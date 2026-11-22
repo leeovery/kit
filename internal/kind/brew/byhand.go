@@ -85,7 +85,7 @@ func (h *Homebrew) matched(ctx context.Context, hand []ByHand) error {
 	}
 	for i, app := range hand {
 		if at, err := filepath.Rel(h.AppDirs[0], app.Path); err == nil && filepath.IsLocal(at) {
-			hand[i].Cask, _ = cat.match(at, app.ID)
+			hand[i].Cask, _ = cat.match(at, app.ID, apps.ShortVersion(app.Path))
 		}
 	}
 	return nil

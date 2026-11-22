@@ -118,8 +118,9 @@ reconcile` asks whether to keep it.
 - **A replaced linked file is never lost.** `--adopt` moves the copy on the Mac into
   kit-config, and links it back. `--revert` links the copy in kit-config instead, and moves the
   other to the Bin.
-- **Adopting an app can replace it.** If it differs from the download, the cask's copy
-  replaces it. A fork with the same name is never offered.
+- **Adopting an app can replace it.** If the app differs from the download, the cask's copy
+  replaces an older copy of the same major version. kit leaves any other version alone, and
+  the cask fails, saying why. A fork with the same name is never offered.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 

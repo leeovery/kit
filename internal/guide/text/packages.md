@@ -45,11 +45,14 @@ Every cask install runs `brew install --cask --adopt`, in `kit cask add`,
 `kit apply` and `kit reconcile` alike: an app already in /Applications
 that's the cask's is taken over in place. If Homebrew says it differs from
 the cask's download, kit installs the cask again, alone, with
-`brew install --cask --force`, which replaces the app. An app there whose
-bundle id the cask doesn't name (a fork of the same name), or the App
-Store's copy, is left alone, and the cask fails, saying so: ask the person
-which to keep. To keep the app, undeclare the cask
-(`kit reconcile cask:<name> --undeclare`).
+`brew install --cask --force`, which replaces the app, but only an older
+copy of the same major version: the app's `CFBundleShortVersionString` and
+the cask's version, before any comma, both dotted numbers, the app's lower.
+An app of any other version (another major version, a newer copy, a
+prerelease, or beside a cask of `latest`), an app there whose bundle id the
+cask doesn't name (a fork of the same name), or the App Store's copy, is
+left alone, and the cask fails, saying so: ask the person which to keep. To
+keep the app, undeclare the cask (`kit reconcile cask:<name> --undeclare`).
 
 An app installed by hand that one of Homebrew's own casks installs, the
 cask naming the app's bundle id, is drift while the cask isn't declared
@@ -64,9 +67,12 @@ for this Mac: state `by-hand`, its `detail` saying what it's installed as,
 - `--snooze`: quiet for 7 days.
 
 There's no `--remove`: kit deletes no app it didn't install. Adopting may
-replace the app, so ask the person before you adopt. Casks from taps, and
-apps whose cask can't be told, as Homebrew's catalogue can't be read, are
-never offered.
+replace the app, so ask the person before you adopt. Of the casks
+installing an app, the one whose version is the app's is offered
+(`blender@lts` for Blender's LTS), else the one without `@`, and never one
+whose install would leave the app and fail. Casks from taps, and apps whose
+cask can't be told, as Homebrew's catalogue can't be read, are never
+offered.
 
 ## Private downloads
 

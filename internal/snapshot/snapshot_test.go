@@ -455,7 +455,7 @@ func TestTheAppsInstalledByHand(t *testing.T) {
 		why       bool
 	}{
 		{"catalogued", map[string]string{"api/internal/packages.arm64_tahoe.jws.json.payload": `{"protected":"e30","signature":"c2ln"}
-{"casks": {"google-chrome": {"raw_artifacts": [[":uninstall", {":quit": "com.google.Chrome"}], [":app", ["Google Chrome.app"]]]}}}`}, "google-chrome", false},
+{"casks": {"google-chrome": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.google.Chrome"}], [":app", ["Google Chrome.app"]]]}}}`}, "google-chrome", false},
 		{"no catalogue", nil, "", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

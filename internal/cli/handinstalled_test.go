@@ -31,7 +31,7 @@ func handWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
 	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
-{"casks": {"editor": {"raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]}}}`)
+{"casks": {"editor": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]}}}`)
 	w.installApp(t, "Editor", "com.example.editor")
 	w.installApp(t, "Kubius", "com.example.kubius")
 	w.write(t, driftFile, `{"first_seen": {"brew:ffmpeg": "2025-12-31T00:00:00Z", "brew:node@20": "2025-12-31T00:00:00Z", "cask:firefox": "2025-12-31T00:00:00Z", "cask:editor": "2025-12-31T00:00:00Z"}}`)
