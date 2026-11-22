@@ -611,7 +611,7 @@ kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's M
 kit machine add <name>       Add a Mac to kit-config, a copy of another's or empty   [--from] [--description]
 kit terminal [<name>]        The terminal a new Mac's boot hands over to: shown, or set in kit.toml   [--none]
 kit nightly at [<time>]      When the nightly run falls due: shown, or set in kit.toml (nightly_at)
-kit setup                    Set up a Mac in use: kit-config made or joined, the Mac declared as it is, then kit apply   [--create|--join] [--mac] [--from] [--restore|--no-restore] [--prefs|--no-prefs] [--link|--no-link] [--apply|--no-apply]
+kit setup                    Set up a Mac in use: kit-config made or joined, the Mac declared as it is, then kit apply   [--create|--join] [--mac] [--from] [--restore|--no-restore] [--prefs|--no-prefs] [--link|--no-link] [--adopt|--no-adopt] [--apply|--no-apply]
 
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
@@ -724,7 +724,12 @@ suggested, its flag, and its answer kept in the record: the folders a new Mac br
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
 does; asked unless this Mac's own record says capture's on, whatever kit-config declares, as a
 Mac joining as a copy of one saving them has saved nothing), the shell's and tools' files kept (`--link`, as `kit file
-add` moves and links them), and, joining, what kit-config declares that this Mac hasn't:
+add` moves and links them), the apps installed by hand Homebrew takes over (`--adopt <cask>`,
+To Homebrew: a row a cask of those that install them, as `brew.Homebrew` matches them, its apps
+named and the cask only when its name says more, all ticked, a cask the Mac declares already
+never offered; the ticked declared with the snapshot, so the `kit apply` after setup takes their
+apps over, the rest left by hand for good in drift.json, `kit reconcile` never asking of them),
+and, joining, what kit-config declares that this Mac hasn't:
 installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`); a kind
 whose check couldn't tell is asked about too, saying so and why, never taken for nothing to
 install; kit-config started on this Mac has nothing to install, its step saying so. Then,
@@ -737,8 +742,8 @@ isn't, links only what isn't, commits nothing new and pushes what's waiting, to 
 repository as one, its branch made by the push; what's waiting that can't be told is never
 taken for nothing. Till kit-config's own branch is on the remote, the prefs store pushes
 nothing, as GitHub makes a new repository's first branch pushed the one a new Mac's boot
-clones. It says what's refused and what couldn't be checked, each with why, the apps installed by hand
-(never Apple's, the App Store's, a cask's or those Chrome makes for websites, `com.google.Chrome.app.`;
+clones. It says what's refused and what couldn't be checked, each with why, the apps left installed by hand
+(none a cask takes over, never Apple's, the App Store's, a cask's or those Chrome makes for websites, `com.google.Chrome.app.`;
 the person's to install through Homebrew or the App Store should kit set the Mac up again),
 and that secrets go in a store with `kit secret add`; then `kit apply` runs in the same
 process, with its own screen at a terminal. Without a terminal it asks nothing: each question

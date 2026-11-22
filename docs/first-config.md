@@ -15,7 +15,7 @@ kit setup
 
 `kit setup` signs you in to GitHub and asks a few questions. It ends on what it declared:
 
-<img src="../art/first-config-done.webp" alt="kit setup's end on a Mac in use: GitHub, kit-config and this Mac done, 370 things declared by part, three apps installed by hand, a note on secrets, and kit apply carrying on" width="573">
+<img src="../art/first-config-done.webp" alt="kit setup's end on a Mac in use: GitHub, kit-config and this Mac done, 370 things declared by part, two apps for Homebrew to take over, three left installed by hand, a note on secrets, and kit apply carrying on" width="573">
 
 On a blank Mac, use the one-line install instead: see [A new Mac from one line](new-mac.md). A
 Mac with a kit-config already is refused, because kit looks after it.
@@ -31,6 +31,7 @@ Each question comes with a suggested answer, so enter takes it. Each has a flag 
 | Your data | Your own folders | `--restore`, `--no-restore` |
 | Apps' settings | Save every night | `--prefs`, `--no-prefs` |
 | Linked files | Every one found | `--link`, `--no-link` |
+| To Homebrew | Every app offered | `--adopt`, `--no-adopt` |
 | What to install (joining) | Install with the rest | `--apply`, `--no-apply` |
 
 - **Your data** lists the folders in your home folder, with their sizes. A new Mac copies the
@@ -39,6 +40,8 @@ Each question comes with a suggested answer, so enter takes it. Each has a flag 
   [Apps' settings](apps-settings.md).
 - **Linked files** lists files such as `~/.zshrc` and `~/.ssh/config`. Each one you keep moves
   into kit-config and is linked back.
+- **To Homebrew** lists apps you installed by hand that a cask installs. Then `kit apply` has
+  Homebrew take over each one you keep. kit leaves the rest, and won't ask again.
 
 ## What happens
 
@@ -48,14 +51,14 @@ file:
 - **Everything installed and not yet declared,** of each kind whose program is here, such as
   Homebrew casks, login items and MCP servers.
 - **The folders those programs need on kit's PATH,** such as `~/.local/bin` for Claude Code.
-  kit adds each to this Mac's `[paths]`, as `kit path add` does, if your shell finds the program
-  there and kit's PATH doesn't.
+  kit adds each to this Mac's `[paths]` if your shell finds the program there and kit's PATH
+  doesn't.
 - **The macOS settings set now,** leaving out the state macOS keeps for itself, and git's global
   settings.
 - **The features on and the backup tools set up,** such as Touch ID for sudo and Time Machine.
 - **Your answers go beside it.** kit commits all of it as one, and pushes it.
-- **Apps installed by hand are listed, never managed.** If kit sets this Mac up again, you
-  install them yourself.
+- **Apps left installed by hand are listed.** They're yours to install if kit sets this Mac up
+  again.
 - **Secrets aren't looked for.** kit keeps a secret in a store, never in kit-config: declare each
   one with `kit secret add`. See [Secrets from 1Password](secrets.md).
 
@@ -94,10 +97,11 @@ or stop to look first with `kit status`.
 | `--restore <path>` | A folder a new Mac brings back |
 | `--prefs` | Save apps' settings every night |
 | `--link <path>` | A file kit-config keeps, linked back |
+| `--adopt <cask>` | A cask that takes over its app |
 | `--no-apply` | Stop after the commit, to look first |
 
-`--restore` and `--link` take one path each time. `--restore`, `--prefs` and `--link` each
-have a `--no-` flag that answers no. Without a terminal, kit asks nothing: a question its flag
+`--restore`, `--link` and `--adopt` take one each time. Each of those and `--prefs` has a
+`--no-` flag that answers no. Without a terminal, kit asks nothing: a question its flag
 doesn't answer stops setup, naming the flag.
 
 ## Related
