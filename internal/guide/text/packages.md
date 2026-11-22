@@ -47,9 +47,11 @@ A cask of Homebrew's own that kit can vet, its apps alone, installs with
 is taken over in place, at any version if the cask updates itself. If
 Homebrew says it differs from the cask's download, kit installs the cask
 again, alone, with `brew install --cask --force`, which replaces the app,
-but only an older copy of the same major version: the app's
-`CFBundleShortVersionString` and the cask's version, before any comma,
-both dotted numbers, the app's lower. An app of any other version (another
+but only the same version (another build) or an older copy of the same
+major version: the app's `CFBundleShortVersionString` and the cask's
+version, before any comma, both dotted numbers. A cask that installs
+through a package is checked so before its installer runs over the app,
+whether it updates itself or not. An app of any other version (an earlier
 major version, a newer copy, a prerelease, or beside a cask of `latest`),
 an app there whose bundle id the cask doesn't name (a fork of the same
 name), or the App Store's copy, even when the cask names its id, is left
@@ -73,21 +75,26 @@ for this Mac: state `by-hand`, its `detail` saying what it's installed as,
 
 - `kit reconcile cask:<name> --adopt [--shared]`: declare the cask, for
   this Mac or every Mac, and install it, Homebrew taking the app over.
-  `kit cask add` does the same. With `--shared`, every Mac with the app
-  hands it to Homebrew at its next apply, even one where it was left.
+  `kit cask add` does the same. `--shared` declares the cask for every
+  Mac: each Mac with the app has Homebrew take it over, even one where it
+  was left by hand, and every Mac without it installs it.
 - `--leave`: leave it installed by hand, quiet for good, on this Mac only
   (`--shared` is refused), kept by the app's bundle id in `by-hand.json`
-  in kit's state. Status counts it, `left`. Any other answer by its id, or
-  the app going, ends it; `kit reconcile --all` never asks about it.
+  in kit's state. Status counts it, `left`. Any other answer by its id,
+  the app leaving the app folders, or a cask having it ends it;
+  `kit reconcile --all` never asks about it.
 - `--snooze`: quiet for 7 days.
 
 There's no `--remove`: kit deletes no app it didn't install. Adopting may
 replace the app, so ask the person before you adopt. Of the casks
-installing an app, the one without `@` is offered if it updates itself,
-whatever the app's version; else the one whose version is nearest the
-app's, by the numbers it starts with (`blender@lts` for Blender's LTS), a
-tie going to the one without `@`; and never one whose install would leave
-the app and fail, as a cask of `latest` that doesn't update itself would.
+installing an app, when the one without `@` updates itself: that one if
+the app's major version is the cask's or later (Chrome, Dropbox); for an
+earlier major, the `@` line of that major (`bbedit@14`, `firefox@esr`),
+never a channel's (beta, nightly and the like), or none. Otherwise the one
+whose version is nearest the app's, by the numbers it starts with
+(`blender@lts` for Blender's LTS), a tie going to the one without `@`.
+None is offered that kit's own checks would refuse, as a cask of `latest`
+that doesn't update itself, but Homebrew can still refuse the install.
 Casks from taps, and apps whose cask can't be told, as Homebrew's catalogue
 can't be read, are never offered.
 

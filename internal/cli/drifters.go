@@ -152,7 +152,7 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		// Never removed: kit deletes nothing it didn't install.
 		// One set of words for both: "everywhere", after the label, tells
 		// them apart, and longer words would run past a terminal's width.
-		takes := does(takingOver, "declare it; "+d.tool+" takes it over, updating an older copy")
+		takes := does(takingOver, "declare it; "+d.tool+" takes it over, replacing an older copy")
 		all = []choice{
 			{action: adopt, words: takes},
 			{action: adopt, words: takes, shared: true},

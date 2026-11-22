@@ -120,14 +120,25 @@ in, kit asks again on the next run.
 
 ## A cask fails because its app is already there
 
-kit has Homebrew take over an app already in Applications only if it's the cask's own. If it
-isn't, the cask fails, and the app stays as it is. The message starts `couldn't install`, then
-gives one of the reasons below. The fix for each is the same: choose which copy you keep.
+kit has Homebrew take over an app already in Applications only if it's the cask's own, at a
+version kit can update. If it isn't, the cask fails, and the app stays as it is.
+
+The reason comes after the start of the message:
+
+| Command | Message starts |
+|---|---|
+| `kit apply` | `couldn't install <cask>:` |
+| `kit cask add` | `couldn't install:` |
+| `kit reconcile` | `couldn't install:` |
+
+With four casks or more failing, `kit apply` starts `couldn't install 4 of 6:` instead. Two
+reasons or more are joined with `;`. The fix for each is the same: choose which copy you
+keep.
 
 ### The app isn't the cask's
 
 ```text
-couldn't install spaceman: Spaceman.app is already in /Applications and isn't the cask's (com.example.Spaceman)
+Spaceman.app is already in /Applications and isn't the cask's (com.example.Spaceman)
 ```
 
 **Cause:** the cask doesn't name the bundle id of the app there. A fork with the same name
@@ -136,7 +147,7 @@ does this. If the message ends `(no bundle id)`, the app names no bundle id at a
 ### The App Store's copy is there
 
 ```text
-couldn't install google-chrome: Google Chrome.app is already in /Applications and is the App Store's
+Slack.app is already in /Applications and is the App Store's
 ```
 
 **Cause:** the app came from the App Store. kit never hands the App Store's copy to Homebrew,
@@ -145,21 +156,24 @@ even if the cask names its bundle id.
 ### Another version is there
 
 ```text
-couldn't install charles: Charles.app is 4.6.8 and the cask's is 5.2.3: kit replaces only an older copy of the same major version
+Charles.app is 4.6.8 and the cask's is 5.2.3: kit replaces only an older copy of the same major version
 ```
 
-**Cause:** the app differs from the cask's download. kit replaces it only if it's an older
-copy of the same major version. A newer copy, another major version or a prerelease stays,
-and so does an app that says no version. The message may add why, such as `this one is
-newer`.
+**Cause:** the app isn't one kit can update to the cask's version. kit replaces the app only if
+it's the same version or an older copy of the same major version. These stay as they are:
 
-If you want to keep the older major version, Homebrew may have a cask for it, such as
-`charles@4`. Declare that one instead.
+- a newer copy, and the message adds `this one is newer`;
+- an earlier major version, such as Charles 4 beside the cask's 5;
+- a prerelease, or an app that says no version.
+
+A cask that installs through a package is checked the same way, before its installer runs.
+If you want to keep an earlier major version, Homebrew may have a cask for it, such as
+`bbedit@14`. Declare that one instead.
 
 ### kit can't look at the app
 
 ```text
-couldn't install google-chrome: can't tell whose Google Chrome.app in /Applications is: …
+can't tell whose Spaceman.app in /Applications is: …
 ```
 
 **Cause:** kit couldn't read the app, for the reason after the last colon. Put that right,
@@ -170,8 +184,12 @@ then run `kit apply cask`.
 The message holds Homebrew's own words, `It seems there is already an App at`.
 
 **Cause:** kit couldn't check the cask, so Homebrew installed it without taking the app over.
-That happens for a cask from a tap, a cask missing from Homebrew's catalogue, or every cask if
-the catalogue can't be read.
+That happens for these casks:
+
+- a cask from a tap;
+- a cask that puts more than apps in place, such as a font;
+- a cask missing from Homebrew's catalogue;
+- every cask, if the catalogue can't be read.
 
 ### The fix: choose which copy you keep
 
@@ -184,8 +202,8 @@ If `[app store apps]` declares the app in the way, moving it to the Bin isn't en
 `kit apply` installs it again. Run `kit mas remove <app>` instead, which uninstalls it and takes
 its line out.
 
-If you keep yours, the app stays installed by hand. If the cask is in the shared file, add
-`--shared`. That takes the cask off every Mac: no answer keeps a shared cask off one Mac only.
+If you keep yours, the app stays as it is. If the cask is in the shared file, add `--shared`.
+That takes the cask off every Mac: no answer keeps a shared cask off one Mac only.
 
 ## kit.app needs Full Disk Access again
 

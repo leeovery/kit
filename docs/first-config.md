@@ -13,16 +13,16 @@ brew install leeovery/tools/kit
 kit setup
 ```
 
-`kit setup` signs you in to GitHub and asks a few questions. It ends on what it declared:
+`kit setup` signs you in to GitHub and asks some questions. It ends on what it declared:
 
 <img src="../art/first-config-done.webp" alt="kit setup's end on a Mac in use: GitHub, kit-config and this Mac done, 370 things declared by part, two apps for Homebrew to take over, three left installed by hand, a note on secrets, and kit apply carrying on" width="573">
 
 On a blank Mac, use the one-line install instead: see [A new Mac from one line](new-mac.md). A
-Mac with a kit-config already is refused, because kit looks after it.
+Mac kit looks after already is refused.
 
 ## What it asks
 
-Each question comes with a suggested answer, so enter takes it. Each has a flag too:
+Each question suggests an answer, which enter takes, and has a flag:
 
 | Question | Suggested | Flags |
 |---|---|---|
@@ -40,8 +40,8 @@ Each question comes with a suggested answer, so enter takes it. Each has a flag 
   [Apps' settings](apps-settings.md).
 - **Linked files** lists files such as `~/.zshrc` and `~/.ssh/config`. Each one you keep moves
   into kit-config and is linked back.
-- **To Homebrew** lists apps you installed by hand that a cask installs. Then `kit apply` has
-  Homebrew take over each one you keep. kit leaves the rest, and won't ask again: `kit status`
+- **To Homebrew** lists apps you installed by hand that kit matches to a cask. Then `kit apply`
+  has Homebrew take over each one you tick. kit leaves the rest, and won't ask again: `kit status`
   counts them, and `kit cask add <name>` takes one over later.
 
 ## What happens
@@ -51,35 +51,36 @@ file:
 
 - **Everything installed and not yet declared,** of each kind whose program is here, such as
   Homebrew casks, login items and MCP servers.
-- **The folders those programs need on kit's PATH,** such as `~/.local/bin` for Claude Code.
-  kit adds each to this Mac's `[paths]` if your shell finds the program there and kit's PATH
-  doesn't.
-- **The macOS settings set now,** leaving out the state macOS keeps for itself, and git's global
-  settings.
+- **The folders those programs need on kit's PATH,** such as `~/.local/bin` for Claude Code,
+  in this Mac's `[paths]`. kit adds one if only your shell's PATH finds the program.
+- **The macOS settings set now,** and git's global settings, without the state macOS keeps
+  for itself.
 - **The features on and the backup tools set up,** such as Touch ID for sudo and Time Machine.
 - **Your answers go beside it.** kit commits all of it as one, and pushes it.
 - **Apps left installed by hand are listed.** They're yours to install if kit sets this Mac up
   again.
 - **Secrets aren't looked for.** kit keeps a secret in a store, never in kit-config: declare each
-  one with `kit secret add`. See [Secrets from 1Password](secrets.md).
+  with `kit secret add`. See [Secrets from 1Password](secrets.md).
 
 ## A second Mac joins
 
+On your next Mac, plain `kit setup` finds kit-config on your account and offers to join it.
+Pick which Mac this is, or name one kit-config doesn't have yet:
+
 ```bash
-# Join kit-config as a new Mac named studio
+# Or answer with flags: join as a Mac named studio
 kit setup --join owner/kit-config --mac studio
 ```
 
-A new Mac starts from what every Mac shares, or copies another with `--from`. The snapshot then
-declares what this Mac has. kit-config must be private, or `--join` refuses it.
+A Mac kit-config doesn't name yet starts from what every Mac shares, or copies another with
+`--from`. kit-config must be private, or `--join` refuses it.
 
 ## Good to know
 
 - **Run it again if it stops.** `kit setup` carries on where it stopped, and nothing is made
   twice. Bare `kit` at a terminal offers the same. Once the commit is pushed, setup is done.
-- **A package with a private download is left out.** Setup refuses its line without the token,
-  and won't come back to it. Declare the token with `kit secret add`, then add the package with
-  `kit brew add` or `kit cask add`.
+- **A package with a private download is left out,** for good. Declare the token with
+  `kit secret add`, then add the package with `kit brew add` or `kit cask add`.
 - **Never delete `~/.config/kit` part-way.** Setup moves files into it and links them back.
 
 ## Reference

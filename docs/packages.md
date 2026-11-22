@@ -55,28 +55,25 @@ A few kinds take more than the name they keep:
 
 ## What happens
 
-- **This Mac only, unless you say.** Without `--shared`, the line goes in this Mac's file, such
-  as `laptop/declarations`. With `--shared`, it goes in `shared/declarations` for every Mac,
+- **This Mac only, unless you say.** Without `--shared`, the line goes in this Mac's file. With `--shared`, it goes in `shared/declarations` for every Mac,
   and comes out of each Mac's own file. Other Macs install it at their next `kit apply`.
 - **Removing undoes the install.** A formula is uninstalled, a login item stops opening at
   login, and an MCP server leaves Claude Code. If something installed still needs the package,
   kit changes nothing and says why.
-- **`kit apply` installs what's missing.** It installs what's declared and not installed, and
-  never removes anything.
+- **`kit apply` installs what's missing,** and never removes anything.
 - **A new Mac installs it all,** once what each kind needs is in place, such as npm for npm
   packages. [A new Mac from one line](new-mac.md) says what waits for what.
 
 ## Your own installs show up
 
-If you install a package with brew or npm yourself, kit-config doesn't have it. That's drift.
-After its first day, `kit status` lists it under CONFIG:
+A package you install with brew or npm yourself is drift. After its first day, `kit status` lists it under CONFIG:
 
 <img src="../art/drift-status.webp" alt="kit status under CONFIG: ffmpeg installed, not declared, for 2 days, with kit reconcile to settle it" width="456">
 
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
 
-Apps you dragged into Applications show up too, if a cask installs them. Adopting one or
-adding its cask has Homebrew take the app over, updating an older copy. A newer copy, another
+Apps you dragged into Applications show up too, if kit can match them to a cask. Adopting one
+has Homebrew take the app over, replacing an older copy. A newer copy, another
 major version or a fork fails the cask: see [Troubleshooting](troubleshooting.md). `--leave`
 keeps the app by hand.
 
@@ -88,7 +85,8 @@ keeps the app by hand.
 - **Trying something out?** `--temp` installs without declaring, quiet for 7 days.
 - **Private taps need a token.** kit checks a tap's download as you add it. If it's private, the
   line waits on a secret: see [Secrets from 1Password](secrets.md).
-- **Adopt everywhere reaches each Mac with the app,** even one where you left it by hand.
+- **`--adopt --shared` declares the cask for every Mac.** Each Mac with the app has Homebrew
+  take it over, even one where you left it by hand. Every Mac without it installs it.
 - **Installing isn't setting up.** A sign-in or a licence a package needs is a
   [step of your own](steps.md) or a step by hand, after the package.
 

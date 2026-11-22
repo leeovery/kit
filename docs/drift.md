@@ -1,7 +1,7 @@
 # Drift: keep or undo what changed by hand
 
-You install a package with brew. You change a Dock setting. An app replaces a linked file. kit
-sees each one, and `kit reconcile` asks what you want. You keep it, and kit declares it in
+You install a package with brew, or change a Dock setting, or an app replaces a linked file.
+kit sees each one, and `kit reconcile` asks what you want. You keep it, and kit declares it in
 kit-config; or you undo it, and the Mac goes back to what kit-config says. You'd want it so
 that your next Mac matches the one you use today.
 
@@ -12,7 +12,7 @@ that your next Mac matches the one you use today.
 kit status
 ```
 
-Drift shows under CONFIG, with how long it's been there:
+Drift shows under CONFIG, with its age:
 
 <img src="../art/drift-status.webp" alt="kit status under CONFIG: ffmpeg installed, not declared, for 2 days, with kit reconcile to settle it" width="456">
 
@@ -30,10 +30,7 @@ pushes kit-config once:
 
 - **A day's grace.** Drift counts only after a day. A package you try and remove the same
   afternoon never needs you. Until then, `kit status` counts it as new.
-- **Every hour, kit looks.** The hourly run runs every check, so drift turns up without you
-  asking. It tells no one: `kit status` shows it.
-- **Each item has its own answers.** A package can be declared or uninstalled. A setting can
-  be kept as it is now, or put back.
+- **Every hour, kit looks.** The hourly run runs every check, so drift turns up unasked. It tells no one: `kit status` shows it.
 - **One commit for the lot.** Whatever you settle in one run goes into kit-config as one
   commit, pushed.
 - **Nothing is lost by stopping.** If you stop part way, kit does what you answered so far.
@@ -99,12 +96,11 @@ kit reconcile cask:google-chrome --adopt
 kit reconcile cask:google-chrome --leave
 ```
 
-An app you dragged into Applications is drift if a Homebrew cask installs it. `kit status`
-reads `installed by hand as Google Chrome.app, not declared`. Adopting it declares the cask,
-and Homebrew takes the app over, updating an older copy. A fork with the same name gets no
-offer.
+An app you dragged into Applications is drift if kit can match it to a cask.
+`kit status` reads `installed by hand as Google Chrome.app, not declared`. Adopting it declares
+the cask, and Homebrew takes the app over, replacing an older copy.
 
-`kit status` counts a left app on its Packages row. To adopt it later, run
+`kit status` counts a left app on its Packages row. Adopt it later with
 `kit reconcile cask:<name> --adopt` or `kit cask add <name>`.
 
 ## Trying something out
@@ -116,8 +112,7 @@ kit brew add hello --temp
 
 <img src="../art/drift-temp.webp" alt="kit brew add hello --temp at a terminal: hello installed for now, not declared, and nothing for kit-config to commit" width="573">
 
-The package stays quiet for 7 days. After that, it's drift like any other, and `kit
-reconcile` asks whether to keep it.
+The package stays quiet for 7 days, then `kit reconcile` asks whether to keep it.
 
 ## Good to know
 
@@ -128,6 +123,10 @@ reconcile` asks whether to keep it.
 - **A replaced linked file is never lost.** `--adopt` moves the copy on the Mac into
   kit-config, and links it back. `--revert` links the copy in kit-config instead, and moves the
   other to the Bin.
+- **Some apps never match a cask:**
+  - a fork, or an app outside /Applications;
+  - a newer copy, or an older major version without its own cask;
+  - an app whose cask is a tap's, a `latest` one, or puts more than apps in place.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 
@@ -137,7 +136,7 @@ reconcile` asks whether to keep it.
 |---|---|
 | `kit status` | Every check, drift under CONFIG |
 | `kit reconcile` | Asks about each item, at a terminal |
-| `reconcile --all` | Asks about new and snoozed items too |
+| `reconcile --all` | Asks about quiet items too, but apps left by hand |
 | `kit reconcile <id>... --<answer>` | Settles those items |
 | `kit reconcile --json` | Lists the items as one document |
 | `kit <kind> add --temp` | Installs without declaring |

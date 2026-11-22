@@ -245,7 +245,7 @@ func (s *Setup) adoptAnswer(ctx context.Context) ([]string, error) {
 
 // adoptMore is what more the question says: what taking over does, and
 // what becomes of the rest.
-const adoptMore = "Homebrew takes each over in place, updating an older copy; the rest stay as they are, and kit won't ask about them again"
+const adoptMore = "Homebrew takes each over, replacing an older copy; the rest stay as they are, and kit won't ask about them again"
 
 // givenAdopt are the casks --adopt gives, each once: nil when it's not
 // given.

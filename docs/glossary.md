@@ -81,7 +81,7 @@ runs the hourly jobs every time, and the nightly jobs once a day.
 - a dependency that nothing installed needs any more;
 - a setting changed by hand;
 - a linked file that a program replaced with a copy;
-- an app installed by hand that a cask installs, the cask not declared.
+- an app installed by hand that kit matches to a cask, the cask not declared.
 
 `kit status` lists drift under CONFIG once a day has passed.
 
@@ -122,9 +122,8 @@ holds the Mac as it stands:
 - the features on, and the backup tools set up.
 
 **Installed by hand.** An app that no kind installed: not from Homebrew or the App Store, not
-Apple's, and not one Chrome made for a website. If a cask installs the same app and names its
-bundle id, kit offers to adopt it, and Homebrew takes the app over. A fork with the same name
-gets no offer. A package you install yourself through Homebrew isn't one: it comes up as drift.
+Apple's, and not one Chrome made for a website. If kit can match it to a Homebrew cask, kit
+offers to adopt it, and Homebrew takes the app over. A fork with the same name gets no match. A package you install yourself through Homebrew isn't one: it comes up as drift.
 
 ## A new Mac
 

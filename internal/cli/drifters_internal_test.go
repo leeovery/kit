@@ -19,8 +19,8 @@ func TestAdoptingAnAppByHandSaysWhatItDoes(t *testing.T) {
 		}
 	}
 	want := []string{
-		"declare it; Homebrew takes it over, updating an older copy",
-		"declare it; Homebrew takes it over, updating an older copy",
+		"declare it; Homebrew takes it over, replacing an older copy",
+		"declare it; Homebrew takes it over, replacing an older copy",
 	}
 	if !slices.Equal(said, want) {
 		t.Errorf("adopting says %q\nwant %q", said, want)

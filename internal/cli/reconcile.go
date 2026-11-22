@@ -106,7 +106,7 @@ run and one commit:
 	f.BoolVar(&opts.revert, "revert", false, "put back what's declared, in place of what the Mac has")
 	f.BoolVar(&opts.leave, "leave", false, "leave it installed by hand, and stop asking")
 	f.BoolVar(&opts.shared, "shared", false, "for every Mac: adopt into, or undeclare from, the shared file")
-	f.BoolVar(&opts.all, "all", false, "at a terminal, every item, quiet ones too")
+	f.BoolVar(&opts.all, "all", false, "at a terminal, every item, quiet ones too, but apps left by hand")
 	f.StringVar(&opts.note, "note", "", "why it's adopted, kept after its name")
 	return cmd
 }
