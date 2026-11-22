@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/backup/arq"
 	"github.com/leeovery/kit/internal/backup/timemachine"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kind/defaults"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/runner"
@@ -413,60 +414,52 @@ func TestAHardLinkedFileCountsOnce(t *testing.T) {
 	}
 }
 
-// The apps installed by hand are those that are neither Apple's, nor the
-// App Store's, nor made by Chrome for a website, wherever it put them, nor
-// put in place by a cask, as its app, in its suite's folder, or through
-// its package. Chrome itself, installed by hand, is.
+// The snapshot carries the apps installed by hand, each with the cask that
+// installs it, as Homebrew's catalogue has it; when the catalogue can't be
+// read, the apps all the same, with no cask, and why.
 func TestTheAppsInstalledByHand(t *testing.T) {
-	m, fake := newMac(t, "")
-	apps := m.AppDirs[0]
-	write(t, apps, map[string]string{
-		"Editor.app/Contents/Info.plist": app("com.example.editor"),
-		"Driver.app/Contents/Info.plist": app("com.example.driver"),
-		"Agent.app/Contents/Info.plist":  app("com.example.agent"),
-		"Store.app/Contents/Info.plist":  app("com.example.store"), "Store.app/Contents/_MASReceipt/receipt": "",
-		"Safari.app/Contents/Info.plist":             app("com.apple.Safari"),
-		"Utilities/Terminal.app/Contents/Info.plist": app("com.apple.Terminal"),
-		"Tool.app/Contents/Info.plist":               app("com.example.tool"),
-		"Example Suite/Part.app/Contents/Info.plist": app("com.example.part"),
-		"Other Tool.app/Contents/Info.plist":         app("com.example.other"),
-		"Google Chrome.app/Contents/Info.plist":      app("com.google.Chrome"),
-		// As Chrome names the apps it makes for websites, measured.
-		"Chrome Apps.localized/Google Meet.app/Contents/Info.plist": app("com.google.Chrome.app.kjgfgldnnfoeklkmfkjfagphfepbbdan"),
-		"Mail Site.app/Contents/Info.plist":                         app("com.google.Chrome.app.pommaclcbfghclhalboakcipcmmndhcj"),
-	})
-	homebrew(fake, "", "", "agent\ndriver\neditor\nsuite\n")
-	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": [
-		{"token": "suite", "artifacts": [{"suite": ["Example Suite"]}]},
-		{"token": "editor", "artifacts": [{"app": ["Editor.app"]}]},
-		{"token": "driver", "artifacts": [{"uninstall": [{"pkgutil": "com.example.driver.*"}]}, {"pkg": ["Driver.pkg"]}]},
-		{"token": "agent", "artifacts": [{"uninstall": [{"pkgutil": "com.example.agent"}]}, {"pkg": ["Agent.pkg"]}]}]}`)
-	fake.On("pkgutil", "--pkgs").Prints("com.apple.pkg.Core\ncom.example.driver.app\ncom.example.agent\ncom.example.other\n")
-	receipt := func(location string) string {
-		return `<plist version="1.0"><dict><key>install-location</key><string>` + location + `</string><key>volume</key><string>/</string></dict></plist>`
-	}
-	fake.On("pkgutil", "--pkg-info-plist", "com.example.driver.app").Prints(receipt(strings.TrimPrefix(apps, "/")))
-	fake.On("pkgutil", "--files", "com.example.driver.app").Prints("Driver.app\nDriver.app/Contents\nDriver.app/Contents/Info.plist\n")
-	fake.On("pkgutil", "--pkg-info-plist", "com.example.agent").Prints(receipt(filepath.Join(apps, "Agent.app")))
-	fake.On("pkgutil", "--files", "com.example.agent").Prints("Contents\nContents/Info.plist\n")
-	s, _, err := snapshot.Find(t.Context(), m)
-	if want := []string{"Google Chrome", "Other Tool", "Tool"}; err != nil || !slices.Equal(s.ByHand, want) {
-		t.Errorf("by hand = %q, %v; want %q", s.ByHand, err, want)
-	}
-	if slices.Contains(fake.Calls(), "pkgutil --files com.example.other") {
-		t.Error("asked pkgutil of a package no cask installed")
+	for _, tt := range []struct {
+		name      string
+		catalogue map[string]string
+		cask      string
+		why       bool
+	}{
+		{"catalogued", map[string]string{"api/internal/packages.arm64_tahoe.jws.json.payload": `{"protected":"e30","signature":"c2ln"}
+{"casks": {"google-chrome": {"raw_artifacts": [[":uninstall", {":quit": "com.google.Chrome"}], [":app", ["Google Chrome.app"]]]}}}`}, "google-chrome", false},
+		{"no catalogue", nil, "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, fake := newMac(t, "")
+			apps := m.AppDirs[0]
+			write(t, apps, map[string]string{
+				"Google Chrome.app/Contents/Info.plist": app("com.google.Chrome"),
+				"Tool.app/Contents/Info.plist":          app("com.example.tool"),
+			})
+			homebrew(fake, "", "", "")
+			cache := t.TempDir()
+			write(t, cache, tt.catalogue)
+			fake.On("brew", "--cache").Prints(cache + "\n")
+			s, _, err := snapshot.Find(t.Context(), m)
+			want := []brew.ByHand{
+				{Path: filepath.Join(apps, "Google Chrome.app"), Name: "Google Chrome", ID: "com.google.Chrome", Cask: tt.cask},
+				{Path: filepath.Join(apps, "Tool.app"), Name: "Tool", ID: "com.example.tool"},
+			}
+			if err != nil || s.ByHandErr != nil || !slices.Equal(s.ByHand, want) || (s.MatchErr != nil) != tt.why {
+				t.Errorf("Find() = by hand %+v, why %v, unmatched %v, %v\nwant %+v, unmatched %v", s.ByHand, s.ByHandErr, s.MatchErr, err, want, tt.why)
+			}
+		})
 	}
 }
 
 // With no Homebrew, every app neither Apple's nor the App Store's is
-// installed by hand, and no part is Homebrew's.
+// installed by hand, with no cask, and no part is Homebrew's.
 func TestWithoutHomebrew(t *testing.T) {
 	m, fake := newMac(t, "")
 	write(t, m.AppDirs[0], map[string]string{"Tool.app/Contents/Info.plist": app("com.example.tool")})
 	fake.On("brew").Fails(runner.ErrNotFound)
 	s, _, err := snapshot.Find(t.Context(), m)
-	if err != nil || !slices.Equal(s.ByHand, []string{"Tool"}) {
-		t.Errorf("by hand = %q, %v; want Tool", s.ByHand, err)
+	if want := []brew.ByHand{{Path: filepath.Join(m.AppDirs[0], "Tool.app"), Name: "Tool", ID: "com.example.tool"}}; err != nil || s.MatchErr != nil || !slices.Equal(s.ByHand, want) {
+		t.Errorf("by hand = %+v, %v, unmatched %v; want Tool", s.ByHand, err, s.MatchErr)
 	}
 	if got, want := counts(s), []string{"defaults 0", "features 0", "backups 0"}; !slices.Equal(got, want) {
 		t.Errorf("parts = %q, want %q", got, want)

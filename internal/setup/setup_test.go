@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -938,7 +939,7 @@ func TestModel(t *testing.T) {
 var found = snapshot.Snapshot{
 	Folders: []snapshot.Folder{{Path: "~/Code", Size: 48.2e9, Whole: true, Ticked: true}, {Path: "~/Movies", Size: 31e9, Whole: true}},
 	Files:   []string{"~/.zshrc"},
-	ByHand:  []string{"Kubius", "Sendhit"},
+	ByHand:  []brew.ByHand{{Name: "Kubius"}, {Name: "Sendhit"}},
 }
 
 // snapshotted is setup on laptop, joined, the snapshot taken; laptop

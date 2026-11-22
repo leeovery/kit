@@ -102,6 +102,36 @@ func TestApplyWhoseInstallFails(t *testing.T) {
 	}
 }
 
+// Applying, a cask whose app is already in the Applications folder adopts
+// it when the cask states the app's bundle id, as Homebrew's catalogue has
+// it; one whose app there isn't its own isn't installed, saying so: the
+// app, where it is and its bundle id. kit exits 1.
+func TestApplyAdoptsTheAppsAlreadyThere(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew casks", "editor\nspaceman\n")
+	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
+{"casks": {
+	"editor": {"raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]},
+	"spaceman": {"raw_artifacts": [[":uninstall", {":quit": "dev.original.Spaceman"}], [":app", ["Spaceman.app"]]]}}}`)
+	w.installApp(t, "Editor", "com.example.editor")
+	w.installApp(t, "Spaceman", "dev.fork.Spaceman")
+	f := w.fake
+	f.On("brew", "info", "--json=v2", "--cask", "editor", "spaceman").Prints(`{"formulae": [], "casks": [{"token": "editor", "full_token": "editor"}, {"token": "spaceman", "full_token": "spaceman"}]}`)
+	f.On("brew", "info", "--json=v2", "--cask", "spaceman").Prints(`{"formulae": [], "casks": [{"token": "spaceman", "full_token": "spaceman"}]}`)
+	f.On("brew", "update", "--quiet")
+	f.On("brew", "install", "--cask", "--adopt", "editor").Does(func() {
+		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\neditor\n")
+	})
+	out, errOut, code := w.run(t, "apply")
+	if want := "couldn't install spaceman: Spaceman.app is already in ~/Applications and isn't the cask's (dev.fork.Spaceman)"; !strings.Contains(out, want) || code != 1 {
+		t.Errorf("kit apply printed\n%s%s exit %d; want %q, exit 1", out, errOut, code, want)
+	}
+	calls := w.fake.Calls()
+	if !slices.Contains(calls, "brew install --cask --adopt editor") || slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "brew install") && strings.Contains(c, "spaceman") }) {
+		t.Errorf("ran %q: want editor's app adopted, spaceman's cask never installed over the app there", calls)
+	}
+}
+
 func TestApplyPlanChangesNothing(t *testing.T) {
 	w := missingWorld(t)
 	out, errOut, code := w.run(t, "apply", "--plan")

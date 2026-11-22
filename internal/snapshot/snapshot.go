@@ -24,6 +24,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kind/defaults"
 	"github.com/leeovery/kit/internal/kind/gitconfig"
 	"github.com/leeovery/kit/internal/kinds"
@@ -111,10 +112,12 @@ type Snapshot struct {
 	// Files are the shell's and tools' files at their usual places, from ~,
 	// that could be linked in.
 	Files []string
-	// ByHand are the apps installed by hand, by name: kit never manages
-	// them. ByHandErr is why they couldn't be told, when they couldn't.
-	ByHand    []string
-	ByHandErr error
+	// ByHand are the apps installed by hand, each with the cask that
+	// installs it, if one does. ByHandErr is why they couldn't be told,
+	// when they couldn't; MatchErr, why which casks install them couldn't,
+	// when it couldn't.
+	ByHand              []brew.ByHand
+	ByHandErr, MatchErr error
 }
 
 // Part is a part of what a snapshot declares: a kind's things, or the
@@ -192,7 +195,7 @@ func Find(ctx context.Context, m Mac) (Snapshot, Mac, error) {
 	parts = append(parts, m.kindParts(ctx, deps, featuresLabel, backupsLabel)...)
 	parts = append(parts, m.lookAt(featuresLabel, func() Part { return m.featuresPart(ctx) }), m.lookAt(backupsLabel, func() Part { return m.backupsPart(ctx) }))
 	s := Snapshot{Parts: parts, Files: m.files(owned)}
-	s.ByHand, s.ByHandErr = m.byHand(ctx, deps)
+	s.ByHand, s.MatchErr, s.ByHandErr = brew.Of(deps).AppsByHand(ctx)
 	select {
 	case s.Folders = <-sizes:
 	default:

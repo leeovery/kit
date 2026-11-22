@@ -1,0 +1,106 @@
+{"protected":"eyJhbGciOiJQUzUxMiJ9","signature":"c2lnbmF0dXJl","source_size":4096,"source_mtime_ns":1795374814788778000}
+{
+  "metadata": {"homebrew_version": "7.0.15", "bottle_tag": "arm64_tahoe", "generated_at": 1795372776},
+  "formulae": {"jq": {"desc": "Lightweight and flexible command-line JSON processor", "versions": {"stable": "1.8.1"}}},
+  "casks": {
+    "google-chrome": {
+      "auto_updates": true, "names": ["Google Chrome"], "tap_string": "homebrew/cask", "version": "158.0.8127.37",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.google.Chrome"}],
+        [":app", ["Google Chrome.app"]],
+        [":zap", {
+          ":launchctl": ["com.google.keystone.agent", "com.google.keystone.daemon"],
+          ":trash": ["~/Library/Caches/com.google.Chrome", "~/Library/Preferences/com.google.Chrome.plist", "~/Library/Saved Application State/com.google.Chrome.app.*.savedState"],
+          ":rmdir": ["~/Library/Google"]
+        }]
+      ]
+    },
+    "spaceman": {
+      "auto_updates": true, "names": ["Spaceman"], "tap_string": "homebrew/cask", "version": "1.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "dev.original.Spaceman"}],
+        [":app", ["Spaceman.app"]],
+        [":zap", {":trash": ["~/Library/Application Scripts/dev.original.Spaceman-LaunchAtLoginHelper", "~/Library/Caches/dev.original.Spaceman", "~/Library/Preferences/dev.original.Spaceman.plist"]}]
+      ]
+    },
+    "zoom": {
+      "auto_updates": true, "names": ["Zoom"], "tap_string": "homebrew/cask", "version": "7.2.5.90525",
+      "raw_artifacts": [
+        [":uninstall", {
+          ":launchctl": ["us.zoom.updater", "us.zoom.ZoomDaemon"],
+          ":signal": ["KILL", "us.zoom.xos"],
+          ":pkgutil": "us.zoom.pkg.videomeeting",
+          ":delete": ["/Applications/zoom.us.app", "/Library/Internet Plug-Ins/ZoomUsPlugIn.plugin", "/Library/Logs/DiagnosticReports/zoom.us*"]
+        }],
+        [":pkg", ["zoomusInstallerFull.pkg"]],
+        [":zap", {":trash": ["~/Library/Preferences/us.zoom.*.plist", "~/Library/WebKit/us.zoom.xos"]}]
+      ]
+    },
+    "1password": {
+      "auto_updates": true, "names": ["1Password"], "tap_string": "homebrew/cask", "version": "8.12.46",
+      "conflicts_with_args": {":cask": ["1password@beta"]},
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["2BUA8C4S2C.com.1password.browser-helper", "com.1password.1password-launcher"], ":quit": "com.1password.1password"}],
+        [":app", ["1Password.app"]],
+        [":zap", {":trash": ["~/Library/Containers/com.1password.1password*", "~/Library/Preferences/com.1password.1password.plist"]}]
+      ]
+    },
+    "1password@beta": {
+      "auto_updates": true, "names": ["1Password"], "tap_string": "homebrew/cask", "version": "8.12.48-24.BETA",
+      "conflicts_with_args": {":cask": ["1password"]},
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["2BUA8C4S2C.com.1password.browser-helper", "com.1password.1password-launcher"], ":quit": "com.1password.1password"}],
+        [":app", ["1Password.app"]],
+        [":zap", {":trash": ["~/Library/Containers/com.1password.1password*", "~/Library/Preferences/com.1password.1password.plist"]}]
+      ]
+    },
+    "quiet-tool": {
+      "names": ["Quiet Tool"], "tap_string": "homebrew/cask", "version": "2.1",
+      "raw_artifacts": [
+        [":app", ["Quiet Tool.app"]],
+        [":zap", {":trash": ["~/Library/Application Support/Quiet Tool", "~/Library/Preferences/com.example.quiet.*.plist"]}]
+      ]
+    },
+    "browser": {
+      "names": ["Browser"], "tap_string": "homebrew/cask", "version": "140.0",
+      "raw_artifacts": [
+        [":app", ["Chromium.app"], {":target": "Browser.app"}],
+        [":zap", {":trash": "~/Library/Saved Application State/com.example.browser.savedState"}]
+      ]
+    },
+    "example-editor": {
+      "names": ["Example Editor"], "tap_string": "homebrew/cask", "version": "3.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": ["com.example.editor", "com.example.editor.helper"]}],
+        [":app", ["Example Editor.app"]],
+        [":binary", ["$APPDIR/Example Editor.app/Contents/MacOS/edit"]],
+        [":zap", {":trash": ["~/Library/Containers/com.example.editor", "~/Library/HTTPStorages/com.example.editor"]}]
+      ]
+    },
+    "signals": {
+      "names": ["Signals"], "tap_string": "homebrew/cask", "version": "1.4",
+      "raw_artifacts": [
+        [":uninstall", {":signal": [["TERM", "com.example.signals"], ["KILL", "com.example.signals.agent"]]}],
+        [":app", ["Signals/Signals.app"]],
+        [":zap"]
+      ]
+    },
+    "old-tool": {
+      "names": ["Old Tool"], "tap_string": "homebrew/cask", "version": "0.9",
+      "disable_args": {":date": "2026-09-01", ":because": ":unmaintained"},
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.oldtool"}],
+        [":app", ["Old Tool.app"]]
+      ]
+    },
+    "sidekick": {
+      "names": ["Sidekick"], "tap_string": "homebrew/cask", "version": "5.0",
+      "raw_artifacts": [
+        [":app", ["Sidekick Installer.app/Contents/Resources/Sidekick.app"], {":target": "~/Library/Application Support/Sidekick/Sidekick.app"}],
+        [":uninstall", {":quit": "com.example.sidekick"}]
+      ]
+    }
+  },
+  "cask_renames": {"chrome": "google-chrome"},
+  "cask_tap_git_head": "0c6dce3e499deb37b57859e0944e742eddfcf869"
+}

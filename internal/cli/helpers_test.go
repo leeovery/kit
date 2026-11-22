@@ -161,6 +161,18 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	return w
 }
 
+// homebrewCache has brew --cache name Homebrew's cache in the world, holding
+// payload as its catalogue of casks: with none, there's no telling whose an
+// app already there is, so casks install as ever, without --adopt.
+func (w *world) homebrewCache(t *testing.T, payload string) {
+	t.Helper()
+	cache := filepath.Join("Library", "Caches", "Homebrew")
+	if payload != "" {
+		w.write(t, filepath.Join(cache, "api", "internal", "packages.arm64_tahoe.jws.json.payload"), payload)
+	}
+	w.fake.On("brew", "--cache").Prints(filepath.Join(w.home, cache) + "\n")
+}
+
 // nowhere is an address on this machine nothing answers at.
 const nowhere = "http://127.0.0.1:1"
 

@@ -564,7 +564,7 @@ func (s *Setup) byHandStep() engine.Step {
 			}
 			res := check.Result{State: check.OK, Summary: fmt.Sprintf("%d, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there", len(found.ByHand))}
 			for _, app := range found.ByHand {
-				res.Items = append(res.Items, check.Item{ID: ByHandStep + ":" + app, Name: app, State: "installed by hand"})
+				res.Items = append(res.Items, check.Item{ID: ByHandStep + ":" + app.Name, Name: app.Name, State: "installed by hand"})
 			}
 			return res
 		},

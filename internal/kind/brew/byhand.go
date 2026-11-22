@@ -1,4 +1,4 @@
-package snapshot
+package brew
 
 import (
 	"context"
@@ -10,40 +10,71 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/apps"
-	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// byHand are the apps in the Mac's app folders installed by hand, by name:
-// none of Apple's, nor the App Store's (its receipt in the app), nor one
-// Chrome made for a website (chromeApp), nor one a cask put in place, as
-// its app, in its suite's folder, or through its package (pkgutil's
-// receipts).
-func (m Mac) byHand(ctx context.Context, deps *kind.Deps) ([]string, error) {
-	var casked brew.Casked
+// ByHand is an app installed by hand: where it is; its name, without
+// .app; its bundle id; and the cask that installs it, by its token, ""
+// when none does, or which couldn't be told.
+type ByHand struct {
+	Path, Name, ID, Cask string
+}
+
+// AppsByHand are the apps in the folders apps are installed in (AppDirs)
+// installed by hand: none of Apple's, nor the App Store's (its receipt in
+// the app), nor one Chrome made for a website (chromeApp), nor one a cask
+// put in place, as its app, in its suite's folder, or through its package
+// (pkgutil's receipts); each with the cask that installs it, if one does,
+// as Homebrew's catalogue has it (match). unmatched is why which casks
+// install them couldn't be told, when it couldn't: they're found all the
+// same. Without Homebrew, every app but those is by hand, and none has a
+// cask. err is why they couldn't be found.
+func (h *Homebrew) AppsByHand(ctx context.Context) (found []ByHand, unmatched, err error) {
+	brewed := runner.Has(h.run, "brew")
+	var casked Casked
 	var packaged map[string]bool
-	if runner.Has(m.Run, "brew") {
-		var err error
-		if casked, err = brew.Of(deps).Casked(ctx); err != nil {
-			return nil, fmt.Errorf("find the casks' apps: %w", err)
+	if brewed {
+		if casked, err = h.Casked(ctx); err != nil {
+			return nil, nil, fmt.Errorf("find the casks' apps: %w", err)
 		}
-		if packaged, err = installedBy(ctx, m.Run, casked.Receipts); err != nil {
-			return nil, fmt.Errorf("find the casks' packages' apps: %w", err)
+		if packaged, err = installedBy(ctx, h.run, casked.Receipts); err != nil {
+			return nil, nil, fmt.Errorf("find the casks' packages' apps: %w", err)
 		}
 	}
-	var out []string
-	for _, app := range apps.Installed(m.AppDirs) {
-		name := filepath.Base(app)
-		inSuite := slices.Contains(m.AppDirs, filepath.Dir(filepath.Dir(app))) && slices.Contains(casked.Suites, filepath.Base(filepath.Dir(app)))
+	for _, app := range apps.Installed(h.AppDirs) {
 		id := apps.BundleID(app)
-		if strings.HasPrefix(id, "com.apple.") || strings.HasPrefix(id, chromeApp) || fromAppStore(app) || slices.Contains(casked.Apps, name) || inSuite || packaged[app] {
+		if !h.byHand(app, id, casked, packaged) {
 			continue
 		}
-		out = append(out, strings.TrimSuffix(name, ".app"))
+		found = append(found, ByHand{Path: app, Name: strings.TrimSuffix(filepath.Base(app), ".app"), ID: id})
 	}
-	return out, nil
+	if !brewed || len(found) == 0 {
+		return found, nil, nil
+	}
+	cat, err := h.catalogue(ctx)
+	if err != nil {
+		return found, err, nil
+	}
+	for i, app := range found {
+		found[i].Cask, _ = cat.match(filepath.Base(app.Path), app.ID)
+	}
+	return found, nil, nil
+}
+
+// byHand reports whether the app at app, whose bundle id is id, was
+// installed by hand: not Apple's, nor the App Store's, nor Chrome's for a
+// website, nor put in place by a cask, as casked and packaged, the apps
+// the casks' packages installed, say.
+func (h *Homebrew) byHand(app, id string, casked Casked, packaged map[string]bool) bool {
+	inSuite := slices.Contains(h.AppDirs, filepath.Dir(filepath.Dir(app))) && slices.Contains(casked.Suites, filepath.Base(filepath.Dir(app)))
+	switch {
+	case strings.HasPrefix(id, "com.apple."), strings.HasPrefix(id, chromeApp), fromAppStore(app):
+		return false
+	case slices.Contains(casked.Apps, filepath.Base(app)), inSuite, packaged[app]:
+		return false
+	}
+	return true
 }
 
 // chromeApp starts the bundle id of each app Chrome makes for a website,
@@ -60,9 +91,8 @@ func fromAppStore(app string) bool {
 // installedBy are the apps, by path, the packages whose ids match patterns
 // installed, as pkgutil's receipts list them, the place a package installs
 // in among them, as one can install into an app's own folder: each pattern
-// matching an id
-// whole, as a regular expression, as Homebrew matches one, or as itself
-// when it isn't one.
+// matching an id whole, as a regular expression, as Homebrew matches one,
+// or as itself when it isn't one.
 func installedBy(ctx context.Context, run runner.Runner, patterns []string) (map[string]bool, error) {
 	if len(patterns) == 0 {
 		return nil, nil
