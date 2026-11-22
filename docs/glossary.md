@@ -93,7 +93,7 @@ Without one, you name each item and what to do with it. The main answers:
 | `--adopt` | Declares what this Mac has |
 | `--revert` | Puts back what was there, or what's declared |
 | `--remove` | Uninstalls it |
-| `--leave` | Leaves an app installed by hand |
+| `--leave` | Leaves it installed by hand, for good |
 
 kit then commits and pushes kit-config. Adopting an app installed by hand also installs its
 cask, and Homebrew takes the app over. `--install`, `--undeclare` and `--snooze` settle the
@@ -122,11 +122,9 @@ holds the Mac as it stands:
 - the features on, and the backup tools set up.
 
 **Installed by hand.** An app that no kind installed: not from Homebrew or the App Store, not
-Apple's, and not one Chrome made for a website. If a cask installs the same app, kit offers to
-adopt it, and Homebrew takes the app over. The cask must name the app's bundle id, so a fork
-gets no offer. The app must be the cask's version, unless the cask updates itself or the app
-is an older copy of the same major version. A package you install yourself through Homebrew
-isn't one: it comes up as drift.
+Apple's, and not one Chrome made for a website. If a cask installs the same app and names its
+bundle id, kit offers to adopt it, and Homebrew takes the app over. A fork with the same name
+gets no offer. A package you install yourself through Homebrew isn't one: it comes up as drift.
 
 ## A new Mac
 

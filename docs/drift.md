@@ -69,7 +69,7 @@ The answers:
 | `--remove` | Uninstalls it |
 | `--install` | Installs it, as declared |
 | `--undeclare` | Takes its line out |
-| `--leave` | Keeps an app by hand, for good |
+| `--leave` | Leaves it installed by hand, for good |
 | `--snooze` | Quiets it for 7 days |
 
 Each item takes only some, and `--snooze` takes any:
@@ -92,10 +92,20 @@ keeps a note after the line it adopts. `kit reconcile brew cask` goes through on
 
 ## Apps you installed by hand
 
+```bash
+# Declare the cask, and Homebrew takes the app over
+kit reconcile cask:google-chrome --adopt
+# Or keep it by hand, and stop asking on this Mac
+kit reconcile cask:google-chrome --leave
+```
+
 An app you dragged into Applications is drift if a Homebrew cask installs it. `kit status`
 reads `installed by hand as Google Chrome.app, not declared`. Adopting it declares the cask,
-and Homebrew takes the app over in place. `--leave` keeps it by hand, and kit stops asking on
-this Mac.
+and Homebrew takes the app over, updating an older copy. A fork with the same name gets no
+offer.
+
+`kit status` counts a left app on its Packages row. To adopt it later, run
+`kit reconcile cask:<name> --adopt` or `kit cask add <name>`.
 
 ## Trying something out
 
@@ -118,9 +128,6 @@ reconcile` asks whether to keep it.
 - **A replaced linked file is never lost.** `--adopt` moves the copy on the Mac into
   kit-config, and links it back. `--revert` links the copy in kit-config instead, and moves the
   other to the Bin.
-- **Adopting an app can replace it.** If the app differs from the download, the cask's copy
-  replaces an older copy of the same major version. kit leaves any other version alone, and
-  the cask fails, saying why. A fork with the same name is never offered.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 
@@ -130,7 +137,7 @@ reconcile` asks whether to keep it.
 |---|---|
 | `kit status` | Every check, drift under CONFIG |
 | `kit reconcile` | Asks about each item, at a terminal |
-| `reconcile --all` | Asks about quiet items too |
+| `reconcile --all` | Asks about new and snoozed items too |
 | `kit reconcile <id>... --<answer>` | Settles those items |
 | `kit reconcile --json` | Lists the items as one document |
 | `kit <kind> add --temp` | Installs without declaring |

@@ -1279,14 +1279,24 @@ Homebrew's cache (`api/internal/packages.<arch>_<macos>.jws.json.payload`, Homeb
 format): each cask of Homebrew's own, its apps' places in /Applications (or the app a package
 cask deletes, or the one it alone quits) and the bundle ids it states (what its uninstall quits,
 signals or unloads, and the `~/Library` paths it zaps). An app installed by hand has a cask
-only when it's at that cask's place and the cask states its bundle id, the plain token over an
-`@` one: a fork under the app's name, or a cask stating no id, has none, erring towards no
-offer. A cask that moves anything besides apps into place (a suite, a font, a Quick Look
+only when it's at that cask's place and the cask states its bundle id: a fork under the app's
+name, or a cask stating no id, has none, erring towards no offer. Of several stating it, the
+one without `@` when it updates itself (Homebrew adopts its app at any version, and such an
+app runs ahead of the catalogue); else the one whose version shares the most leading numbers
+with the app's `CFBundleShortVersionString` (`charles@4` for Charles 4, `blender@lts` for
+Blender's LTS), a tie to the one without `@`, two without `@` none. Never one whose install
+would refuse the app (below), so a cask of `latest` that doesn't update itself is never
+offered. A cask that moves anything besides apps into place (a suite, a font, a Quick Look
 plugin) is never matched, nor vetted when installed. Every vetted cask installs with `brew
 install --cask --adopt`, Homebrew taking its app there over in place (unchecked for a cask that
 auto-updates; else the versions must match). One Homebrew didn't adopt, as the app differs from
-the download, is installed again alone with `--force`, which replaces the app (`--adopt
---force` raises before force is read). Before either, an app at the cask's place whose bundle
+the download, is installed again alone with `--force`, which deletes the app and moves the
+cask's in (`--adopt --force` raises before force is read), but only for an older copy of the
+same major version: both versions dotted numbers (the cask's before any comma), the app's
+lower, its first number the same. Another major version may be kept on purpose (an older line,
+an LTS), a newer copy or a prerelease is ahead of the cask, and `latest` or no version says
+nothing, so each fails the cask saying why, `whyNot` adding what it can ("Charles.app is 4.6.8
+and the cask's is 5.2.3: kit replaces only an older copy of the same major version"). Before either, an app at the cask's place whose bundle
 id it doesn't state, or the App Store's copy, isn't touched: the cask fails, saying so
 ("Spaceman.app is already in /Applications and isn't the cask's (<id>)"). Taps' casks, casks
 the catalogue lacks, and every cask when it can't be read install as before, and none is

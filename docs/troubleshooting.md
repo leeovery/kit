@@ -120,21 +120,72 @@ in, kit asks again on the next run.
 
 ## A cask fails because its app is already there
 
+kit has Homebrew take over an app already in Applications only if it's the cask's own. If it
+isn't, the cask fails, and the app stays as it is. The message starts `couldn't install`, then
+gives one of the reasons below. The fix for each is the same: choose which copy you keep.
+
+### The app isn't the cask's
+
 ```text
 couldn't install spaceman: Spaceman.app is already in /Applications and isn't the cask's (com.example.Spaceman)
 ```
 
-The message may end `and is the App Store's` instead.
+**Cause:** the cask doesn't name the bundle id of the app there. A fork with the same name
+does this. If the message ends `(no bundle id)`, the app names no bundle id at all.
 
-**Cause:** an app of the cask's name is in Applications, but the cask doesn't name its bundle
-id. A fork with the same name does this, and so does the App Store's copy. kit leaves that app
-alone rather than replace it.
+### The App Store's copy is there
 
-**Fix:** choose which copy you keep.
+```text
+couldn't install google-chrome: Google Chrome.app is already in /Applications and is the App Store's
+```
 
-- To keep the cask's, move the app to the Bin or rename it, then run `kit apply cask`.
-- To keep yours, run `kit reconcile cask:spaceman --undeclare`. The app stays installed by
-  hand. If the cask is declared for every Mac, add `--shared`.
+**Cause:** the app came from the App Store. kit never hands the App Store's copy to Homebrew,
+even if the cask names its bundle id.
+
+### Another version is there
+
+```text
+couldn't install charles: Charles.app is 4.6.8 and the cask's is 5.2.3: kit replaces only an older copy of the same major version
+```
+
+**Cause:** the app differs from the cask's download. kit replaces it only if it's an older
+copy of the same major version. A newer copy, another major version or a prerelease stays,
+and so does an app that says no version. The message may add why, such as `this one is
+newer`.
+
+If you want to keep the older major version, Homebrew may have a cask for it, such as
+`charles@4`. Declare that one instead.
+
+### kit can't look at the app
+
+```text
+couldn't install google-chrome: can't tell whose Google Chrome.app in /Applications is: …
+```
+
+**Cause:** kit couldn't read the app, for the reason after the last colon. Put that right,
+then run `kit apply cask`.
+
+### Homebrew says there's already an App
+
+The message holds Homebrew's own words, `It seems there is already an App at`.
+
+**Cause:** kit couldn't check the cask, so Homebrew installed it without taking the app over.
+That happens for a cask from a tap, a cask missing from Homebrew's catalogue, or every cask if
+the catalogue can't be read.
+
+### The fix: choose which copy you keep
+
+| To keep | Do this |
+|---|---|
+| The cask's | Move the app to the Bin, then `kit apply cask` |
+| Yours | `kit reconcile cask:<name> --undeclare` |
+
+If `[app store apps]` declares the app in the way, moving it to the Bin isn't enough:
+`kit apply` installs it again. Run `kit mas remove <app>` instead, which uninstalls it and takes
+its line out.
+
+If you keep yours, the app stays installed by hand. If the cask is in the shared file, add
+`--shared`. That takes the cask off every Mac: no answer keeps a shared cask off one Mac only.
 
 ## kit.app needs Full Disk Access again
 

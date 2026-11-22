@@ -41,7 +41,8 @@ Each question comes with a suggested answer, so enter takes it. Each has a flag 
 - **Linked files** lists files such as `~/.zshrc` and `~/.ssh/config`. Each one you keep moves
   into kit-config and is linked back.
 - **To Homebrew** lists apps you installed by hand that a cask installs. Then `kit apply` has
-  Homebrew take over each one you keep. kit leaves the rest, and won't ask again.
+  Homebrew take over each one you keep. kit leaves the rest, and won't ask again: `kit status`
+  counts them, and `kit cask add <name>` takes one over later.
 
 ## What happens
 
@@ -64,18 +65,13 @@ file:
 
 ## A second Mac joins
 
-On your next Mac, `kit setup` finds kit-config on your account and offers to join it. Then
-pick which Mac this is, or a new one. A new Mac starts from what every Mac shares, or as a copy
-of another with `--from`. Either way, the snapshot then declares what this Mac has. kit-config
-must be private: `--join` refuses a repository that isn't.
-
 ```bash
 # Join kit-config as a new Mac named studio
 kit setup --join owner/kit-config --mac studio
 ```
 
-kit then asks about what kit-config declares that this Mac hasn't. Install it with the rest,
-or stop to look first with `kit status`.
+A new Mac starts from what every Mac shares, or copies another with `--from`. The snapshot then
+declares what this Mac has. kit-config must be private, or `--join` refuses it.
 
 ## Good to know
 
@@ -95,14 +91,11 @@ or stop to look first with `kit status`.
 | `--mac <name>` | This Mac's name |
 | `--from <mac>` | The Mac a new one copies |
 | `--restore <path>` | A folder a new Mac brings back |
-| `--prefs` | Save apps' settings every night |
 | `--link <path>` | A file kit-config keeps, linked back |
-| `--adopt <cask>` | A cask that takes over its app |
-| `--no-apply` | Stop after the commit, to look first |
+| `--adopt <cask>` | An app Homebrew takes over, by cask |
 
-`--restore`, `--link` and `--adopt` take one each time. Each of those and `--prefs` has a
-`--no-` flag that answers no. Without a terminal, kit asks nothing: a question its flag
-doesn't answer stops setup, naming the flag.
+Give `--restore`, `--link` or `--adopt` once for each path or cask. Without a terminal, kit
+asks nothing: a question its flag doesn't answer stops setup, naming the flag.
 
 ## Related
 

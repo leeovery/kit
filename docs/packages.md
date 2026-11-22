@@ -1,8 +1,8 @@
 # Packages: install once, and your next Mac has it
 
 One kit command installs a package and declares it in [kit-config](glossary.md). A Mac that
-replaces this one installs it too, and `--shared` puts it on every Mac. It covers nine kinds,
-from Homebrew casks to Claude Code skills. You'd want it for every install you mean to keep.
+replaces this one installs it too, and `--shared` puts it on every Mac. You'd want it for every
+install you mean to keep.
 
 ## Try it
 
@@ -75,19 +75,20 @@ After its first day, `kit status` lists it under CONFIG:
 
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
 
-Apps you dragged into Applications show up too, if a Homebrew cask installs the same app.
-Adopting one has Homebrew take the app over in place, and `--leave` keeps it by hand.
-[Drift](drift.md) says more.
+Apps you dragged into Applications show up too, if a cask installs them. Adopting one or
+adding its cask has Homebrew take the app over, updating an older copy. A newer copy, another
+major version or a fork fails the cask: see [Troubleshooting](troubleshooting.md). `--leave`
+keeps the app by hand.
 
 ## Good to know
 
 - **Removing an app asks about its files.** `kit cask remove` and `kit mas remove` ask at a
   terminal whether to keep what the app leaves behind. `--keep` and `--zap` answer without
   asking. Without a terminal, kit keeps it.
-- **Trying something out?** `--temp` installs without declaring. The package stays quiet for 7
-  days, then `kit reconcile` asks about it.
+- **Trying something out?** `--temp` installs without declaring, quiet for 7 days.
 - **Private taps need a token.** kit checks a tap's download as you add it. If it's private, the
   line waits on a secret: see [Secrets from 1Password](secrets.md).
+- **Adopt everywhere reaches each Mac with the app,** even one where you left it by hand.
 - **Installing isn't setting up.** A sign-in or a licence a package needs is a
   [step of your own](steps.md) or a step by hand, after the package.
 
@@ -104,7 +105,7 @@ Adopting one has Homebrew take the app over in place, and `--leave` keeps it by 
 | `kit list [<kind>]` | List what's declared for this Mac |
 | `kit why <name>` | Where it's declared, and what needs it |
 
-Each of these takes `--json`, and `--help` says what it needs and what it changes.
+Each takes `--json`, and `--help` says what it changes.
 
 ## Related
 

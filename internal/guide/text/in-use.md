@@ -38,10 +38,12 @@ Every question has its flag; without a terminal kit setup asks nothing.
 - The apps Homebrew can take over are the apps installed by hand that one
   of Homebrew's own casks installs, the cask naming the app's bundle id;
   setup's failing step names each cask and its apps, all suggested. A
-  cask kit-config declares already isn't offered. Each given is declared
-  in this Mac's file, and the `kit apply` after setup takes its app over,
-  which may replace it (see `kit agent packages`). The rest are left by
-  hand for good: `kit reconcile` won't ask about them.
+  cask kit-config declares already isn't offered, but counted: `kit apply`
+  takes its app over too. Each given is declared in this Mac's file, and
+  the `kit apply` after setup takes its app over, updating an older copy
+  (see `kit agent packages`). The rest are left by hand for good:
+  `kit reconcile` won't ask about them, and `kit cask add <cask>` takes one
+  over later.
 - `--no-apply` stops once setup has committed, for the person to look
   first; `kit apply` then installs the rest.
 
@@ -86,11 +88,12 @@ Read the document's steps, then tell them:
   setup ran with, so kit's later runs find it too.
 - `commit`'s items: lines refused, and lines declared as they are because
   kit couldn't check whether they need a secret, each with why.
-- `adopt`: how many apps Homebrew takes over, in the `kit apply` that
-  follows.
+- `adopt`: how many apps Homebrew takes over in the `kit apply` that
+  follows, those of casks declared already counted apart.
 - `by-hand`: the apps left installed by hand, those no cask installs and
   those the person kept. kit doesn't look after them: if kit ever sets the
   Mac up again, they're the person's to install, and Homebrew or the App
-  Store is the way to.
+  Store is the way to. An app a cask installs has that cask's add as its
+  `detail`, as in `kit cask add editor`: it takes the app over later.
 - `secrets`: kit keeps secrets in a store, never in kit-config. Point them
   at `kit secret add`. Never search their files for secrets.
