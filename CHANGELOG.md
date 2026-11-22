@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-11-22
+
+🐛 Fixed
+- The hourly run now checks kit.app's Full Disk Access after the kinds that need it, so a refused one is reported correctly instead of being missed.
+- Flags such as `--visibility-change` are no longer split at their hyphens when kit wraps long lines of text.
+- A check's own output is no longer cut into separate pieces at each semicolon in a step's summary row.
+
 ## [0.4.2] - 2026-11-20
 
 ✨ Added
