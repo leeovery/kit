@@ -123,7 +123,7 @@ func TestBootFaceNeedsYou(t *testing.T) {
 	}
 	f.Emit(event.StepFinished{Time: at, Step: "password", Result: check.Result{State: check.OK, Summary: "Touch ID on for sudo"}, Duration: 12 * time.Second})
 	ok("homebrew", "7.0.9 · Xcode tools 27.0", 6*time.Minute+2*time.Second)
-	ok("apps", "Ghostty 1.3.1 · 1Password 8.12.40", 98*time.Second)
+	ok("apps", "Ghostty 1.3.1", 98*time.Second)
 	ok("kit-config", "cloned · 61 files linked", 6*time.Second)
 	ok("kit", "0.1.1 · through Homebrew", 21*time.Second)
 	f.Emit(event.StepStarted{Time: at, Step: "full-disk-access"})

@@ -29,9 +29,20 @@ isn't Apple's or the system's, whole, and restores it on a new Mac (see
 `kit agent prefs`). Declaring an app's setting as a defaults line as well
 has two of kit's mechanisms writing it.
 
-Some settings only take effect once something restarts (the Dock, Finder,
-a logout). A defaults line sets the value, nothing more: what has to
-restart for it is a step of your own, or a note saying so.
+Each time kit sets, unsets or puts back a defaults line, it restarts what
+reads the line's domain, so the change shows at once:
+
+| Domain | kit restarts |
+| --- | --- |
+| com.apple.dock, com.apple.spaces, com.apple.WindowManager | the Dock |
+| com.apple.finder | Finder |
+| com.apple.controlcenter, com.apple.menuextra.clock | Control Center |
+| com.apple.screencapture | the menu bar (SystemUIServer) |
+| com.apple.symbolichotkeys | nothing: it reloads keyboard shortcuts |
+
+A line in any other domain, the global domain included, is written and
+nothing restarts. If such a setting needs an app restarted, or a logout,
+that's a step of your own, or a note saying so.
 
 ## Features
 
