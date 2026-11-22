@@ -16,7 +16,6 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/prefs"
@@ -101,6 +100,9 @@ type question struct {
 	anew               func(rec record) bool
 	nothing            func(ctx context.Context, found *snapshot.Snapshot) (string, bool)
 	ask                func(ctx context.Context, found *snapshot.Snapshot) error
+	// edited, when set, is how a refusal once the edits are made says the
+	// answer recorded: else by the title, and the answer as its row says it.
+	edited func(rec record) string
 }
 
 // anew reports whether a flag gives an answer, given, other than the one
@@ -136,7 +138,11 @@ func (s *Setup) questionStep(q question) engine.Step {
 				if !ok {
 					said = "unasked"
 				}
-				return fmt.Errorf("kit setup, part-way, has made its edits in kit-config, %s %s: run kit setup again without %s", strings.ToLower(q.title[:1])+q.title[1:], said, q.flags)
+				made := strings.ToLower(q.title[:1]) + q.title[1:] + " " + said
+				if q.edited != nil {
+					made = q.edited(rec)
+				}
+				return fmt.Errorf("kit setup, part-way, has made its edits in kit-config, %s: run kit setup again without %s", made, q.flags)
 			}
 			found, _ := s.snapshot()
 			return q.ask(ctx, found)
@@ -218,8 +224,8 @@ func (s *Setup) ticked(ctx context.Context, step, question string, items []Item)
 	return s.tickedAs(ctx, step, question, items, func(i int) string { return items[i].Name })
 }
 
-// tickedAs asks which of items to keep: those kept, each as key has the
-// one in its place.
+// tickedAs asks which of items to keep: those kept, each as key names the
+// item at its index.
 func (s *Setup) tickedAs(ctx context.Context, step, question string, items []Item, key func(i int) string) ([]string, error) {
 	kept, err := s.Ask.Tick(ctx, step, question, items)
 	if err != nil {
@@ -324,97 +330,6 @@ func (s *Setup) linkAnswer(ctx context.Context, found *snapshot.Snapshot) ([]str
 		items[i] = Item{Name: f, Ticked: true}
 	}
 	return s.ticked(ctx, FilesStep, "which should kit-config keep, each moved in and linked back?", items)
-}
-
-// adoptStep asks which of the apps installed by hand that a cask installs
-// Homebrew takes over (adoptable), each with its cask, all suggested: the
-// casks are declared with the snapshot, so the kit apply after setup takes
-// the apps over, and a new Mac installs them; the rest are left by hand.
-func (s *Setup) adoptStep() engine.Step {
-	return s.questionStep(question{
-		name: AdoptStep, title: "To Homebrew", flags: "--adopt or --no-adopt",
-		answered: func(rec record) (string, bool) {
-			if rec.Adopt == nil {
-				return "", false
-			}
-			if n := len(*rec.Adopt); n > 0 {
-				return fmt.Sprintf("%d %s", n, look.Plural(n, "app", "apps")), true
-			}
-			return "none", true
-		},
-		anew: func(rec record) bool { return anew(s.Given.Adopt, rec.Adopt) },
-		nothing: func(_ context.Context, found *snapshot.Snapshot) (string, bool) {
-			offered, err := s.adoptable(found)
-			if err != nil {
-				return "couldn't tell which apps it can take over", len(offered) == 0
-			}
-			return "none to take over", len(offered) == 0
-		},
-		ask: func(ctx context.Context, found *snapshot.Snapshot) error {
-			casks, err := s.adoptAnswer(ctx, found)
-			if err != nil {
-				return err
-			}
-			return s.update(func(r *record) { r.Adopt = &casks })
-		},
-	})
-}
-
-// adoptable are the apps installed by hand the snapshot found that a cask
-// installs, the cask not declared for this Mac: those whose cask is are the
-// kit apply after setup's to take over. The error is why some couldn't be
-// told: which casks install them, or what this Mac declares.
-func (s *Setup) adoptable(found *snapshot.Snapshot) ([]brew.ByHand, error) {
-	_, m := s.snapshot()
-	var declared []string
-	err := found.MatchErr
-	if m.Config != nil {
-		list, listErr := m.Config.List(brew.CasksDescriptor.Name, m.Name)
-		if listErr != nil {
-			return nil, listErr
-		}
-		declared = list.Names()
-	}
-	var offered []brew.ByHand
-	for _, app := range found.ByHand {
-		if app.Cask != "" && !slices.Contains(declared, app.Cask) {
-			offered = append(offered, app)
-		}
-	}
-	return offered, err
-}
-
-func (s *Setup) adoptAnswer(ctx context.Context, found *snapshot.Snapshot) ([]string, error) {
-	offered, _ := s.adoptable(found)
-	said := make([]string, len(offered))
-	for i, app := range offered {
-		said[i] = app.Cask + " for " + app.Name
-	}
-	switch {
-	case s.Given.Adopt != nil:
-		for _, c := range *s.Given.Adopt {
-			if !slices.ContainsFunc(offered, func(app brew.ByHand) bool { return app.Cask == c }) {
-				return nil, fmt.Errorf("no app installed by hand here is the %s cask's to take over: %s", c, adoptFlags(said))
-			}
-		}
-		return *s.Given.Adopt, nil
-	case s.Ask == nil:
-		return nil, s.unanswered(adoptFlags(said))
-	}
-	items := make([]Item, len(offered))
-	for i, app := range offered {
-		items[i] = Item{Name: app.Name, More: app.Cask, Ticked: true}
-	}
-	return s.tickedAs(ctx, AdoptStep, "which apps should Homebrew take over, so a new Mac gets them?", items, func(i int) string { return offered[i].Cask })
-}
-
-// adoptFlags is what the flags answer, said naming each cask offered, and
-// the app it takes over.
-func adoptFlags(said []string) string {
-	if len(said) == 0 {
-		return "--no-adopt, as Homebrew can take over none of the apps installed by hand"
-	}
-	return "--adopt <cask> for each app installed by hand Homebrew takes over, so a new Mac gets it (" + strings.Join(said, ", ") + ", all suggested), or --no-adopt"
 }
 
 // NothingNew is what the install step says on a kit-config setup started:
@@ -533,7 +448,7 @@ func (s *Setup) missing(ctx context.Context) *toInstall {
 	if m.Config == nil {
 		return nil
 	}
-	deps := &kind.Deps{Run: m.Run, Home: m.Home, ConfigHome: m.ConfigHome, StateDir: m.Dirs.State, AppDirs: m.AppDirs}
+	deps := kindDeps(m)
 	t := &toInstall{names: []string{}}
 	for _, d := range kinds.All {
 		k := d.New(deps)
@@ -567,6 +482,11 @@ func (s *Setup) missing(ctx context.Context) *toInstall {
 	s.toInstall = t
 	s.mu.Unlock()
 	return t
+}
+
+// kindDeps are what m's kinds are made from.
+func kindDeps(m snapshot.Mac) *kind.Deps {
+	return &kind.Deps{Run: m.Run, Home: m.Home, ConfigHome: m.ConfigHome, StateDir: m.Dirs.State, AppDirs: m.AppDirs}
 }
 
 // oneLine is why, its lines run together, to sit in a question's line.
@@ -612,7 +532,7 @@ func (s *Setup) commitStep() engine.Step {
 				d.Link = *rec.Link
 			}
 			var left []string
-			d.Adopt, left = s.adopting(found, rec)
+			d.Adopt, left = s.adopting(ctx, rec)
 			res := s.Declare(ctx, d)
 			if res.State != check.Failed && len(left) > 0 {
 				if err := drift.Leave(s.Dirs.State, s.Now(), left...); err != nil {
@@ -631,26 +551,6 @@ func (s *Setup) commitStep() engine.Step {
 			return s.update(func(r *record) { r.Done = true })
 		},
 	}
-}
-
-// adopting are the casks rec's answer has Homebrew take over apps
-// installed by hand with, of those offered now (adoptable); and, by their
-// drift's ids, those offered and not taken, which are left by hand, so
-// kit status never asks of them.
-func (s *Setup) adopting(found *snapshot.Snapshot, rec record) (adopt, left []string) {
-	if rec.Adopt == nil {
-		return nil, nil
-	}
-	offered, _ := s.adoptable(found)
-	for _, app := range offered {
-		switch {
-		case !slices.Contains(*rec.Adopt, app.Cask):
-			left = append(left, brew.CasksDescriptor.Name+":"+app.Cask)
-		case !slices.Contains(adopt, app.Cask):
-			adopt = append(adopt, app.Cask)
-		}
-	}
-	return adopt, left
 }
 
 // provenPrivate is why the clone isn't pushed to a repository proven
@@ -679,7 +579,7 @@ func (s *Setup) stopped(res check.Result) check.Result {
 func (s *Setup) byHandStep() engine.Step {
 	return engine.Step{
 		Name: ByHandStep, Title: "Installed by hand",
-		Check: func(context.Context) check.Result {
+		Check: func(ctx context.Context) check.Result {
 			found, _ := s.snapshot()
 			switch {
 			case found == nil:
@@ -687,13 +587,14 @@ func (s *Setup) byHandStep() engine.Step {
 			case found.ByHandErr != nil:
 				return check.Result{State: check.OK, Summary: "couldn't tell which: " + found.ByHandErr.Error()}
 			}
-			left := s.leftByHand(found)
+			hand := s.handApps(ctx)
+			left := s.leftByHand(found, hand)
 			if len(left) == 0 {
 				return check.Result{State: check.OK, Summary: "none"}
 			}
 			said := fmt.Sprintf("%d, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there", len(left))
-			if found.MatchErr != nil {
-				said += "; kit couldn't tell which Homebrew can take over"
+			if hand.err != nil {
+				said += "; kit couldn't tell which Homebrew can take over: " + oneLine(hand.err.Error())
 			}
 			res := check.Result{State: check.OK, Summary: said}
 			for _, app := range left {
@@ -702,23 +603,6 @@ func (s *Setup) byHandStep() engine.Step {
 			return res
 		},
 	}
-}
-
-// leftByHand are the apps installed by hand found that stay so: those no
-// cask installs, and those offered Homebrew (adoptable) and not taken.
-// One whose cask is declared already is the kit apply after setup's to
-// take over.
-func (s *Setup) leftByHand(found *snapshot.Snapshot) []brew.ByHand {
-	offered, _ := s.adoptable(found)
-	adopted := s.record().Adopt
-	var left []brew.ByHand
-	for _, app := range found.ByHand {
-		taken := adopted != nil && slices.Contains(*adopted, app.Cask)
-		if app.Cask == "" || slices.Contains(offered, app) && !taken {
-			left = append(left, app)
-		}
-	}
-	return left
 }
 
 // secretsStep says where secrets go: kit has no way to tell them, so it

@@ -60,9 +60,10 @@ Mac's [paths], as kit path add does. It asks:
   whether apps' settings are saved every night (--prefs, --no-prefs);
   which of the shell's and tools' files kit-config keeps, each moved in and
   linked back as kit file add does (--link, --no-link);
-  which of the apps installed by hand that a cask installs Homebrew takes
-  over, so a new Mac installs them too (--adopt, --no-adopt): their casks
-  declared, kit apply adopts them, and the rest are left by hand;
+  which apps installed by hand Homebrew takes over, of those a cask
+  installs, so a new Mac gets them too (--adopt, --no-adopt): their casks
+  are declared, and kit apply takes them over; the rest stay as they are,
+  and kit won't ask about them again;
   joining, whether what kit-config declares that this Mac hasn't installs
   with the rest (--apply), or setup stops here to look first (--no-apply).
 It commits and pushes all of it as one, says what kit doesn't look after
@@ -96,8 +97,8 @@ part-way: files are moved into it and linked back.`,
 	f.BoolVar(&noPrefs, "no-prefs", false, "don't save apps' settings")
 	f.StringArrayVar(&links, "link", nil, "a file kit-config keeps, moved in and linked back, as often as wanted")
 	f.BoolVar(&noLink, "no-link", false, "no files for kit-config to keep")
-	f.StringArrayVar(&adopts, "adopt", nil, "a cask Homebrew takes over an app installed by hand with, as often as wanted")
-	f.BoolVar(&noAdopt, "no-adopt", false, "leave every app installed by hand as it is")
+	f.StringArrayVar(&adopts, "adopt", nil, "the cask to take over an app installed by hand, as often as wanted")
+	f.BoolVar(&noAdopt, "no-adopt", false, "leave every app installed by hand as it is, for good: kit won't ask about them again")
 	f.BoolVar(&apply, "apply", false, "run kit apply once setup's done, installing what kit-config declares")
 	f.BoolVar(&noApply, "no-apply", false, "stop once setup's committed, to look first")
 	for _, pair := range [][]string{{"create", "join"}, {"restore", "no-restore"}, {"prefs", "no-prefs"}, {"link", "no-link"}, {"adopt", "no-adopt"}, {"apply", "no-apply"}} {
@@ -295,7 +296,7 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 		counts[p.Kind] += len(p.Lines)
 		total += len(p.Lines)
 		for _, ref := range p.Refused {
-			items = append(items, check.Item{ID: p.Kind + ":" + ref.Entry.Name, Name: ref.Entry.Name, State: "refused", Detail: ref.Err.Error()})
+			items = append(items, check.Item{ID: p.Kind + ":" + ref.Entry.Name, Name: ref.Entry.Name, State: setup.Refused, Detail: ref.Err.Error()})
 		}
 		for _, u := range p.Unchecked {
 			items = append(items, check.Item{ID: p.Kind + ":" + u.Name, Name: u.Name, State: "declared unchecked", Detail: u.Err.Error()})
@@ -329,7 +330,7 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 func (r *run) declareRestores(ctx context.Context, paths []string) []check.Item {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
 	if err != nil {
-		return []check.Item{{ID: config.RestoreKind, Name: strings.Join(paths, ", "), State: "refused", Detail: err.Error()}}
+		return []check.Item{{ID: config.RestoreKind, Name: strings.Join(paths, ", "), State: setup.Refused, Detail: err.Error()}}
 	}
 	var refused []check.Item
 	for _, p := range r.tildePaths(paths) {
@@ -346,7 +347,7 @@ func (r *run) declareRestores(ctx context.Context, paths []string) []check.Item 
 			err = r.cfg.Declare(config.RestoreKind, r.machine, e)
 		}
 		if err != nil {
-			refused = append(refused, check.Item{ID: config.RestoreKind + ":" + p, Name: p, State: "refused", Detail: err.Error()})
+			refused = append(refused, check.Item{ID: config.RestoreKind + ":" + p, Name: p, State: setup.Refused, Detail: err.Error()})
 		}
 	}
 	return refused
@@ -364,12 +365,12 @@ func (r *run) linkFiles(ctx context.Context, paths []string) []check.Item {
 		}
 	}
 	if err != nil {
-		return []check.Item{{ID: "files", Name: strings.Join(paths, ", "), State: "refused", Detail: err.Error()}}
+		return []check.Item{{ID: "files", Name: strings.Join(paths, ", "), State: setup.Refused, Detail: err.Error()}}
 	}
 	var refused []check.Item
 	for i, path := range full {
 		if _, _, err := r.files.Add(ctx, path, r.machine); err != nil {
-			refused = append(refused, check.Item{ID: "files:" + shown[i], Name: shown[i], State: "refused", Detail: err.Error()})
+			refused = append(refused, check.Item{ID: "files:" + shown[i], Name: shown[i], State: setup.Refused, Detail: err.Error()})
 		}
 	}
 	return refused

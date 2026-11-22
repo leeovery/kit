@@ -658,6 +658,30 @@ func TestDriftWhenWhatsByHandCantBeTold(t *testing.T) {
 	}
 }
 
+// Taken goes by every name a thing declared or installed goes by, as Drift
+// does; by the names declared alone while the kind's program isn't here;
+// and fails when what's installed couldn't be looked at.
+func TestTaken(t *testing.T) {
+	k := &fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}}, aliases: map[string]string{"homebrew/cask/editor": "editor"}}
+	taken, err := kind.Taken(t.Context(), k, declared("homebrew/cask/editor"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]bool{"editor": true, "homebrew/cask/editor": true, "jq": true, "tally": false} {
+		if taken(name) != want {
+			t.Errorf("taken(%q) = %v, want %v", name, !want, want)
+		}
+	}
+	k = &fakeKind{err: fmt.Errorf("brew: %w on kit's PATH", runner.ErrNotFound)}
+	if taken, err := kind.Taken(t.Context(), k, declared("tally")); err != nil || !taken("tally") || taken("editor") {
+		t.Errorf("without its program, Taken = %v; want the names declared alone", err)
+	}
+	k = &fakeKind{err: errors.New("brew list exited 1")}
+	if _, err := kind.Taken(t.Context(), k, declared()); err == nil || !strings.Contains(err.Error(), "brew list exited 1") {
+		t.Errorf("listing failing, Taken's error = %v, want why", err)
+	}
+}
+
 // A kind's step finds what it could take over, installed by hand, looking
 // afresh at each check till applying begins, then going by the look made
 // before: installing what's declared changes nothing of it.

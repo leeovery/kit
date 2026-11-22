@@ -257,8 +257,7 @@ func withHandApps(t *testing.T) *world {
 	f.On("brew", "leaves")
 	f.On("brew", "leaves", "--installed-on-request")
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n")
-	f.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
-	f.On("brew", "info", "--json=v2", "--cask", "ghostty").Prints(`{"formulae": [], "casks": [{"token": "ghostty", "full_token": "ghostty", "old_tokens": [], "artifacts": [{"app": ["Ghostty.app"]}]}]}`)
+	w.caskroom(t, map[string]string{"ghostty": "Ghostty.app"})
 	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
 {"casks": {"editor": {"raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]}, "tally": {"raw_artifacts": [[":uninstall", {":quit": "com.example.tally"}], [":app", ["Tally.app"]]]}}}`)
 	w.installApp(t, "Editor", "com.example.editor")
@@ -280,12 +279,12 @@ func TestSetupAdoptsAsItsFlagsSay(t *testing.T) {
 	w := withHandApps(t)
 	base := []string{"setup", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--no-link", "--no-apply"}
 	_, errOut, code := w.run(t, base...)
-	if want := "answer with --adopt <cask> for each app installed by hand Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt"; code != 2 || !strings.Contains(errOut, want) {
+	if want := "answer with --adopt <cask> for each app installed by hand that Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt leaves them as they are, for good"; code != 2 || !strings.Contains(errOut, want) {
 		t.Errorf("unanswered, kit setup said %q, exit %d; want it to name %q", errOut, code, want)
 	}
 
 	out, errOut, code := w.run(t, append(base, "--adopt", "tally")...)
-	for _, want := range []string{"adopt ok 1 app\n", "commit ok 3 declared · committed and pushed", "by-hand ok 2, which kit doesn't look after", "by-hand installed by hand Editor, Kubius\n"} {
+	for _, want := range []string{"adopt ok 1 app · kit apply takes it over\n", "commit ok 3 declared · committed and pushed", "by-hand ok 2, which kit doesn't look after", "by-hand installed by hand Editor, Kubius\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("kit setup --adopt tally printed\n%s%s\nwant it to hold %q", out, errOut, want)
 		}

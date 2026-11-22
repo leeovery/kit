@@ -52,6 +52,10 @@ const (
 	SecretsStep  = "secrets"
 )
 
+// Refused is the state of what setup's commit refused to declare, an
+// item of its result each.
+const Refused = "refused"
+
 // The areas setup's steps are in: setting up, then what's declared.
 const (
 	AreaSetup    = "Setup"
@@ -146,6 +150,7 @@ type Setup struct {
 	found        *snapshot.Snapshot
 	mac          snapshot.Mac
 	toInstall    *toInstall
+	hand         *handApps
 	declared     *check.Result
 	wanted       []string
 }

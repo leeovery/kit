@@ -177,12 +177,12 @@ func SetupDone(at time.Time) []event.Event {
 	ok(setup.DataStep, "3 folders · 56.3 GB")
 	ok(setup.PrefsStep, "every night")
 	ok(setup.FilesStep, "5")
-	ok(setup.AdoptStep, "2 apps")
+	ok(setup.AdoptStep, "2 apps · kit apply takes them over")
 	ok(setup.InstallStep, setup.NothingNew)
 	events = append(events, event.StepStarted{Time: at, Step: setup.CommitStep},
 		event.StepFinished{Time: at, Step: setup.CommitStep, Result: check.Result{State: check.OK, Summary: "370 declared · committed and pushed kit.toml and laptop/", Counts: counts}})
 	byHand := check.Result{State: check.OK, Summary: "3, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there"}
-	for _, app := range []string{"Sketchpad", "Tally", "Mac Monitor"} {
+	for _, app := range []string{"Sketchpad", "Inkwell", "Mac Monitor"} {
 		byHand.Items = append(byHand.Items, check.Item{ID: setup.ByHandStep + ":" + app, Name: app, State: "installed by hand"})
 	}
 	events = append(events, event.StepFinished{Time: at, Step: setup.ByHandStep, Result: byHand})

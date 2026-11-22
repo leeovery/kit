@@ -200,6 +200,10 @@ type mac struct {
 	mu       sync.Mutex
 	declared []Declaring
 	pushes   []check.State
+	// byHand are the apps the last run said were installed by hand.
+	byHand []string
+	// refuse are the casks committing refuses to declare.
+	refuse []string
 }
 
 func newMac(t *testing.T, repos map[string]bool) *mac {
@@ -233,7 +237,7 @@ func newMac(t *testing.T, repos map[string]bool) *mac {
 	run.On("git", m.inClone("remote", "get-url", "--push", "--all", "origin")...).Filters(m.git.pushURL)
 	run.On("git", m.inClone("for-each-ref", "--count=1", "--format=%(refname)", "refs/heads")...).Filters(m.git.printed("branch"))
 	run.On("git", m.inClone("ls-remote", "--heads", "origin")...).Filters(m.git.lsRemote)
-	for _, args := range [][]string{{"list", "--formula", "--full-name", "-1"}, {"leaves"}, {"leaves", "--installed-on-request"}} {
+	for _, args := range [][]string{{"list", "--formula", "--full-name", "-1"}, {"leaves"}, {"leaves", "--installed-on-request"}, {"list", "--cask", "--full-name", "-1"}} {
 		run.On("brew", args...).Fails(runner.ErrNotFound)
 	}
 	return m
@@ -336,20 +340,53 @@ func (m *mac) setup(given Answers) *Setup {
 			m.mu.Lock()
 			defer m.mu.Unlock()
 			m.declared = append(m.declared, d)
+			var refused []check.Item
+			casks := slices.DeleteFunc(slices.Clone(d.Adopt), func(c string) bool {
+				if !slices.Contains(m.refuse, c) {
+					return false
+				}
+				refused = append(refused, check.Item{ID: brew.CasksDescriptor.Name + ":" + c, Name: c, State: Refused, Detail: "declared for every Mac already"})
+				return true
+			})
+			if err := m.declareCasks(casks); err != nil {
+				return check.Result{State: check.Failed, Reason: err.Error()}
+			}
 			state := check.OK
 			if len(m.pushes) > 0 {
 				state, m.pushes = m.pushes[0], m.pushes[1:]
 			}
 			switch state {
 			case check.OK:
-				return check.Result{State: state, Summary: "committed and pushed"}
+				return check.Result{State: state, Summary: "committed and pushed", Items: refused}
 			case check.Failed:
 				return check.Result{State: state, Reason: "couldn't commit"}
 			}
-			return check.Result{State: state, Summary: "committed, not pushed"}
+			return check.Result{State: state, Summary: "committed, not pushed", Items: refused}
 		},
 	}
 	return s
+}
+
+// declareCasks declares casks for the Mac setup's record names, as
+// setup's commit declares those taking over apps installed by hand.
+func (m *mac) declareCasks(casks []string) error {
+	if len(casks) == 0 {
+		return nil
+	}
+	rec, err := kitstate.Load[record](m.dirs.State, recordName)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(m.dirs.Config, kinds.Sections())
+	if err != nil {
+		return err
+	}
+	lines := make([]config.Declaration, len(casks))
+	for i, c := range casks {
+		lines[i] = config.Declaration{Kind: brew.CasksDescriptor.Name, Entry: config.Entry{Name: c}}
+	}
+	_, err = cfg.DeclareAll(rec.Mac, nil, lines)
+	return err
 }
 
 // runSetup runs setup on the Mac, given answers, as kit setup does, only
@@ -368,6 +405,10 @@ func (m *mac) runSetup(t *testing.T, given Answers, only ...string) (*Setup, eng
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.byHand = nil
+	for _, it := range report.Results[ByHandStep].Items {
+		m.byHand = append(m.byHand, it.Name)
+	}
 	return s, report
 }
 
@@ -383,15 +424,19 @@ func said(report engine.Report, steps ...string) []string {
 
 // ended is how the Mac ends, setup run: setup's record; kit.toml, and the
 // declarations file of the Mac it names; kit's name for it; git in the
-// clone; what the last commit declared, but what the snapshot found; how
-// often GitHub's CLI created a repository; and what's left by hand.
+// clone; what the last commit declared, but what the snapshot found and
+// the casks taken over; the casks every commit took over, as each one was
+// declared; how often GitHub's CLI created a repository; what's left by
+// hand, in drift's record; and what the last run said was installed by
+// hand.
 type ended struct {
 	Record              record
 	Toml, Decl, Machine string
 	Git                 map[string]string
 	Declared            Declaring
+	Adopted             []string
 	Creates             int
-	Left                []string
+	Left, ByHand        []string
 }
 
 func (m *mac) ended(t *testing.T) ended {
@@ -407,8 +452,12 @@ func (m *mac) ended(t *testing.T) ended {
 	e.Machine, _ = config.ReadMachine(m.dirs.State)
 	if n := len(m.declared); n > 0 {
 		e.Declared = m.declared[n-1]
-		e.Declared.Found = nil
+		e.Declared.Found, e.Declared.Adopt = nil, nil
 	}
+	for _, d := range m.declared {
+		e.Adopted = append(e.Adopted, d.Adopt...)
+	}
+	e.ByHand = m.byHand
 	for _, call := range m.run.Calls() {
 		if strings.HasPrefix(call, "gh repo create ") {
 			e.Creates++
@@ -723,7 +772,7 @@ func TestSetupStoppedAnywhereEndsAsOneNeverStopped(t *testing.T) {
 				flow.github(t, unbroken)
 				unbroken.runSetup(t, flow.given)
 				want := unbroken.ended(t)
-				if !want.Record.Done || !slices.Equal(want.Declared.Adopt, tally) || !slices.Equal(want.Left, []string{"cask:editor"}) {
+				if !want.Record.Done || !slices.Equal(want.Adopted, tally) || !slices.Equal(want.Left, []string{"cask:editor"}) || !slices.Equal(want.ByHand, []string{"Kubius", "Editor", "Sendhit"}) {
 					t.Fatalf("unbroken, setup ended %+v", want)
 				}
 
@@ -965,7 +1014,7 @@ func snapshotted(t *testing.T, ask Asker) (*Setup, *mac) {
 		m.write(t, name, content)
 	}
 	m.write(t, config.DeclFile("laptop"), "[features]\nprefs\n\n"+joinedConfig[config.DeclFile("laptop")])
-	if err := kitstate.Update(m.dirs.State, recordName, func(r *record) { r.Repo = "someone/kit-config" }); err != nil {
+	if err := kitstate.Update(m.dirs.State, recordName, func(r *record) { r.Repo, r.Mac = "someone/kit-config", "laptop" }); err != nil {
 		t.Fatal(err)
 	}
 	m.git.put("origin", "https://github.com/someone/kit-config.git")()
@@ -1018,18 +1067,19 @@ func TestTheSnapshotsQuestions(t *testing.T) {
 		{"files, no terminal", FilesStep, nil, false, Answers{}, false, nil,
 			"failed no terminal to ask at: --link <path> for each file kit-config keeps, moved in and linked back (~/.zshrc, all suggested), or --no-link", ""},
 		{"files, given anew", FilesStep, func(r *record) { r.Link = &[]string{"~/.zshrc"} }, false, Answers{Link: &[]string{}}, false, nil, "ok none", ""},
-		{"apps, as given", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally"}}, false, nil, "ok 1 app", ""},
+		{"apps, as given", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally"}}, false, nil, "ok 1 app · kit apply takes it over", ""},
+		{"apps, given twice", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally", "tally"}}, false, nil, "ok 1 app · kit apply takes it over", ""},
 		{"apps, none", AdoptStep, nil, false, Answers{Adopt: &[]string{}}, false, nil, "ok none", ""},
-		{"apps, asked", AdoptStep, nil, false, Answers{}, true, nil, "ok 2 apps",
-			"adopt: which apps should Homebrew take over, so a new Mac gets them?: Editor editor (ticked), Tally tally (ticked)"},
+		{"apps, asked", AdoptStep, nil, false, Answers{}, true, nil, "ok 2 apps · kit apply takes them over",
+			"adopt: which apps should Homebrew take over, so a new Mac gets them?\nthe rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"},
 		{"apps, no terminal", AdoptStep, nil, false, Answers{}, false, nil,
-			"failed no terminal to ask at: --adopt <cask> for each app installed by hand Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt", ""},
+			"failed no terminal to ask at: --adopt <cask> for each app installed by hand that Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt leaves them as they are, for good", ""},
 		{"apps, a cask offered for none", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally", "kubius"}}, false, nil,
-			"failed no app installed by hand here is the kubius cask's to take over: --adopt <cask> for each app installed by hand Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt", ""},
-		{"apps, recorded", AdoptStep, func(r *record) { r.Adopt = &[]string{"editor"} }, false, Answers{}, false, nil, "ok 1 app", ""},
+			"failed no app installed by hand here is the kubius cask's to take over: --adopt <cask> for each app installed by hand that Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt leaves them as they are, for good", ""},
+		{"apps, recorded", AdoptStep, func(r *record) { r.Adopt = &[]string{"editor"} }, false, Answers{}, false, nil, "ok 1 app · kit apply takes it over", ""},
 		{"apps, given anew", AdoptStep, func(r *record) { r.Adopt = &[]string{"editor"} }, false, Answers{Adopt: &[]string{}}, false, nil, "ok none", ""},
 		{"apps, given anew once the edits are made", AdoptStep, func(r *record) { r.Adopt, r.Declared = &[]string{"editor"}, true }, false, Answers{Adopt: &[]string{}}, false, nil,
-			"failed kit setup, part-way, has made its edits in kit-config, to Homebrew 1 app: run kit setup again without --adopt or --no-adopt", ""},
+			"failed kit setup, part-way, has made its edits in kit-config, with Homebrew to take over 1 app: run kit setup again without --adopt or --no-adopt", ""},
 		{"to install, as given", InstallStep, nil, false, Answers{Apply: &yes}, false, nil, "ok with the rest", ""},
 		{"to install, asked", InstallStep, nil, false, Answers{}, true, []int{1}, "ok stopped here to look first: kit status, then kit apply",
 			"to-install: kit-config declares 1 thing this Mac hasn't\njq: Install them with the rest, Stop here to look first"},
@@ -1211,7 +1261,7 @@ func TestSetupAdoptsTheAppsTicked(t *testing.T) {
 	if _, err := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"adopt: which apps should Homebrew take over, so a new Mac gets them?: Editor editor (ticked), Tally tally (ticked)"}; !slices.Equal(ask.asked, want) {
+	if want := []string{"adopt: which apps should Homebrew take over, so a new Mac gets them?\nthe rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"}; !slices.Equal(ask.asked, want) {
 		t.Errorf("asked %q, want %q", ask.asked, want)
 	}
 	if err := s.update(func(r *record) { r.Restore, r.Link, r.Adopt = &[]string{}, &[]string{}, &[]string{"tally"} }); err != nil {
@@ -1254,8 +1304,8 @@ func TestSetupAdoptsNothingOffered(t *testing.T) {
 		byHand   string
 	}{
 		{"none a cask installs", nil, "none to take over", "2, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there"},
-		{"no telling", errors.New("Homebrew's catalogue isn't there"), "couldn't tell which apps it can take over",
-			"2, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there; kit couldn't tell which Homebrew can take over"},
+		{"no telling", errors.New("Homebrew's catalogue isn't there"), "couldn't tell which it can take over: Homebrew's catalogue isn't there",
+			"2, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there; kit couldn't tell which Homebrew can take over: Homebrew's catalogue isn't there"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ask := &asker{}
@@ -1270,6 +1320,118 @@ func TestSetupAdoptsNothingOffered(t *testing.T) {
 				t.Errorf("by hand said %q\nwant %q", got, tt.byHand)
 			}
 		})
+	}
+}
+
+// byHandNames are the apps the by-hand step lists, and what it says.
+func byHandNames(t *testing.T, s *Setup) ([]string, string) {
+	t.Helper()
+	res := s.byHandStep().Check(t.Context())
+	var names []string
+	for _, it := range res.Items {
+		names = append(names, it.Name)
+	}
+	return names, res.Summary
+}
+
+// A cask installing several apps is a row of its own, naming them, its
+// flag named once, its answer counting them; a cask is shown only when
+// its name doesn't say it already.
+func TestSetupOffersEachCaskOnce(t *testing.T) {
+	ask := &asker{}
+	s, _ := adopting(t, ask)
+	s.found = &snapshot.Snapshot{ByHand: []brew.ByHand{
+		{Name: "Word", Cask: "office"}, {Name: "Spark Desktop", Cask: "readdle-spark"}, {Name: "Excel", Cask: "office"}, {Name: "Google Chrome", Cask: "google-chrome"},
+	}}
+	p, _ := engine.New(s.adoptStep())
+	report, _ := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1})
+	if got := said(report, AdoptStep)[0]; got != "adopt ok 4 apps · kit apply takes them over" {
+		t.Errorf("stood %q", got)
+	}
+	want := "adopt: which apps should Homebrew take over, so a new Mac gets them?\nthe rest stay as they are, and kit won't ask about them again: Word and Excel office (ticked), Spark Desktop readdle-spark (ticked), Google Chrome (ticked)"
+	if !slices.Equal(ask.asked, []string{want}) {
+		t.Errorf("asked %q\nwant %q", ask.asked, want)
+	}
+
+	s, _ = adopting(t, nil)
+	s.found = &snapshot.Snapshot{ByHand: []brew.ByHand{{Name: "Word", Cask: "office"}, {Name: "Excel", Cask: "office"}}}
+	p, _ = engine.New(s.adoptStep())
+	report, _ = p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1})
+	if got := said(report, AdoptStep)[0]; !strings.Contains(got, "(office for Word and Excel, all suggested)") {
+		t.Errorf("without a terminal, stood %q; want office named once, for both", got)
+	}
+	s.Given.Adopt = &[]string{"office"}
+	report, _ = p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1})
+	if got := said(report, AdoptStep)[0]; got != "adopt ok 2 apps · kit apply takes them over" {
+		t.Errorf("--adopt office stood %q, want both apps counted", got)
+	}
+}
+
+// A cask the Mac declares already is taken as given, as kit apply takes
+// its app over anyway, and declared no more; nor is its app by hand.
+func TestSetupAdoptsACaskDeclaredAlready(t *testing.T) {
+	s, m := adopting(t, nil)
+	s.Given.Adopt = &[]string{"viewer", "tally"}
+	p, _ := engine.New(s.adoptStep(), s.commitStep())
+	report, _ := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1})
+	if got := said(report, AdoptStep)[0]; got != "adopt ok 2 apps · kit apply takes them over" {
+		t.Errorf("--adopt viewer tally stood %q", got)
+	}
+	if d := m.declared[len(m.declared)-1]; !slices.Equal(d.Adopt, []string{"tally"}) {
+		t.Errorf("declared %q, want tally alone", d.Adopt)
+	}
+	if names, _ := byHandNames(t, s); !slices.Equal(names, []string{"Kubius", "Editor"}) {
+		t.Errorf("by hand listed %q, want Kubius and Editor", names)
+	}
+}
+
+// A ticked cask the commit refuses stays installed by hand, listed so, and
+// isn't left by hand, so kit status raises it.
+func TestSetupListsACaskRefusedAsByHand(t *testing.T) {
+	s, m := adopting(t, nil)
+	m.refuse = []string{"tally"}
+	if err := s.update(func(r *record) { r.Adopt = &[]string{"tally", "editor"} }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.commitStep().Apply(t.Context(), check.Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := byHandNames(t, s); !slices.Equal(names, []string{"Kubius", "Tally"}) || len(m.left(t)) > 0 {
+		t.Errorf("by hand listed %q, left %q; want Kubius and Tally listed, nothing left", names, m.left(t))
+	}
+}
+
+// When which apps a cask installs can't be told on a run again, the answer
+// recorded stands: its casks declared, nothing more left by hand.
+func TestSetupTrustsTheAnswerWhenTheLookFails(t *testing.T) {
+	s, m := adopting(t, nil)
+	s.found = &snapshot.Snapshot{ByHand: []brew.ByHand{{Name: "Kubius"}, {Name: "Editor"}, {Name: "Tally"}}, MatchErr: errors.New("Homebrew's catalogue isn't there")}
+	if err := s.update(func(r *record) { r.Adopt = &[]string{"tally"} }); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.adoptStep().Check(t.Context()).Summary; got != "1 app · kit apply takes it over" {
+		t.Errorf("stood %q, want the answer recorded", got)
+	}
+	if err := s.commitStep().Apply(t.Context(), check.Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if d := m.declared[0]; !slices.Equal(d.Adopt, []string{"tally"}) || len(m.left(t)) > 0 {
+		t.Errorf("declared %q, left %q; want tally declared, nothing left", d.Adopt, m.left(t))
+	}
+}
+
+// When what the Mac declares can't be read, nothing's offered, the row
+// saying why, and every app stays in Installed by hand, saying why too.
+func TestSetupWhenTheDeclaredCasksCantBeRead(t *testing.T) {
+	s, _ := adopting(t, nil)
+	s.mac.Config = nil
+	why := "couldn't read what this Mac declares: kit-config isn't read"
+	if got := s.adoptStep().Check(t.Context()).Summary; got != "couldn't tell which it can take over: "+why {
+		t.Errorf("stood %q", got)
+	}
+	names, summary := byHandNames(t, s)
+	if !slices.Equal(names, []string{"Kubius", "Editor", "Tally", "Viewer"}) || !strings.HasSuffix(summary, "; kit couldn't tell which Homebrew can take over: "+why) {
+		t.Errorf("by hand listed %q, saying %q; want every app, and why", names, summary)
 	}
 }
 
