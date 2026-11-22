@@ -1229,8 +1229,9 @@ var scannerLine = config.List{Entries: []config.Entry{{Name: "scanner", Value: `
 // r on bringing back apps' settings, then s while that's under way: the
 // to-do's left for later, skipped and settling, the scanner's up at once.
 // The settings brought back while the scanner's up, the list says it's
-// done there and then, and the app it leaves to open comes at the list's
-// end, up once the scanner's done, this run.
+// done there and then, and next, as its step's check finds it, the app it
+// leaves to open comes at the list's end, up once the scanner's done, this
+// run.
 func TestSkippingAChoiceWhileItsKeyIsDone(t *testing.T) {
 	defer steps.SetManualPoll(time.Millisecond)()
 	c := newCard(t)
@@ -1249,8 +1250,12 @@ func TestSkippingAChoiceWhileItsKeyIsDone(t *testing.T) {
 	c.listUntil(t, func(l event.ToDos) bool { return l.List[0].Skipped && l.List[0].Settling && l.Up == 1 })
 	close(through)
 	l := c.listUntil(t, func(l event.ToDos) bool { return l.List[0].Done })
-	if ids := toDoIDs(l.List); l.Up != 1 || l.List[0].Skipped || l.List[0].Settling || !slices.Equal(ids, []string{"prefs:none", "manual:scanner", "prefs:open"}) {
-		t.Errorf("the settings brought back, the list said %+v, up %d; want it done there and then, the scanner up, the app to open at the end", l.List, l.Up)
+	if l.Up != 1 || l.List[0].Skipped || l.List[0].Settling {
+		t.Errorf("the settings brought back, the list said %+v, up %d; want it done there and then, the scanner up", l.List, l.Up)
+	}
+	l = c.listUntil(t, func(l event.ToDos) bool { return len(l.List) == 3 })
+	if ids := toDoIDs(l.List); l.Up != 1 || !slices.Equal(ids, []string{"prefs:none", "manual:scanner", "prefs:open"}) {
+		t.Errorf("the settings brought back, the list said %+v, up %d; want the scanner up, the app to open at the end", l.List, l.Up)
 	}
 	c.answer(t, steps.ManualName, hand.Done)
 	c.upNow(t, "prefs:open")
