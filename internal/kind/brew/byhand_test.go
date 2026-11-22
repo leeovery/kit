@@ -51,9 +51,10 @@ func withApps(fake *runnertest.Fake, dirs ...string) *brew.Homebrew {
 	return brew.Of(&kind.Deps{Run: fake, Home: "/Users/someone", AppDirs: dirs})
 }
 
-// noCasks has Homebrew say no cask is installed.
-func noCasks(fake *runnertest.Fake) {
-	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
+// noCasks has Homebrew's Caskroom hold no cask.
+func noCasks(t *testing.T, fake *runnertest.Fake) {
+	t.Helper()
+	caskroom(t, fake, nil)
 }
 
 // names are the names of apps.
@@ -86,11 +87,12 @@ func TestTheAppsInstalledByHand(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(installApp(t, apps, "Store.app", "com.example.store"), "Contents", "_MASReceipt", "receipt"), "")
 	installApp(t, mine, "Mine.app", "com.example.mine")
-	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": [
-		{"token": "suite", "artifacts": [{"suite": ["Example Suite"]}]},
-		{"token": "editor", "artifacts": [{"app": ["Editor.app"]}]},
-		{"token": "driver", "artifacts": [{"uninstall": [{"pkgutil": "com.example.driver.*"}]}, {"pkg": ["Driver.pkg"]}]},
-		{"token": "agent", "artifacts": [{"uninstall": [{"pkgutil": "com.example.agent"}]}, {"pkg": ["Agent.pkg"]}]}]}`)
+	caskroom(t, fake, map[string]string{
+		"suite":  `[{"suite": ["Example Suite"]}]`,
+		"editor": `[{"app": ["Editor.app"]}]`,
+		"driver": `[{"uninstall": [{"pkgutil": "com.example.driver.*"}]}]`,
+		"agent":  `[{"uninstall": [{"pkgutil": "com.example.agent"}]}]`,
+	})
 	fake.On("pkgutil", "--pkgs").Prints("com.apple.pkg.Core\ncom.example.driver.app\ncom.example.agent\ncom.example.other\n")
 	receipt := func(location string) string {
 		return `<plist version="1.0"><dict><key>install-location</key><string>` + location + `</string><key>volume</key><string>/</string></dict></plist>`
@@ -156,7 +158,7 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 				dir = other
 			}
 			path := installApp(t, dir, tt.app, tt.id)
-			noCasks(fake)
+			noCasks(t, fake)
 			catalogued(t, fake)
 			found, err := withApps(fake, apps, other).AppsByHand(t.Context())
 			want := []brew.ByHand{{Path: path, Name: strings.TrimSuffix(tt.app, ".app"), ID: tt.id, Cask: tt.want}}
@@ -185,7 +187,7 @@ func TestAppsByHandWithoutACatalogue(t *testing.T) {
 			fake := runnertest.New(t)
 			apps := t.TempDir()
 			path := installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
-			noCasks(fake)
+			noCasks(t, fake)
 			cache := t.TempDir()
 			if tt.payload != "" {
 				writeFile(t, filepath.Join(cache, "api", "internal", "packages.arm64_tahoe.jws.json.payload"), tt.payload)
@@ -199,7 +201,7 @@ func TestAppsByHandWithoutACatalogue(t *testing.T) {
 		})
 	}
 	fake := runnertest.New(t)
-	noCasks(fake)
+	noCasks(t, fake)
 	if found, err := withApps(fake, t.TempDir()).AppsByHand(t.Context()); found.Apps != nil || found.Unmatched != nil || err != nil || len(fake.Calls()) > 0 {
 		t.Errorf("AppsByHand() of none = %+v, %v, running %q; want none, Homebrew asked nothing", found, err, fake.Calls())
 	}
@@ -211,7 +213,7 @@ func TestTheCatalogueIsTheNewestAsItChanges(t *testing.T) {
 	fake := runnertest.New(t)
 	apps := t.TempDir()
 	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
-	noCasks(fake)
+	noCasks(t, fake)
 	cache := t.TempDir()
 	fake.On("brew", "--cache").Prints(cache + "\n")
 	internal := filepath.Join(cache, "api", "internal")
@@ -252,7 +254,7 @@ func TestAppsByHandWithoutHomebrewsCache(t *testing.T) {
 	fake := runnertest.New(t)
 	apps := t.TempDir()
 	installApp(t, apps, "Tool.app", "com.example.tool")
-	noCasks(fake)
+	noCasks(t, fake)
 	fake.On("brew", "--cache").Exits(1).PrintsToStderr("Error: broken")
 	found, err := withApps(fake, apps).AppsByHand(t.Context())
 	if exit, ok := errors.AsType[*runner.ExitError](found.Unmatched); err != nil || !ok || !strings.HasPrefix(found.Unmatched.Error(), "find Homebrew's cache") || exit.Code != 1 {
@@ -271,7 +273,7 @@ func TestTheCasksAppsInstalledByHandAreDrift(t *testing.T) {
 	installApp(t, apps, "Spaceman.app", "dev.original.Spaceman")
 	installApp(t, apps, "1Password.app", "com.1password.1password")
 	installApp(t, apps, "Kubius.app", "com.example.kubius")
-	noCasks(fake)
+	noCasks(t, fake)
 	catalogued(t, fake)
 	fake.On("brew", "list", "--cask", "--full-name", "-1")
 	fake.On("brew", "info", "--json=v2", "--cask", "1password").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password"}]}`)
@@ -286,22 +288,76 @@ func TestTheCasksAppsInstalledByHandAreDrift(t *testing.T) {
 	}
 }
 
-// When which casks install the apps installed by hand can't be told, none
-// is drift, and the casks' check stands as ever, the run's log saying why.
-func TestTheCasksWithoutACatalogueHaveNoAppsByHand(t *testing.T) {
+// When which casks install the apps installed by hand can't be told,
+// however that fails, none is drift, and the casks' check stands as ever
+// but partial, so what it couldn't see is kept, the run's log saying why.
+func TestTheCasksAppsByHandThatCantBeTold(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		setup func(t *testing.T, fake *runnertest.Fake)
+		why   string
+	}{
+		{"no catalogue", func(t *testing.T, fake *runnertest.Fake) {
+			noCasks(t, fake)
+			fake.On("brew", "--cache").Prints(t.TempDir() + "\n")
+		}, "no catalogue of casks in Homebrew's cache"},
+		{"no Caskroom told", func(t *testing.T, fake *runnertest.Fake) {
+			fake.On("brew", "--caskroom").Exits(1).PrintsToStderr("Error: broken\n")
+		}, "find the casks' apps: "},
+		{"a cask brew info can't describe, gone from its tap", func(t *testing.T, fake *runnertest.Fake) {
+			caskroom(t, fake, map[string]string{"gone": ""})
+			fake.On("brew", "info", "--json=v2", "--cask", "gone").Exits(1).PrintsToStderr("Error: Cask 'gone' is unavailable\n")
+		}, "find the casks' apps: "},
+		{"pkgutil failing", func(t *testing.T, fake *runnertest.Fake) {
+			caskroom(t, fake, map[string]string{"driver": `[{"uninstall": [{"pkgutil": "com.example.driver"}]}]`})
+			catalogued(t, fake)
+			fake.On("pkgutil", "--pkgs").Exits(1)
+		}, "find the casks' packages' apps: "},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			apps := t.TempDir()
+			installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+			fake.On("brew", "list", "--cask", "--full-name", "-1")
+			tt.setup(t, fake)
+			var logged []string
+			ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+			got := kind.Drift(ctx, withApps(fake, apps).Casks(), config.List{Kind: "cask"})
+			if got.State != check.OK || len(got.Items) != 0 || !got.Partial {
+				t.Errorf("Drift() = %+v, want ok, nothing by hand, partial", got)
+			}
+			if len(logged) != 1 || !strings.HasPrefix(logged[0], "kit can't tell what's installed by hand: "+tt.why) {
+				t.Errorf("logged %q, want why: %s", logged, tt.why)
+			}
+		})
+	}
+}
+
+// Finding what the casks could take over asks brew where the Caskroom is
+// and for its catalogue alone, as the installed casks' receipts say what
+// they put in place; and pkgutil nothing while no app left a cask installs,
+// though a cask's package might have put it there. Finding every app by
+// hand, as a snapshot does, asks pkgutil of each.
+func TestFindingAppsByHandRunsLittle(t *testing.T) {
 	fake := runnertest.New(t)
 	apps := t.TempDir()
-	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
-	noCasks(fake)
-	fake.On("brew", "--cache").Prints(t.TempDir() + "\n")
-	fake.On("brew", "list", "--cask", "--full-name", "-1")
-	var logged []string
-	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
-	got := kind.Drift(ctx, withApps(fake, apps).Casks(), config.List{Kind: "cask"})
-	if got.State != check.OK || len(got.Items) != 0 {
-		t.Errorf("Drift() = %+v, want ok, nothing by hand", got)
+	installApp(t, apps, "Kubius.app", "com.example.kubius")
+	installApp(t, apps, "Editor.app", "com.example.editor")
+	caskroom(t, fake, map[string]string{
+		"editor": `[{"app": ["Editor.app"]}]`,
+		"driver": `[{"uninstall": [{"pkgutil": "com.example.driver"}]}]`,
+	})
+	catalogued(t, fake)
+	fake.On("pkgutil", "--pkgs").Prints("com.apple.pkg.Core\n")
+	found, err := withApps(fake, apps).Casks().(kind.Adoptable).InstalledByHand(t.Context())
+	if err != nil || len(found) != 0 {
+		t.Errorf("InstalledByHand() = %v, %v; want none", found, err)
 	}
-	if want := []string{"kit can't tell what's installed by hand: no catalogue of casks in Homebrew's cache"}; !slices.Equal(logged, want) {
-		t.Errorf("logged %q, want %q", logged, want)
+	if want := []string{"brew --caskroom", "brew --cache"}; !slices.Equal(fake.Calls(), want) {
+		t.Errorf("ran %q, want %q", fake.Calls(), want)
+	}
+	hand, err := withApps(fake, apps).AppsByHand(t.Context())
+	if err != nil || !slices.Equal(names(hand.Apps), []string{"Kubius"}) || !slices.Contains(fake.Calls(), "pkgutil --pkgs") {
+		t.Errorf("AppsByHand() = %+v, %v, running %q; want the Kubius, pkgutil asked", hand, err, fake.Calls())
 	}
 }

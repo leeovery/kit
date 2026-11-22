@@ -187,6 +187,10 @@ type Result struct {
 	Counts map[string]int `json:"counts,omitempty"`
 	// Items are the things that need attention.
 	Items []Item `json:"items,omitempty"`
+	// Partial is whether the check couldn't look at all it looks for, as
+	// at the apps installed by hand: what it doesn't report may be there
+	// still.
+	Partial bool `json:"partial,omitempty"`
 	// Done are the items applying the step dealt with, each with the action
 	// it took.
 	Done []Item `json:"done,omitempty"`

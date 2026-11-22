@@ -8,6 +8,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/drift"
+	"github.com/leeovery/kit/internal/kind"
 )
 
 var now = time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
@@ -23,11 +24,9 @@ func TestQuieten(t *testing.T) {
 		FirstSeen: map[string]time.Time{
 			"brew:recent": ago(2 * time.Hour), "brew:old": ago(25 * time.Hour), "brew:snoozed": ago(30 * 24 * time.Hour),
 			"brew:woke": ago(30 * 24 * time.Hour), "brew:temp": ago(26 * time.Hour), "brew:stale-temp": ago(9 * 24 * time.Hour),
-			"brew:left": ago(30 * 24 * time.Hour), "brew:left-woke": ago(30 * 24 * time.Hour),
 		},
-		Snoozed:   map[string]time.Time{"brew:snoozed": now.Add(time.Hour), "brew:woke": ago(time.Minute), "brew:left-woke": ago(time.Minute)},
+		Snoozed:   map[string]time.Time{"brew:snoozed": now.Add(time.Hour), "brew:woke": ago(time.Minute)},
 		Temporary: map[string]time.Time{"brew:temp": ago(26 * time.Hour), "brew:stale-temp": ago(8 * 24 * time.Hour)},
-		Left:      map[string]time.Time{"brew:left": ago(20 * 24 * time.Hour), "brew:left-woke": ago(20 * 24 * time.Hour), "brew:left-unseen": ago(time.Hour)},
 	}
 	tests := []struct {
 		name      string
@@ -42,9 +41,6 @@ func TestQuieten(t *testing.T) {
 		{name: "woke", stillLoud: true, since: ago(30 * 24 * time.Hour)},
 		{name: "temp", quiet: drift.Temporary, since: ago(26 * time.Hour)},
 		{name: "stale-temp", stillLoud: true, since: ago(9 * 24 * time.Hour)},
-		{name: "left", quiet: drift.Left, since: ago(30 * 24 * time.Hour)},
-		{name: "left-woke", quiet: drift.Left, since: ago(30 * 24 * time.Hour)},
-		{name: "left-unseen", quiet: drift.Left},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,6 +55,32 @@ func TestQuieten(t *testing.T) {
 			}
 			if res.State != want {
 				t.Errorf("state = %s, want %s", res.State, want)
+			}
+		})
+	}
+}
+
+// A thing installed by hand left so is quiet for good, however old, its
+// snooze ended or never seen; a leave holds for nothing else under its id,
+// as the cask installed since, by hand.
+func TestQuietenWhatsLeftByHand(t *testing.T) {
+	r := drift.Record{
+		FirstSeen: map[string]time.Time{"cask:left": ago(30 * 24 * time.Hour), "cask:woke": ago(30 * 24 * time.Hour), "cask:since": ago(30 * 24 * time.Hour)},
+		Snoozed:   map[string]time.Time{"cask:woke": ago(time.Minute)},
+		Left:      map[string]time.Time{"cask:left": ago(20 * 24 * time.Hour), "cask:woke": ago(20 * 24 * time.Hour), "cask:unseen": ago(time.Hour), "cask:since": ago(20 * 24 * time.Hour)},
+	}
+	for _, tt := range []struct {
+		name, state, quiet string
+	}{
+		{"left", kind.ByHand, drift.Left},
+		{"woke", kind.ByHand, drift.Left},
+		{"unseen", kind.ByHand, drift.Left},
+		{"since", kind.Extra, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			res := drift.Quieten(check.Result{State: check.Attention, Items: []check.Item{{ID: "cask:" + tt.name, Name: tt.name, State: tt.state}}}, r, now, nil)
+			if res.Items[0].Quiet != tt.quiet {
+				t.Errorf("item = %+v, want quiet %q", res.Items[0], tt.quiet)
 			}
 		})
 	}
@@ -86,15 +108,17 @@ func TestSeen(t *testing.T) {
 		FirstSeen: map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:gone": ago(48 * time.Hour), "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour), "login-item:unseen": ago(48 * time.Hour)},
 		Snoozed:   map[string]time.Time{"brew:kept": now.Add(time.Hour), "brew:ended": ago(time.Second), "brew:gone": now.Add(time.Hour)},
 		Temporary: map[string]time.Time{"brew:gone": ago(time.Hour), "brew:kept": ago(time.Hour)},
-		Left:      map[string]time.Time{"brew:gone": ago(time.Hour), "brew:kept": ago(time.Hour), "cask:unchecked": ago(time.Hour), "mas:failed": ago(time.Hour)},
+		Left: map[string]time.Time{
+			"brew:gone": ago(time.Hour), "brew:by-hand": ago(time.Hour), "brew:kept": ago(time.Hour), "cask:unchecked": ago(time.Hour), "mas:failed": ago(time.Hour),
+		},
 	}
 	r.Seen(map[string]check.Result{
-		"brew":       {State: check.Attention, Items: []check.Item{extra("kept"), extra("fresh"), extra("ended")}},
+		"brew":       {State: check.Attention, Items: []check.Item{extra("kept"), extra("fresh"), extra("ended"), {ID: "brew:by-hand", Name: "by-hand", State: kind.ByHand}}},
 		"mas":        {State: check.Failed},
 		"login-item": refused,
 	}, now)
 
-	wantSeen := map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:fresh": now, "brew:ended": now, "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour), "login-item:unseen": ago(48 * time.Hour)}
+	wantSeen := map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:fresh": now, "brew:ended": now, "brew:by-hand": now, "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour), "login-item:unseen": ago(48 * time.Hour)}
 	if fmt.Sprint(r.FirstSeen) != fmt.Sprint(wantSeen) {
 		t.Errorf("FirstSeen = %v\nwant %v", r.FirstSeen, wantSeen)
 	}
@@ -104,8 +128,25 @@ func TestSeen(t *testing.T) {
 	if wantTemp := map[string]time.Time{"brew:kept": ago(time.Hour)}; fmt.Sprint(r.Temporary) != fmt.Sprint(wantTemp) {
 		t.Errorf("Temporary = %v, want %v", r.Temporary, wantTemp)
 	}
-	if wantLeft := map[string]time.Time{"brew:kept": ago(time.Hour), "cask:unchecked": ago(time.Hour), "mas:failed": ago(time.Hour)}; fmt.Sprint(r.Left) != fmt.Sprint(wantLeft) {
+	// brew:kept is reported, but not as installed by hand: its leave ends.
+	if wantLeft := map[string]time.Time{"brew:by-hand": ago(time.Hour), "cask:unchecked": ago(time.Hour), "mas:failed": ago(time.Hour)}; fmt.Sprint(r.Left) != fmt.Sprint(wantLeft) {
 		t.Errorf("Left = %v, want %v", r.Left, wantLeft)
+	}
+}
+
+// A check that couldn't look at all it looks for, as at the apps installed
+// by hand, keeps what it didn't report: first seen, snoozed and left. What
+// it did report is noted as ever, and an ended snooze goes.
+func TestSeenOfAPartialCheck(t *testing.T) {
+	r := drift.Record{
+		FirstSeen: map[string]time.Time{"cask:editor": ago(48 * time.Hour), "cask:firefox": ago(48 * time.Hour)},
+		Snoozed:   map[string]time.Time{"cask:zoom": now.Add(time.Hour), "cask:ended": ago(time.Second)},
+		Left:      map[string]time.Time{"cask:editor": ago(time.Hour)},
+	}
+	r.Seen(map[string]check.Result{"cask": {State: check.Attention, Partial: true, Items: []check.Item{{ID: "cask:fresh", Name: "fresh", State: "extra"}}}}, now)
+	wantSeen := map[string]time.Time{"cask:editor": ago(48 * time.Hour), "cask:firefox": ago(48 * time.Hour), "cask:fresh": now}
+	if fmt.Sprint(r.FirstSeen) != fmt.Sprint(wantSeen) || r.Left["cask:editor"].IsZero() || r.Snoozed["cask:zoom"].IsZero() || len(r.Snoozed) != 1 {
+		t.Errorf("record = %+v, want what wasn't reported kept, the ended snooze gone", r)
 	}
 }
 

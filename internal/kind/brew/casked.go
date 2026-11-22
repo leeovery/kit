@@ -3,9 +3,13 @@ package brew
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // Casked is what the installed casks put in the Applications folders.
@@ -14,15 +18,42 @@ type Casked struct {
 	// Example.app; Suites the folders of apps their suite artifacts do, by
 	// name: each renamed by the target given after it, if one is.
 	Apps, Suites []string
-	// Receipts are, for the casks installing through a package, its
-	// receipts' ids as their uninstall names them, each a pattern as
-	// Homebrew matches pkgutil's ids.
+	// Receipts are the ids of the packages they installed, as their
+	// uninstall names them, each a pattern as Homebrew matches pkgutil's
+	// ids.
 	Receipts []string
 }
 
-// Casked is what the installed casks put in place, as brew info says.
+// Casked is what the installed casks put in place, each as its install
+// receipt in Homebrew's Caskroom (brew --caskroom) says it installed, read
+// from the file; brew info, a second or more slower, says it of those
+// whose receipt doesn't.
 func (h *Homebrew) Casked(ctx context.Context) (Casked, error) {
-	res, err := h.brew(ctx, "info", "--json=v2", "--cask", "--installed")
+	res, err := h.brew(ctx, "--caskroom")
+	if err != nil {
+		return Casked{}, err
+	}
+	room := strings.TrimSpace(string(res.Stdout))
+	entries, err := os.ReadDir(room)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Casked{}, fmt.Errorf("read Homebrew's Caskroom: %w", err)
+	}
+	var c Casked
+	var unsaid []string
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if artifacts, ok := installedArtifacts(filepath.Join(room, e.Name())); ok {
+			c.add(artifacts)
+		} else {
+			unsaid = append(unsaid, e.Name())
+		}
+	}
+	if len(unsaid) == 0 {
+		return c, nil
+	}
+	res, err = h.brew(ctx, slices.Concat([]string{"info", "--json=v2", "--cask"}, unsaid)...)
 	if err != nil {
 		return Casked{}, err
 	}
@@ -30,15 +61,34 @@ func (h *Homebrew) Casked(ctx context.Context) (Casked, error) {
 	if err := json.Unmarshal(res.Stdout, &in); err != nil {
 		return Casked{}, fmt.Errorf("read brew info's answer: %w", err)
 	}
-	var c Casked
 	for _, cask := range in.Casks {
-		c.Apps = append(c.Apps, installs(cask.Artifacts, "app")...)
-		c.Suites = append(c.Suites, installs(cask.Artifacts, "suite")...)
-		if slices.ContainsFunc(cask.Artifacts, func(a map[string]json.RawMessage) bool { return a["pkg"] != nil }) {
-			c.Receipts = append(c.Receipts, receiptsOf(cask.Artifacts)...)
-		}
+		c.add(cask.Artifacts)
 	}
 	return c, nil
+}
+
+// add adds what a cask's artifacts put in place to c.
+func (c *Casked) add(artifacts []map[string]json.RawMessage) {
+	c.Apps = append(c.Apps, installs(artifacts, "app")...)
+	c.Suites = append(c.Suites, installs(artifacts, "suite")...)
+	c.Receipts = append(c.Receipts, receiptsOf(artifacts)...)
+}
+
+// installedArtifacts are the artifacts the cask installed in dir, in the
+// Caskroom, as its install receipt says, in brew info's form: none when it
+// can't be read, or doesn't say.
+func installedArtifacts(dir string) ([]map[string]json.RawMessage, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, ".metadata", "INSTALL_RECEIPT.json"))
+	if err != nil {
+		return nil, false
+	}
+	var receipt struct {
+		Artifacts []map[string]json.RawMessage `json:"uninstall_artifacts"`
+	}
+	if json.Unmarshal(data, &receipt) != nil || receipt.Artifacts == nil {
+		return nil, false
+	}
+	return receipt.Artifacts, true
 }
 
 // installs are what a cask's artifacts of the sort given install, by name:

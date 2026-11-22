@@ -682,7 +682,7 @@ func wrong(s event.Step, it check.Item) string {
 	case "unused-dependency":
 		return "installed for something since removed"
 	case "by-hand":
-		return cmp.Or(it.Detail, "installed by hand")
+		return cmp.Or(it.Detail, "installed by hand") + ", not declared"
 	case "changed", "diverged":
 		return "changed from what's declared"
 	case "dead":
@@ -700,9 +700,9 @@ func wrong(s event.Step, it check.Item) string {
 }
 
 // beyond is what the detail of it says past what's wrong with it (wrong):
-// none when that's the detail whole, as of a thing installed by hand.
+// none when that says it already, as of a thing installed by hand.
 func beyond(s event.Step, it check.Item) string {
-	if it.Detail == wrong(s, it) {
+	if strings.Contains(wrong(s, it), it.Detail) {
 		return ""
 	}
 	return it.Detail

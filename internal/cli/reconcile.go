@@ -61,7 +61,7 @@ func newReconcileCommand(a *app) *cobra.Command {
 	var opts reconcileOptions
 	cmd := &cobra.Command{
 		Use:         "reconcile [<kind>...] [<id>...]",
-		Short:       "Settle drift: adopt, remove, install, undeclare, leave or snooze what differs from the config",
+		Short:       "Settle drift: adopt, remove, install, undeclare, revert, leave or snooze what differs from the config",
 		Annotations: map[string]string{brief: "settle what differs from the config"},
 		Long: `Settle drift: what's installed but not declared, declared but not installed,
 left by something since removed, or installed by hand that a cask installs. At
@@ -98,7 +98,7 @@ run and one commit:
 		},
 	}
 	f := cmd.Flags()
-	f.BoolVar(&opts.adopt, "adopt", false, "declare it: for this Mac, or every Mac with --shared; a setting removed from the Mac, accept it gone; an app installed by hand, its cask takes it over")
+	f.BoolVar(&opts.adopt, "adopt", false, "declare it, for this Mac or with --shared every Mac (a setting removed: accept it gone)")
 	f.BoolVar(&opts.remove, "remove", false, "uninstall it")
 	f.BoolVar(&opts.install, "install", false, "install it, as it's declared")
 	f.BoolVar(&opts.undeclare, "undeclare", false, "take it out of this Mac's file, or the shared one with --shared")
@@ -206,6 +206,8 @@ func decide(items []driftItem, id string, opts reconcileOptions) (decision, erro
 		return decision{}, fmt.Errorf("one thing at a time: --%s", strings.Join(actions, " and --"))
 	case !slices.Contains(item.Choices, actions[0]):
 		return decision{}, fmt.Errorf("%s can't be %s: %s", id, past(actions[0]), flagList(item.Choices))
+	case actions[0] == leave && opts.shared:
+		return decision{}, fmt.Errorf("%s is left by hand on this Mac only: drop --shared", id)
 	}
 	return decision{item: item, action: actions[0], shared: opts.shared}, nil
 }
@@ -373,8 +375,14 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	return c.finish()
 }
 
-// carryOutOne does what d decided about its item.
+// carryOutOne does what d decided about its item. Any answer but leaving
+// an item left by hand ends the leave: the last answer holds.
 func carryOutOne(ctx context.Context, r *run, c *changes, d decision, note string) check.Result {
+	if d.item.Quiet == drift.Left && d.action != leave {
+		if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Unleave(d.item.ID) }); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+	}
 	switch d.action {
 	case snooze:
 		if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Snooze(d.item.ID, r.now) }); err != nil {

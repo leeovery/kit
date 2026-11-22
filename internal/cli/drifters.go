@@ -150,10 +150,10 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		all = append(all, snoozeChoice)
 	case kind.ByHand:
 		// Never removed: kit deletes nothing it didn't install.
-		takes := "declare it, and " + d.tool + " takes the app over, for "
+		takes := ", and " + d.tool + " takes the app over"
 		all = []choice{
-			{action: adopt, words: does(takingOver, takes+"this Mac")},
-			{action: adopt, words: does(takingOver, takes+"every Mac"), shared: true},
+			{action: adopt, words: does(takingOver, "declare it for this Mac"+takes)},
+			{action: adopt, words: does(takingOver, "declare it for every Mac"+takes), shared: true},
 			{action: leave, words: kind.Words{Label: "Leave by hand", Does: "leave it installed by hand, and stop asking", Doing: "leaving"}},
 			snoozeChoice,
 		}
@@ -168,7 +168,7 @@ func (d kindDrifter) describe(it check.Item) string {
 	case reverts && it.State == kind.Extra:
 		return "changed on this Mac, not declared"
 	case it.State == kind.ByHand:
-		return it.Detail
+		return it.Detail + ", not declared"
 	}
 	return map[string]string{
 		kind.Extra:            d.installing.Done + ", not declared",

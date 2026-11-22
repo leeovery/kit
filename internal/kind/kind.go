@@ -575,12 +575,16 @@ func SudoForgot(err error) bool {
 // Blocker's do.
 func Placed(k Kind, declared config.List, placed func(context.Context) Placing, needs ...string) engine.Step {
 	var unmet deferred
+	var hand handLook
 	return engine.Step{
 		Name:  k.Name(),
 		Did:   verbOf(k),
 		Needs: needs,
-		Check: func(ctx context.Context) check.Result { return unmet.mark(Drift(ctx, k, declared), declared) },
+		Check: func(ctx context.Context) check.Result {
+			return unmet.mark(drift(ctx, k, declared, hand.look), declared)
+		},
 		Apply: func(ctx context.Context, found check.Result) error {
+			hand.hold()
 			var placing Placing
 			if placed != nil {
 				placing = placed(ctx)
@@ -1386,37 +1390,37 @@ func keyOf(k Kind) func(string) string {
 // installed, nothing declared is fine, and anything declared defers the
 // step.
 func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
-	res, _ := compare(ctx, k, declared)
-	return res
+	return compare(ctx, k, declared).res
 }
 
 // Drift is what Compare finds, with, for a kind that can take over things
-// installed by hand (Adoptable), each of those not declared, by any name it
-// goes by, as an item of its own: installed by hand. They're looked for
-// once a check, only once Compare could look at what's installed; when
-// they can't be told, there are none, and the run's log says why.
+// installed by hand (Adoptable), each of those neither declared nor
+// installed, by any name it goes by, as an item of its own: installed by
+// hand. They're looked for once a check, only once Compare could look at
+// what's installed; when they can't be told, there are none, the result is
+// Partial, and the run's log says why.
 func Drift(ctx context.Context, k Kind, declared config.List) check.Result {
-	res, fullNames := compare(ctx, k, declared)
+	return drift(ctx, k, declared, func(ctx context.Context, a Adoptable) (map[string]string, error) { return a.InstalledByHand(ctx) })
+}
+
+// drift is Drift, looking at what's installed by hand with look.
+func drift(ctx context.Context, k Kind, declared config.List, look func(context.Context, Adoptable) (map[string]string, error)) check.Result {
+	c := compare(ctx, k, declared)
+	res := c.res
 	a, ok := k.(Adoptable)
-	if !ok || fullNames == nil {
+	if !ok || !c.looked {
 		return res
 	}
-	found, err := a.InstalledByHand(ctx)
+	found, err := look(ctx, a)
 	if err != nil {
 		event.Log(ctx, event.Logged{Line: "kit can't tell what's installed by hand: " + err.Error()})
+		res.Partial = true
 		return res
 	}
 	key := keyOf(k)
-	taken := make(map[string]bool, len(declared.Entries)+len(fullNames))
-	for _, e := range declared.Entries {
-		taken[key(e.Name)] = true
-	}
-	for _, full := range fullNames {
-		taken[key(full)] = true
-	}
 	var names []string
 	for name := range found {
-		if !taken[key(name)] {
+		if !c.taken[key(name)] {
 			names = append(names, name)
 		}
 	}
@@ -1432,21 +1436,59 @@ func Drift(ctx context.Context, k Kind, declared config.List) check.Result {
 	return res
 }
 
-// compare is Compare, with the full names of the things declared and
-// missing, by declared name: none at all when it couldn't look at what's
-// installed.
-func compare(ctx context.Context, k Kind, declared config.List) (check.Result, map[string]string) {
+// handLook is a step's look at what its kind could take over, installed by
+// hand: made afresh at each check till applying begins (hold), then the
+// one made before, as installing what's declared changes nothing of what's
+// installed by hand and not declared.
+type handLook struct {
+	mu           sync.Mutex
+	held, looked bool
+	found        map[string]string
+	err          error
+}
+
+// look is a's look at what's installed by hand, as h holds it.
+func (h *handLook) look(ctx context.Context, a Adoptable) (map[string]string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.held || !h.looked {
+		h.found, h.err = a.InstalledByHand(ctx)
+		h.looked = true
+	}
+	return h.found, h.err
+}
+
+// hold keeps the look made last for the checks to come.
+func (h *handLook) hold() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.held = true
+}
+
+// comparison is what compare finds: Compare's result; whether it looked at
+// what's installed, as it doesn't while k's program isn't installed, nor
+// when looking fails; and, when it did, the names, as k matches them
+// (Keyed), that the things declared and installed go by: declared, as
+// missing ones resolve, and installed.
+type comparison struct {
+	res    check.Result
+	looked bool
+	taken  map[string]bool
+}
+
+// compare is Compare, with what it went by (comparison).
+func compare(ctx context.Context, k Kind, declared config.List) comparison {
 	installed, err := k.Installed(ctx)
 	switch {
 	case errors.Is(err, runner.ErrNotFound) && len(declared.Entries) == 0:
-		return check.Result{State: check.OK}.Saying("none declared", k.Program()+" isn't installed"), nil
+		return comparison{res: check.Result{State: check.OK}.Saying("none declared", k.Program()+" isn't installed")}
 	case errors.Is(err, runner.ErrNotFound):
-		return check.Result{State: check.Deferred, Reason: "needs " + k.Program() + ", which isn't installed"}, nil
+		return comparison{res: check.Result{State: check.Deferred, Reason: "needs " + k.Program() + ", which isn't installed"}}
 	case err != nil:
-		return failed(k, err), nil
+		return comparison{res: failed(k, err)}
 	}
 	if installed, err = withMissed(ctx, k, installed, declared.On()); err != nil {
-		return failed(k, err), nil
+		return comparison{res: failed(k, err)}
 	}
 	key := keyOf(k)
 	byKey := make(map[string]Installed, len(installed))
@@ -1478,7 +1520,7 @@ func compare(ctx context.Context, k Kind, declared config.List) (check.Result, m
 	if len(unmatched) > 0 {
 		resolved, err := Resolve(ctx, k, unmatched)
 		if err != nil {
-			return failed(k, err), nil
+			return comparison{res: failed(k, err)}
 		}
 		for _, name := range unmatched {
 			full, known := resolved[name]
@@ -1497,7 +1539,7 @@ func compare(ctx context.Context, k Kind, declared config.List) (check.Result, m
 	if b, ok := k.(Blocker); ok && len(missing) > 0 {
 		var err error
 		if blocked, err = b.Blocked(ctx, fullNames, installed); err != nil {
-			return failed(k, err), nil
+			return comparison{res: failed(k, err)}
 		}
 	}
 	var extra, removed, unused []string
@@ -1517,7 +1559,7 @@ func compare(ctx context.Context, k Kind, declared config.List) (check.Result, m
 	if d, ok := k.(Differ); ok && len(installedDeclared) > 0 {
 		var err error
 		if changed, err = d.Differs(ctx, installedDeclared); err != nil {
-			return failed(k, err), nil
+			return comparison{res: failed(k, err)}
 		}
 	}
 
@@ -1583,7 +1625,17 @@ func compare(ctx context.Context, k Kind, declared config.List) (check.Result, m
 	if len(res.Items) > 0 {
 		res.State = check.Attention
 	}
-	return res, fullNames
+	taken := make(map[string]bool, len(declared.Entries)+len(fullNames)+len(installed))
+	for _, e := range declared.Entries {
+		taken[key(e.Name)] = true
+	}
+	for _, full := range fullNames {
+		taken[key(full)] = true
+	}
+	for _, it := range installed {
+		taken[key(it.Name)] = true
+	}
+	return comparison{res: res, looked: true, taken: taken}
 }
 
 // failed is how k's step stands when looking at what's installed failed

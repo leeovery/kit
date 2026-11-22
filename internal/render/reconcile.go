@@ -1,6 +1,7 @@
 package render
 
 import (
+	"strings"
 	"time"
 
 	"github.com/leeovery/kit/internal/ask"
@@ -43,7 +44,7 @@ func ReconcileQuestion(d Drifted, answers []Answer, now time.Time) ask.Question 
 // what's wrong, and for how long.
 func driftSays(d Drifted, now time.Time) string {
 	says := []string{look.Muted(d.Kind), look.Orange(d.What)}
-	if d.Detail != "" && d.Detail != d.What {
+	if !strings.Contains(d.What, d.Detail) {
 		says = append(says, look.Muted(d.Detail))
 	}
 	if !d.Since.IsZero() {

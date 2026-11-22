@@ -217,11 +217,16 @@ func whatsLeft(r check.Result, s event.Step, start time.Time) []string {
 			continue
 		}
 		switch {
-		case it.Quiet != "" && it.Detail != "":
-			// Too new to count as drift, but applying says why it's not done:
-			// waiting for a password, say.
-			lines = append(lines, look.Says(look.White(it.Name), look.Muted(it.Detail)))
 		case it.Quiet != "":
+			// Too new to count as drift, but applying says why it's not done:
+			// waiting for a password, say. Of drift, only that.
+			why := it.Detail
+			if IsDrift(it) {
+				why = beyond(s, it)
+			}
+			if why != "" {
+				lines = append(lines, look.Says(look.White(it.Name), look.Muted(why)))
+			}
 		case IsDrift(it):
 			says := []string{look.Orange(it.Name), look.Muted(wrong(s, it))}
 			if more := beyond(s, it); more != "" {

@@ -149,7 +149,7 @@ func signedOut(t *testing.T, repos map[string]bool) *world {
 	f.On("brew", "leaves").Prints("jq\nripgrep\n")
 	f.On("brew", "leaves", "--installed-on-request").Prints("jq\nripgrep\n")
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n")
-	f.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
+	w.caskroom(t, nil)
 	for _, path := range []string{"Documents/notes.txt", "Pictures/photo.jpg", "Downloads/archive.zip", ".zshrc", ".tmux.conf", ".config/ghostty/config"} {
 		w.write(t, path, "something\n")
 	}
@@ -361,7 +361,7 @@ func TestSetupScreenJoining(t *testing.T) {
 	f.On("brew", "leaves").Prints("jq\n")
 	f.On("brew", "leaves", "--installed-on-request").Prints("jq\n")
 	f.On("brew", "list", "--cask", "--full-name", "-1")
-	f.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
+	w.caskroom(t, nil)
 	f.On("brew", "info", "--json=v2", "--formula", "fd", "lazygit", "ripgrep").Prints(`{"formulae": [{"name": "fd", "full_name": "fd"}, {"name": "lazygit", "full_name": "lazygit"}, {"name": "ripgrep", "full_name": "ripgrep"}], "casks": []}`)
 	w.clones(t, "someone/kit-config", map[string]string{
 		"kit.toml": twoMacs, "laptop/declarations": "", "studio/declarations": "",

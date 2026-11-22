@@ -37,7 +37,7 @@ func TestReconcileQuestion(t *testing.T) {
 		t.Errorf("with nothing more known, says %q", ansi.Strip(q.About.Says))
 	}
 	byHand := "installed by hand as Editor.app"
-	if q := render.ReconcileQuestion(render.Drifted{Name: "editor", Kind: "cask", What: byHand, Detail: byHand}, nil, now); ansi.Strip(q.About.Says) != "cask · "+byHand {
-		t.Errorf("with its detail what's wrong, says %q; want it said once", ansi.Strip(q.About.Says))
+	if q := render.ReconcileQuestion(render.Drifted{Name: "editor", Kind: "cask", What: byHand + ", not declared", Detail: byHand}, nil, now); ansi.Strip(q.About.Says) != "cask · "+byHand+", not declared" {
+		t.Errorf("with what's wrong saying its detail, says %q; want it said once", ansi.Strip(q.About.Says))
 	}
 }

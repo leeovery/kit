@@ -86,7 +86,7 @@ func homebrew(fake *runnertest.Fake, formulae, deps, casks string) {
 	fake.On("brew", "leaves").Prints(formulae)
 	fake.On("brew", "leaves", "--installed-on-request").Prints(formulae)
 	fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(casks)
-	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
+	fake.On("brew", "--caskroom").Prints(filepath.Join(os.TempDir(), "kit-no-caskroom") + "\n")
 }
 
 // setting scripts defaults export for id, currentHost: first for one of
@@ -502,7 +502,7 @@ func TestAppsByHandThatCantBeToldSayWhy(t *testing.T) {
 	m, fake := newMac(t, "")
 	write(t, m.AppDirs[0], map[string]string{"Tool.app/Contents/Info.plist": app("com.example.tool")})
 	homebrew(fake, "", "", "ghostty\n")
-	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Exits(1).PrintsToStderr("Error: something broke\n")
+	fake.On("brew", "--caskroom").Exits(1).PrintsToStderr("Error: something broke\n")
 	s, _, err := snapshot.Find(t.Context(), m)
 	if err != nil || s.ByHandErr == nil || s.ByHand != nil {
 		t.Errorf("Find() = by hand %q, why %v, %v; want why they can't be told", s.ByHand, s.ByHandErr, err)
