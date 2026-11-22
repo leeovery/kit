@@ -39,6 +39,35 @@ App Store by hand leaves drift, and a new Mac without it: use kit's add.
 `kit why <name>` says where a package is declared, whether it's installed,
 and what needs it; `kit list` lists everything declared for this Mac.
 
+## Apps installed by hand
+
+Every cask install runs `brew install --cask --adopt`, in `kit cask add`,
+`kit apply` and `kit reconcile` alike: an app already in /Applications
+that's the cask's is taken over in place. If Homebrew says it differs from
+the cask's download, kit installs the cask again, alone, with
+`brew install --cask --force`, which replaces the app. An app there whose
+bundle id the cask doesn't name (a fork of the same name), or the App
+Store's copy, is left alone, and the cask fails, saying so: ask the person
+which to keep. To keep the app, undeclare the cask
+(`kit reconcile cask:<name> --undeclare`).
+
+An app installed by hand that one of Homebrew's own casks installs, the
+cask naming the app's bundle id, is drift while the cask isn't declared
+for this Mac: state `by-hand`, its `detail` saying what it's installed as,
+`installed by hand as Google Chrome.app`. Its choices:
+
+- `kit reconcile cask:<name> --adopt [--shared]`: declare the cask, for
+  this Mac or every Mac, and install it, taking the app over. `kit cask add`
+  does the same.
+- `--leave`: leave it installed by hand, quiet for good, on this Mac only
+  (`--shared` is refused). Any other answer, or the app going, ends it.
+- `--snooze`: quiet for 7 days.
+
+There's no `--remove`: kit deletes no app it didn't install. Adopting may
+replace the app, so ask the person before you adopt. Casks from taps, and
+apps whose cask can't be told, as Homebrew's catalogue can't be read, are
+never offered.
+
 ## Private downloads
 
 A Homebrew package from a private repository needs a token to download.

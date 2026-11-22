@@ -75,6 +75,10 @@ After its first day, `kit status` lists it under CONFIG:
 
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
 
+Apps you dragged into Applications show up too, if a Homebrew cask installs the same app.
+Adopting one has Homebrew take the app over in place, and `--leave` keeps it by hand.
+[Drift](drift.md) says more.
+
 ## Good to know
 
 - **Removing an app asks about its files.** `kit cask remove` and `kit mas remove` ask at a

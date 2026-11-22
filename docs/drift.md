@@ -51,7 +51,7 @@ brew:node@20 unused-dependency since 31 Dec: --remove, --adopt or --snooze
 cask:firefox extra since 31 Dec: --adopt, --remove or --snooze
 ```
 
-Name the ids, and one answer for them all:
+Name the ids, and one answer:
 
 ```bash
 # Declare both, for this Mac
@@ -60,7 +60,7 @@ kit reconcile brew:ffmpeg cask:firefox --adopt
 kit reconcile brew:node@20 --snooze
 ```
 
-The answers, and what each one does:
+The answers:
 
 | Answer | What kit does |
 |---|---|
@@ -69,9 +69,10 @@ The answers, and what each one does:
 | `--remove` | Uninstalls it |
 | `--install` | Installs it, as declared |
 | `--undeclare` | Takes its line out |
+| `--leave` | Keeps an app by hand, for good |
 | `--snooze` | Quiets it for 7 days |
 
-Each item takes only some of them, and `--snooze` takes any:
+Each item takes only some, and `--snooze` takes any:
 
 | If the item is | It takes |
 |---|---|
@@ -84,9 +85,17 @@ Each item takes only some of them, and `--snooze` takes any:
 | A file not linked | `--install` |
 | A dead link | `--remove` |
 | An edit in kit-config | `--adopt`, `--revert` |
+| An app installed by hand | `--adopt`, `--leave` |
 
 `--shared` with `--adopt` or `--undeclare` uses the shared file, for every Mac. `--note "why"`
 keeps a note after the line it adopts. `kit reconcile brew cask` goes through only those kinds.
+
+## Apps you installed by hand
+
+An app you dragged into Applications is drift if a Homebrew cask installs it. `kit status`
+reads `installed by hand as Google Chrome.app, not declared`. Adopting it declares the cask,
+and Homebrew takes the app over in place. `--leave` keeps it by hand, and kit stops asking on
+this Mac.
 
 ## Trying something out
 
@@ -109,6 +118,8 @@ reconcile` asks whether to keep it.
 - **A replaced linked file is never lost.** `--adopt` moves the copy on the Mac into
   kit-config, and links it back. `--revert` links the copy in kit-config instead, and moves the
   other to the Bin.
+- **Adopting an app can replace it.** If it differs from the download, the cask's copy
+  replaces it. A fork with the same name is never offered.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 

@@ -118,6 +118,24 @@ app-store "Sign in to the App Store" --before mas
 kit then asks for the sign-in partway through the run. If an install still finds nobody signed
 in, kit asks again on the next run.
 
+## A cask fails because its app is already there
+
+```text
+couldn't install spaceman: Spaceman.app is already in /Applications and isn't the cask's (com.example.Spaceman)
+```
+
+The message may end `and is the App Store's` instead.
+
+**Cause:** an app of the cask's name is in Applications, but the cask doesn't name its bundle
+id. A fork with the same name does this, and so does the App Store's copy. kit leaves that app
+alone rather than replace it.
+
+**Fix:** choose which copy you keep.
+
+- To keep the cask's, move the app to the Bin or rename it, then run `kit apply cask`.
+- To keep yours, run `kit reconcile cask:spaceman --undeclare`. The app stays installed by
+  hand. If the cask is declared for every Mac, add `--shared`.
+
 ## kit.app needs Full Disk Access again
 
 `kit status` shows the step `kit-app-access` as `not given to this build of kit.app`.

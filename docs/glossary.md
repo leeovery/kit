@@ -80,7 +80,8 @@ runs the hourly jobs every time, and the nightly jobs once a day.
 - a package installed but not declared, or declared but not installed;
 - a dependency that nothing installed needs any more;
 - a setting changed by hand;
-- a linked file that a program replaced with a copy.
+- a linked file that a program replaced with a copy;
+- an app installed by hand that a cask installs, the cask not declared.
 
 `kit status` lists drift under CONFIG once a day has passed.
 
@@ -92,8 +93,10 @@ Without one, you name each item and what to do with it. The main answers:
 | `--adopt` | Declares what this Mac has |
 | `--revert` | Puts back what was there, or what's declared |
 | `--remove` | Uninstalls it |
+| `--leave` | Leaves an app installed by hand |
 
-kit then commits and pushes kit-config. `--install`, `--undeclare` and `--snooze` settle the
+kit then commits and pushes kit-config. Adopting an app installed by hand also installs its
+cask, and Homebrew takes the app over. `--install`, `--undeclare` and `--snooze` settle the
 rest.
 
 **Feature.** A piece of kit with nothing to list, switched on with `kit feature on`. The features
@@ -119,8 +122,10 @@ holds the Mac as it stands:
 - the features on, and the backup tools set up.
 
 **Installed by hand.** An app that no kind installed: not from Homebrew or the App Store, not
-Apple's, and not one Chrome made for a website. `kit setup` lists these apps, and kit never manages them. A package you install
-yourself through Homebrew isn't one: it comes up as drift.
+Apple's, and not one Chrome made for a website. If a cask installs the same app, kit offers to
+adopt it, and Homebrew takes the app over. The cask must name the app's bundle id. An app
+that only shares the name, such as a fork, gets no offer. A package you install yourself
+through Homebrew isn't one: it comes up as drift.
 
 ## A new Mac
 
