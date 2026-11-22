@@ -123,11 +123,16 @@ func (r *run) access(g *steps.Granting, access *steps.Access, scheduled bool) ki
 
 // held is what a kind's change returns, held for want of Full Disk Access,
 // as g's wait says: g's step checked again, so the run says once it isn't
-// given and raises what to do; and, should that step not be in the run, or
-// still stand ok, as when kit.app's record couldn't be written, saying what
-// to do itself.
+// given and raises what to do; not checked yet, as in the hourly run, where
+// it comes after, looked at, as it then says the same. Should that step not
+// be in the run, or still stand ok, as when kit.app's record couldn't be
+// written, it says what to do itself.
 func held(ctx context.Context, g *steps.Granting) error {
-	if res, ok := engine.Recheck(ctx, g.Step); ok && res.State != check.OK {
+	res, ok := engine.Recheck(ctx, g.Step)
+	if !ok {
+		res, ok = engine.Look(ctx, g.Step)
+	}
+	if ok && res.State != check.OK {
 		return engine.NotYet(g.Wait)
 	}
 	return engine.NotYet(g.Wait + ": " + g.Title)

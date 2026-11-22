@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -817,18 +818,24 @@ func TestNothingRunsThroughBrewWhileHomebrewUpdatesItself(t *testing.T) {
 	<-updating
 
 	// Meanwhile, the casks' check, under a time limit shorter than the
-	// update, waits for it, and still has its time.
+	// update, waits for it, and still has its time. From the update's end,
+	// macOS asks the person at the Mac something, holding the limit, so
+	// that only the wait for the update could count against it. The check
+	// has the limit's time to start waiting, under load, and the update
+	// runs three times that.
+	var asking atomic.Bool
 	checked := make(chan error, 1)
-	limited, cancel := hold.WithTimeout(t.Context(), 30*time.Millisecond)
+	limited, cancel := hold.WithTimeout(hold.With(t.Context(), asking.Load), 100*time.Millisecond)
 	defer cancel()
 	go func() {
 		_, err := h.Casks().Installed(limited)
 		checked <- err
 	}()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	if n := slices.Index(fake.Calls(), "brew update --quiet"); slices.Contains(fake.Calls()[n+1:], "brew list --cask --full-name -1") {
 		t.Fatalf("ran %q: a listing ran while Homebrew updated itself", fake.Calls())
 	}
+	asking.Store(true)
 	close(updated)
 	if err := <-checked; err != nil || limited.Err() != nil {
 		t.Errorf("the check waiting for the update ended %v, its time limit %v; want it run, in time", err, limited.Err())
