@@ -27,8 +27,9 @@ type catalogue struct {
 	casks map[string]catalogued
 	// renames are the tokens casks had before, each to the one it has now.
 	renames map[string]string
-	// byPlace are the casks by where they put their apps, lower case.
-	byPlace map[string][]string
+	// byPlace are the casks by where they put their apps, lower case;
+	// byQuit, those that say nowhere, by the bundle ids they quit.
+	byPlace, byQuit map[string][]string
 }
 
 // catalogued is a cask as the catalogue has it.
@@ -43,6 +44,9 @@ type catalogued struct {
 	// signals or unloads (launchctl) as it's uninstalled or zapped, and
 	// those the files in ~/Library it removes are named for.
 	ids []string
+	// quits are the bundle ids its uninstall quits, lower case, for a cask
+	// installing through a package that says nowhere it puts an app.
+	quits []string
 	// disabled is whether Homebrew has disabled it, or will on a date set.
 	disabled bool
 	// unvetted is whether it moves into place anything kit can't tell to
@@ -155,7 +159,7 @@ func readCatalogue(path string) (*catalogue, error) {
 	if p.Casks == nil {
 		return nil, errors.New("it lists no casks")
 	}
-	c := &catalogue{casks: make(map[string]catalogued, len(p.Casks)), renames: p.Renames, byPlace: map[string][]string{}}
+	c := &catalogue{casks: make(map[string]catalogued, len(p.Casks)), renames: p.Renames, byPlace: map[string][]string{}, byQuit: map[string][]string{}}
 	for token, raw := range p.Casks {
 		k := caskOf(raw.Artifacts)
 		k.token, k.disabled = token, len(raw.Disable) > 0 && string(raw.Disable) != "null"
@@ -163,6 +167,9 @@ func readCatalogue(path string) (*catalogue, error) {
 		for _, at := range k.apps {
 			place := strings.ToLower(at)
 			c.byPlace[place] = append(c.byPlace[place], token)
+		}
+		for _, id := range k.quits {
+			c.byQuit[id] = append(c.byQuit[id], token)
 		}
 	}
 	return c, nil
@@ -184,10 +191,17 @@ func (c *catalogue) cask(name string) (catalogued, bool) {
 // folder, whose bundle id is id: of the casks putting an app there, the
 // one that states id, one without @ in its token over those with
 // (1password over 1password@beta). An app anywhere else is no cask's to
-// adopt: installing the cask would put a second copy in place.
+// adopt: installing the cask would put a second copy in place. With none
+// putting an app there, an app at the folder's top is the one package's
+// whose uninstall quits id, though the package says nowhere it puts it: at
+// worst, it installs a second copy under another name.
 func (c *catalogue) match(at, id string) (string, bool) {
+	candidates := c.byPlace[strings.ToLower(at)]
+	if len(candidates) == 0 && filepath.Base(at) == at {
+		candidates = c.byQuit[strings.ToLower(id)]
+	}
 	var stating []string
-	for _, token := range c.byPlace[strings.ToLower(at)] {
+	for _, token := range candidates {
 		if k := c.casks[token]; !k.disabled && !k.unvetted && k.states(id) {
 			stating = append(stating, token)
 		}
@@ -237,7 +251,7 @@ func (k catalogued) there(dir, home string) (bool, error) {
 func caskOf(artifacts []json.RawMessage) catalogued {
 	var k catalogued
 	var app, pkg bool
-	var deleted []string
+	var deleted, quits []string
 	for _, raw := range artifacts {
 		var parts []json.RawMessage
 		var sort string
@@ -264,6 +278,7 @@ func caskOf(artifacts []json.RawMessage) catalogued {
 			k.ids = append(k.ids, stated(options)...)
 			if sort == ":uninstall" {
 				deleted = append(deleted, oneOrMore(options[":delete"])...)
+				quits = append(quits, oneOrMore(options[":quit"])...)
 			}
 		}
 	}
@@ -272,6 +287,9 @@ func caskOf(artifacts []json.RawMessage) catalogued {
 			if at, ok := inApplications(path); ok && filepath.Ext(at) == ".app" && !strings.Contains(at, "*") {
 				k.apps = append(k.apps, at)
 			}
+		}
+		if len(k.apps) == 0 {
+			k.quits = bundleIDs(quits)
 		}
 	}
 	slices.Sort(k.ids)

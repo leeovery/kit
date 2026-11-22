@@ -116,6 +116,20 @@
         [":pkg", ["Monitor.pkg"]],
         [":zap", {":trash": ["~/Library/Preferences/com.example.monitor.plist"]}]
       ]
+    },
+    "relay": {
+      "names": ["Relay"], "tap_string": "homebrew/cask", "version": "4.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.relay", ":pkgutil": "com.example.relay"}],
+        [":pkg", ["Relay.pkg"]]
+      ]
+    },
+    "relay-enterprise": {
+      "names": ["Relay Enterprise"], "tap_string": "homebrew/cask", "version": "4.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.relay", ":pkgutil": "com.example.relay.enterprise"}],
+        [":pkg", ["RelayEnterprise.pkg"]]
+      ]
     }
   },
   "cask_renames": {"chrome": "google-chrome"},

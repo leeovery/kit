@@ -112,10 +112,12 @@ func TestTheAppsInstalledByHand(t *testing.T) {
 // one without @ over those with. A cask puts its app where its target
 // says, or, installing through a package with no app of its own, where
 // its uninstall deletes one. An app anywhere else is no cask's: installing
-// one would put a second copy in place, whatever id it quits. None states
-// a fork's id under the cask's app's name; a cask that states no id, is
-// disabled, or moves into place what kit can't vet is never the one; nor
-// is any when more than one would do.
+// one would put a second copy in place, whatever id it quits. But a
+// package that says nowhere is the one an app at the folder's top is, when
+// it alone quits the app's id. None states a fork's id under the cask's
+// app's name; a cask that states no id, is disabled, or moves into place
+// what kit can't vet is never the one; nor is any when more than one would
+// do.
 func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 	for _, tt := range []struct {
 		name, in, app, id, want string
@@ -127,7 +129,10 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 		{"a fork, under its name", "", "Spaceman.app", "dev.fork.Spaceman", ""},
 		{"the cask's own, under its name", "", "Spaceman.app", "dev.original.Spaceman", "spaceman"},
 		{"its package's, as its uninstall deletes it, by the id it signals", "", "zoom.us.app", "us.zoom.xos", "zoom"},
-		{"a package's that says nowhere, by the id it quits", "", "Monitor.app", "com.example.monitor", ""},
+		{"a package's that says nowhere, by the id it quits", "", "Monitor.app", "com.example.monitor", "monitor"},
+		{"a package's that says nowhere, in a folder in the casks' folder", "Utilities", "Monitor.app", "com.example.monitor", ""},
+		{"a package's that says nowhere, in another folder apps are in", "other", "Monitor.app", "com.example.monitor", ""},
+		{"by an id two packages that say nowhere quit", "", "Relay.app", "com.example.relay", ""},
 		{"the plain token over one with @", "", "1Password.app", "com.1password.1password", "1password"},
 		{"a cask stating no id", "", "Quiet Tool.app", "com.example.quiet", ""},
 		{"by its target, the id its saved state is named for", "", "Browser.app", "com.example.browser", "browser"},
