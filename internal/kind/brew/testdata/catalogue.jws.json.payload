@@ -64,6 +64,7 @@
     "browser": {
       "names": ["Browser"], "tap_string": "homebrew/cask", "version": "140.0",
       "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.browser"}],
         [":app", ["Chromium.app"], {":target": "Browser.app"}],
         [":zap", {":trash": "~/Library/Saved Application State/com.example.browser.savedState"}]
       ]
@@ -98,6 +99,22 @@
       "raw_artifacts": [
         [":app", ["Sidekick Installer.app/Contents/Resources/Sidekick.app"], {":target": "~/Library/Application Support/Sidekick/Sidekick.app"}],
         [":uninstall", {":quit": "com.example.sidekick"}]
+      ]
+    },
+    "office-tools": {
+      "auto_updates": true, "names": ["Office Tools"], "tap_string": "homebrew/cask", "version": "16.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.office"}],
+        [":app", ["Office.app"]],
+        [":suite", ["Office Extras"]]
+      ]
+    },
+    "monitor": {
+      "auto_updates": true, "names": ["Monitor"], "tap_string": "homebrew/cask", "version": "2.0",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": "com.example.monitor.helper", ":quit": "com.example.monitor", ":pkgutil": "com.example.monitor"}],
+        [":pkg", ["Monitor.pkg"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.example.monitor.plist"]}]
       ]
     }
   },

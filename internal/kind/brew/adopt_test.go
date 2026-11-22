@@ -45,32 +45,35 @@ func TestCasksInstallAdopting(t *testing.T) {
 
 // An app already in the Applications folder where a cask puts its app is
 // adopted when the cask states its bundle id, in any case, by its app or by
-// the app its package installs; one the cask puts elsewhere isn't looked
-// for there. Otherwise the cask isn't installed, saying the app there isn't
-// its own, by the app and its bundle id: a fork under the cask's app's
-// name, any app at all for a cask that states no id, or one with none. The
-// rest go in all the same.
+// the app its package installs. Otherwise the cask isn't installed, saying
+// why, by the app: a fork under the cask's app's name, any app at all for a
+// cask that states no id, or one with none, by its bundle id; the App
+// Store's copy, whatever its id. The rest go in all the same.
 func TestAnAppAlreadyThere(t *testing.T) {
 	for _, tt := range []struct {
 		name, cask, app, id string
+		store               bool
 		refused             string
 	}{
-		{"the cask's own", "google-chrome", "Google Chrome.app", "com.google.Chrome", ""},
-		{"its id in another case", "google-chrome", "Google Chrome.app", "COM.GOOGLE.CHROME", ""},
-		{"by a token the cask had", "chrome", "Google Chrome.app", "com.google.Chrome", ""},
-		{"in Homebrew's own tap", "homebrew/cask/google-chrome", "Google Chrome.app", "com.google.Chrome", ""},
-		{"its package's", "zoom", "zoom.us.app", "us.zoom.xos", ""},
-		{"by its target", "browser", "Browser.app", "com.example.browser", ""},
-		{"one the cask puts elsewhere", "sidekick", "Sidekick.app", "com.example.other", ""},
-		{"a fork under its name", "spaceman", "Spaceman.app", "dev.fork.Spaceman", "Spaceman.app is already in %s and isn't the cask's (dev.fork.Spaceman)"},
-		{"another app by a token the cask had", "chrome", "Google Chrome.app", "com.example.fork", "Google Chrome.app is already in %s and isn't the cask's (com.example.fork)"},
-		{"not its package's", "zoom", "zoom.us.app", "com.example.other", "zoom.us.app is already in %s and isn't the cask's (com.example.other)"},
-		{"a cask stating no id", "quiet-tool", "Quiet Tool.app", "com.example.quiet", "Quiet Tool.app is already in %s and isn't the cask's (com.example.quiet)"},
-		{"an app with no bundle id", "google-chrome", "Google Chrome.app", "", "Google Chrome.app is already in %s and isn't the cask's (no bundle id)"},
+		{"the cask's own", "google-chrome", "Google Chrome.app", "com.google.Chrome", false, ""},
+		{"its id in another case", "google-chrome", "Google Chrome.app", "COM.GOOGLE.CHROME", false, ""},
+		{"by a token the cask had", "chrome", "Google Chrome.app", "com.google.Chrome", false, ""},
+		{"in Homebrew's own tap", "homebrew/cask/google-chrome", "Google Chrome.app", "com.google.Chrome", false, ""},
+		{"its package's", "zoom", "zoom.us.app", "us.zoom.xos", false, ""},
+		{"by its target", "browser", "Browser.app", "com.example.browser", false, ""},
+		{"a fork under its name", "spaceman", "Spaceman.app", "dev.fork.Spaceman", false, "Spaceman.app is already in %s and isn't the cask's (dev.fork.Spaceman)"},
+		{"another app by a token the cask had", "chrome", "Google Chrome.app", "com.example.fork", false, "Google Chrome.app is already in %s and isn't the cask's (com.example.fork)"},
+		{"not its package's", "zoom", "zoom.us.app", "com.example.other", false, "zoom.us.app is already in %s and isn't the cask's (com.example.other)"},
+		{"a cask stating no id", "quiet-tool", "Quiet Tool.app", "com.example.quiet", false, "Quiet Tool.app is already in %s and isn't the cask's (com.example.quiet)"},
+		{"an app with no bundle id", "google-chrome", "Google Chrome.app", "", false, "Google Chrome.app is already in %s and isn't the cask's (no bundle id)"},
+		{"the App Store's, its id the cask's", "google-chrome", "Google Chrome.app", "com.google.Chrome", true, "Google Chrome.app is already in %s and is the App Store's"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake, apps, casks := adopting(t)
-			installApp(t, apps, tt.app, tt.id)
+			app := installApp(t, apps, tt.app, tt.id)
+			if tt.store {
+				writeFile(t, filepath.Join(app, "Contents", "_MASReceipt", "receipt"), "")
+			}
 			fake.On("brew", "install", "--cask", "--adopt", tt.cask, "1password")
 			fake.On("brew", "install", "--cask", "--adopt", "1password")
 			err := casks.Install(t.Context(), []string{tt.cask, "1password"})
@@ -86,6 +89,32 @@ func TestAnAppAlreadyThere(t *testing.T) {
 				t.Errorf("Install() = %v, want the app adopted", err)
 			case tt.refused != "" && (err == nil || err.Error() != strings.Replace(tt.refused, "%s", apps, 1)):
 				t.Errorf("Install() = %v, want %q", err, strings.Replace(tt.refused, "%s", apps, 1))
+			}
+		})
+	}
+}
+
+// A cask moving into place more than kit can vet, an app outside the
+// Applications folder or anything but an app, installs as ever, without
+// --adopt, whatever is there: --adopt would take over, and --force delete,
+// whatever is at those targets.
+func TestACaskKitCantVetInstallsAsEver(t *testing.T) {
+	for _, tt := range []struct {
+		name, cask, app, id string
+	}{
+		{"its app outside the Applications folder", "sidekick", "Sidekick.app", "com.example.other"},
+		{"a suite beside its app", "office-tools", "Office.app", "com.example.fork"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake, apps, casks := adopting(t)
+			installApp(t, apps, tt.app, tt.id)
+			fake.On("brew", "install", "--cask", tt.cask)
+			fake.On("brew", "install", "--cask", "--adopt", "1password")
+			if err := casks.Install(t.Context(), []string{tt.cask, "1password"}); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := installs(fake), []string{"brew install --cask " + tt.cask, "brew install --cask --adopt 1password"}; !slices.Equal(got, want) {
+				t.Errorf("ran %q, want %q", got, want)
 			}
 		})
 	}
@@ -183,7 +212,7 @@ func TestReplacingLeavesWhatElseFailed(t *testing.T) {
 	for _, tt := range []struct {
 		name, listed, force, want string
 	}{
-		{"another failed", "example-editor\n", "", "Error: example-editor: It seems the existing App is different from the one being installed."},
+		{"another failed", "example-editor\n", "", "Error: google-chrome: Download failed"},
 		{"replacing failed", "", "Error: example-editor: It seems there is already an App at '/Applications/Example Editor.app'; overwriting failed.", "Error: example-editor: It seems the existing App is different from the one being installed.; Error: example-editor: It seems there is already an App at '/Applications/Example Editor.app'; overwriting failed."},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

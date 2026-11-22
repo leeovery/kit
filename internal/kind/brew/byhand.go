@@ -21,45 +21,55 @@ type ByHand struct {
 	Path, Name, ID, Cask string
 }
 
+// HandApps are the apps installed by hand, and why which casks install
+// them couldn't be told, when it couldn't: they're there all the same.
+type HandApps struct {
+	Apps      []ByHand
+	Unmatched error
+}
+
 // AppsByHand are the apps in the folders apps are installed in (AppDirs)
 // installed by hand: none of Apple's, nor the App Store's (its receipt in
 // the app), nor one Chrome made for a website (chromeApp), nor one a cask
 // put in place, as its app, in its suite's folder, or through its package
 // (pkgutil's receipts); each with the cask that installs it, if one does,
-// as Homebrew's catalogue has it (match). unmatched is why which casks
-// install them couldn't be told, when it couldn't: they're found all the
-// same. Without Homebrew, every app but those is by hand, and none has a
-// cask. err is why they couldn't be found.
-func (h *Homebrew) AppsByHand(ctx context.Context) (found []ByHand, unmatched, err error) {
+// as Homebrew's catalogue has it (match). Without Homebrew, every app but
+// those is by hand, and none has a cask.
+func (h *Homebrew) AppsByHand(ctx context.Context) (HandApps, error) {
 	brewed := runner.Has(h.run, "brew")
 	var casked Casked
 	var packaged map[string]bool
 	if brewed {
+		var err error
 		if casked, err = h.Casked(ctx); err != nil {
-			return nil, nil, fmt.Errorf("find the casks' apps: %w", err)
+			return HandApps{}, fmt.Errorf("find the casks' apps: %w", err)
 		}
 		if packaged, err = installedBy(ctx, h.run, casked.Receipts); err != nil {
-			return nil, nil, fmt.Errorf("find the casks' packages' apps: %w", err)
+			return HandApps{}, fmt.Errorf("find the casks' packages' apps: %w", err)
 		}
 	}
+	var found HandApps
 	for _, app := range apps.Installed(h.AppDirs) {
 		id := apps.BundleID(app)
 		if !h.byHand(app, id, casked, packaged) {
 			continue
 		}
-		found = append(found, ByHand{Path: app, Name: strings.TrimSuffix(filepath.Base(app), ".app"), ID: id})
+		found.Apps = append(found.Apps, ByHand{Path: app, Name: strings.TrimSuffix(filepath.Base(app), ".app"), ID: id})
 	}
-	if !brewed || len(found) == 0 {
-		return found, nil, nil
+	if !brewed || len(found.Apps) == 0 {
+		return found, nil
 	}
 	cat, err := h.catalogue(ctx)
 	if err != nil {
-		return found, err, nil
+		found.Unmatched = err
+		return found, nil
 	}
-	for i, app := range found {
-		found[i].Cask, _ = cat.match(filepath.Base(app.Path), app.ID)
+	for i, app := range found.Apps {
+		if at, err := filepath.Rel(h.AppDirs[0], app.Path); err == nil && filepath.IsLocal(at) {
+			found.Apps[i].Cask, _ = cat.match(at, app.ID)
+		}
 	}
-	return found, nil, nil
+	return found, nil
 }
 
 // byHand reports whether the app at app, whose bundle id is id, was

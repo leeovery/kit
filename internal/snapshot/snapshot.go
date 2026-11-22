@@ -195,7 +195,8 @@ func Find(ctx context.Context, m Mac) (Snapshot, Mac, error) {
 	parts = append(parts, m.kindParts(ctx, deps, featuresLabel, backupsLabel)...)
 	parts = append(parts, m.lookAt(featuresLabel, func() Part { return m.featuresPart(ctx) }), m.lookAt(backupsLabel, func() Part { return m.backupsPart(ctx) }))
 	s := Snapshot{Parts: parts, Files: m.files(owned)}
-	s.ByHand, s.MatchErr, s.ByHandErr = brew.Of(deps).AppsByHand(ctx)
+	hand, err := brew.Of(deps).AppsByHand(ctx)
+	s.ByHand, s.MatchErr, s.ByHandErr = hand.Apps, hand.Unmatched, err
 	select {
 	case s.Folders = <-sizes:
 	default:

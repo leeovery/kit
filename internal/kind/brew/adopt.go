@@ -5,35 +5,35 @@ import (
 	"errors"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// adoption is how a batch of casks goes in, as the apps already in the
-// Applications folder have it.
+// adoption is how a batch of casks goes in: those that go in with --adopt,
+// as their apps in the Applications folder, dir, are theirs or aren't
+// there; those that go in as ever, as kit can't vet what they put in
+// place; and why each refused doesn't go in.
 type adoption struct {
-	// dir is the Applications folder casks put their apps in.
-	dir string
-	// adopt go in with --adopt: the catalogue's casks, by the names given,
-	// whose apps there, if any are, are theirs. casks are each as the
-	// catalogue has it; there, whether its apps are there.
-	adopt []string
-	casks map[string]catalogued
-	there map[string]bool
-	// plain go in as ever, without --adopt: those the catalogue doesn't
-	// know, as another tap's, whose apps there can't be told to be theirs.
-	// Homebrew fails one whose app is there.
-	plain []string
-	// refused don't go in, each saying why: an app there isn't the cask's.
+	dir     string
+	adopt   []toAdopt
+	plain   []string
 	refused []error
 }
 
-// adoption is how batch, casks of one tap or Homebrew's own, goes in. With
-// no Applications folder to look in, or no catalogue to tell whose an app
-// there is, every one goes in as ever; a tap's without the catalogue read,
-// as it holds Homebrew's own casks alone.
+// toAdopt is a cask to install with --adopt: by the name given, as the
+// catalogue has it, and whether its apps are there already.
+type toAdopt struct {
+	name  string
+	cask  catalogued
+	there bool
+}
+
+// adoption is how batch, casks of one tap or Homebrew's own, goes in. A
+// tap's never are in the catalogue, which holds Homebrew's own alone.
+// With no Applications folder, or no catalogue, every one goes in as ever.
 func (c casks) adoption(ctx context.Context, batch []string) adoption {
 	all := adoption{plain: batch}
 	if _, tapped := tapOf(batch[0]); tapped || len(c.AppDirs) == 0 {
@@ -44,10 +44,10 @@ func (c casks) adoption(ctx context.Context, batch []string) adoption {
 		event.Log(ctx, event.Logged{Line: "kit can't tell whose an app already there is, so casks install without adopting one: " + err.Error()})
 		return all
 	}
-	a := adoption{dir: c.AppDirs[0], casks: map[string]catalogued{}, there: map[string]bool{}}
+	a := adoption{dir: c.AppDirs[0]}
 	for _, name := range batch {
 		k, ok := cat.cask(name)
-		if !ok {
+		if !ok || k.unvetted {
 			a.plain = append(a.plain, name)
 			continue
 		}
@@ -56,20 +56,13 @@ func (c casks) adoption(ctx context.Context, batch []string) adoption {
 			a.refused = append(a.refused, err)
 			continue
 		}
-		a.adopt = append(a.adopt, name)
-		a.casks[name], a.there[name] = k, len(there) > 0
+		a.adopt = append(a.adopt, toAdopt{name: name, cask: k, there: there})
 	}
 	return a
 }
 
-// adopting installs batch, casks of one tap or Homebrew's own, as adoption
-// has it: the catalogue's with --adopt, so the cask's own app already in
-// the Applications folder, by its bundle id, is taken over in place, as
-// Homebrew does unchecked for a cask that updates itself, and for any other
-// only when its bundle versions are the download's; one Homebrew didn't
-// adopt replaced (replace). A cask whose app there isn't its own isn't
-// installed, saying so: kit never takes over, nor deletes, an app that may
-// be another's, as a fork of the cask's under its name.
+// adopting installs batch as adoption has it, replacing each app Homebrew
+// didn't adopt (replace).
 func (c casks) adopting(ctx context.Context, batch []string) error {
 	a := c.adoption(ctx, batch)
 	errs := a.refused
@@ -79,72 +72,104 @@ func (c casks) adopting(ctx context.Context, batch []string) error {
 		}
 	}
 	if len(a.adopt) > 0 {
-		if err := c.installs(ctx, []string{"--cask", "--adopt"}, a.adopt); err != nil {
+		names := make([]string, len(a.adopt))
+		for i, t := range a.adopt {
+			names[i] = t.name
+		}
+		if err := c.installs(ctx, []string{"--cask", "--adopt"}, names); err != nil {
 			errs = append(errs, c.replace(ctx, a, err)...)
 		}
 	}
 	return kind.Joined(errs)
 }
 
-// replace installs again, alone, with --force, each of a's casks that
-// failed, brew install --adopt's failure, says Homebrew didn't adopt
-// (notAdopted), while its own app, by its bundle id, is still there:
-// Homebrew deletes that app, then moves the cask's in. --force never goes
-// in first, as it would replace an app Homebrew adopts in place. It
-// returns what failed: each replacing that failed, and failed itself,
-// unless every one of a's casks to adopt is in now.
+// replace installs again, alone, with --force, each of a's casks whose
+// adopt failed, as failed says, while its own app is still there. It's an
+// install of its own as Homebrew refuses --adopt beside --force, and
+// --adopt never replaces. It keys on Homebrew's line saying the app
+// differs, never on the cask being missing: one that failed otherwise, as
+// its download, may yet be adopted in place, where --force would delete
+// the app. It returns what's still failed.
 func (c casks) replace(ctx context.Context, a adoption, failed error) []error {
 	var errs []error
 	replaced := false
-	for _, name := range a.notAdopted(failed) {
-		if there, err := a.casks[name].there(a.dir, c.Home); err != nil || len(there) == 0 {
+	for _, t := range a.notAdopted(failed) {
+		if there, err := t.cask.there(a.dir, c.Home); err != nil || !there {
 			continue
 		}
-		if err := c.installs(ctx, []string{"--cask", "--force"}, []string{name}); err != nil {
+		if err := c.installs(ctx, []string{"--cask", "--force"}, []string{t.name}); err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		replaced = true
 	}
-	if !replaced || !c.allIn(ctx, a) {
+	if replaced {
+		failed = c.stillFailed(ctx, a, failed)
+	}
+	if failed != nil {
 		errs = append([]error{failed}, errs...)
 	}
 	return errs
 }
 
-// notAdoptedLine is the line brew install --adopt fails a cask with, by
-// its token, when the app at its target differs from the cask's: its
-// bundle versions aren't the download's.
-var notAdoptedLine = regexp.MustCompile(`^Error: (\S+): It seems the existing .+ is different from the one being installed`)
+// caskFailed is the line brew install fails one of its casks with, by its
+// token; notAdoptedLine, the one it fails a cask with whose app there
+// differs from its download.
+var (
+	caskFailed     = regexp.MustCompile(`^Error: ([^\s:]+): `)
+	notAdoptedLine = regexp.MustCompile(`^Error: ([^\s:]+): It seems the existing .+ is different from the one being installed`)
+)
 
 // notAdopted are those of a's casks with an app there that err, brew
 // install --adopt's failure, says Homebrew didn't adopt.
-func (a adoption) notAdopted(err error) []string {
+func (a adoption) notAdopted(err error) []toAdopt {
 	exit, ok := errors.AsType[*runner.ExitError](err)
 	if !ok {
 		return nil
 	}
-	var names []string
+	var not []toAdopt
 	for _, line := range exit.Lines("Error:") {
 		m := notAdoptedLine.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
-		for _, name := range a.adopt {
-			if a.there[name] && a.casks[name].token == m[1] && !slices.Contains(names, name) {
-				names = append(names, name)
-			}
+		if i := slices.IndexFunc(a.adopt, func(t toAdopt) bool { return t.there && t.cask.token == m[1] }); i >= 0 {
+			not = append(not, a.adopt[i])
 		}
 	}
-	return names
+	return not
 }
 
-// allIn reports whether every one of a's casks to adopt is installed, as
-// brew lists them, by token.
-func (c casks) allIn(ctx context.Context, a adoption) bool {
+// stillFailed is failed, brew install --adopt's failure, once some of a's
+// casks are replaced: none when every one is in; else its lines of those
+// still missing alone, as brew lists them, so it never says why one now in
+// failed. As it is when brew can't list them, or it names none of them.
+func (c casks) stillFailed(ctx context.Context, a adoption, failed error) error {
 	listed, err := c.lines(ctx, "list", "--cask", "--full-name", "-1")
 	if err != nil {
-		return false
+		return failed
 	}
-	return !slices.ContainsFunc(a.adopt, func(name string) bool { return !slices.Contains(listed, a.casks[name].token) })
+	var missing []string
+	for _, t := range a.adopt {
+		if !slices.Contains(listed, t.cask.token) {
+			missing = append(missing, t.cask.token)
+		}
+	}
+	exit, ok := errors.AsType[*runner.ExitError](failed)
+	switch {
+	case len(missing) == 0:
+		return nil
+	case !ok:
+		return failed
+	}
+	var said []string
+	for _, line := range exit.Lines("Error:") {
+		if m := caskFailed.FindStringSubmatch(line); m != nil && slices.Contains(missing, m[1]) {
+			said = append(said, line)
+		}
+	}
+	if len(said) == 0 {
+		return failed
+	}
+	return runner.NewExitError(exit.Command, exit.Code, []byte(strings.Join(said, "\n")))
 }

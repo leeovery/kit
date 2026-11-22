@@ -97,9 +97,9 @@ func TestTheAppsInstalledByHand(t *testing.T) {
 	fake.On("pkgutil", "--pkg-info-plist", "com.example.agent").Prints(receipt(filepath.Join(apps, "Agent.app")))
 	fake.On("pkgutil", "--files", "com.example.agent").Prints("Contents\nContents/Info.plist\n")
 	catalogued(t, fake)
-	found, unmatched, err := withApps(fake, apps, mine).AppsByHand(t.Context())
-	if want := []string{"Google Chrome", "Other Tool", "Tool", "Mine"}; err != nil || unmatched != nil || !slices.Equal(names(found), want) {
-		t.Errorf("AppsByHand() = %q, %v, %v; want %q", names(found), unmatched, err, want)
+	found, err := withApps(fake, apps, mine).AppsByHand(t.Context())
+	if want := []string{"Google Chrome", "Other Tool", "Tool", "Mine"}; err != nil || found.Unmatched != nil || !slices.Equal(names(found.Apps), want) {
+		t.Errorf("AppsByHand() = %q, %v, %v; want %q", names(found.Apps), found.Unmatched, err, want)
 	}
 	if slices.Contains(fake.Calls(), "pkgutil --files com.example.other") {
 		t.Error("asked pkgutil of a package no cask installed")
@@ -107,40 +107,53 @@ func TestTheAppsInstalledByHand(t *testing.T) {
 }
 
 // An app installed by hand has the cask that installs it, as Homebrew's
-// catalogue has it: of the casks installing an app of its name, or, if
-// none does, those whose uninstall quits its bundle id, the one that states
-// its id, in any case; one without @ over those with. None states a fork's
-// id, under the cask's app's name; a cask that states no id, or is
-// disabled, is never the one; nor is any when more than one would do.
+// catalogue has it: of the casks putting an app where it is, in the folder
+// casks put their apps in, the one that states its bundle id, in any case;
+// one without @ over those with. A cask puts its app where its target
+// says, or, installing through a package with no app of its own, where
+// its uninstall deletes one. An app anywhere else is no cask's: installing
+// one would put a second copy in place, whatever id it quits. None states
+// a fork's id under the cask's app's name; a cask that states no id, is
+// disabled, or moves into place what kit can't vet is never the one; nor
+// is any when more than one would do.
 func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 	for _, tt := range []struct {
-		name, app, id, want string
+		name, in, app, id, want string
 	}{
-		{"by its name", "Google Chrome.app", "com.google.Chrome", "google-chrome"},
-		{"its id in another case", "Google Chrome.app", "COM.GOOGLE.CHROME", "google-chrome"},
-		{"a fork, under its name", "Spaceman.app", "dev.fork.Spaceman", ""},
-		{"the cask's own, under its name", "Spaceman.app", "dev.original.Spaceman", "spaceman"},
-		{"its package's, as its uninstall deletes it, by the id it signals", "zoom.us.app", "us.zoom.xos", "zoom"},
-		{"the plain token over one with @", "1Password.app", "com.1password.1password", "1password"},
-		{"a cask stating no id", "Quiet Tool.app", "com.example.quiet", ""},
-		{"by its target, the id its saved state is named for", "Browser.app", "com.example.browser", "browser"},
-		{"under the name its target renames", "Chromium.app", "com.example.browser", ""},
-		{"by the id a cask quits, under another name", "Editor.app", "com.example.editor", "example-editor"},
-		{"from a folder of the download, by an id it signals of several", "Signals.app", "com.example.signals.agent", "signals"},
-		{"a disabled cask", "Old Tool.app", "com.example.oldtool", ""},
-		{"no bundle id", "Google Chrome.app", "", ""},
-		{"no cask", "Kubius.app", "com.example.kubius", ""},
+		{"by its name", "", "Google Chrome.app", "com.google.Chrome", "google-chrome"},
+		{"its id in another case", "", "Google Chrome.app", "COM.GOOGLE.CHROME", "google-chrome"},
+		{"in another folder apps are in", "other", "Google Chrome.app", "com.google.Chrome", ""},
+		{"in a folder in the casks' folder", "Utilities", "Google Chrome.app", "com.google.Chrome", ""},
+		{"a fork, under its name", "", "Spaceman.app", "dev.fork.Spaceman", ""},
+		{"the cask's own, under its name", "", "Spaceman.app", "dev.original.Spaceman", "spaceman"},
+		{"its package's, as its uninstall deletes it, by the id it signals", "", "zoom.us.app", "us.zoom.xos", "zoom"},
+		{"a package's that says nowhere, by the id it quits", "", "Monitor.app", "com.example.monitor", ""},
+		{"the plain token over one with @", "", "1Password.app", "com.1password.1password", "1password"},
+		{"a cask stating no id", "", "Quiet Tool.app", "com.example.quiet", ""},
+		{"by its target, the id its saved state is named for", "", "Browser.app", "com.example.browser", "browser"},
+		{"under the name its target renames, by the id it quits", "", "Chromium.app", "com.example.browser", ""},
+		{"under another name, by the id a cask quits", "", "Editor.app", "com.example.editor", ""},
+		{"from a folder of the download, by an id it signals of several", "", "Signals.app", "com.example.signals.agent", "signals"},
+		{"a cask moving a suite too", "", "Office.app", "com.example.office", ""},
+		{"a cask putting its app elsewhere, by the id it quits", "", "Sidekick.app", "com.example.sidekick", ""},
+		{"a disabled cask", "", "Old Tool.app", "com.example.oldtool", ""},
+		{"no bundle id", "", "Google Chrome.app", "", ""},
+		{"no cask", "", "Kubius.app", "com.example.kubius", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
-			apps := t.TempDir()
-			path := installApp(t, apps, tt.app, tt.id)
+			apps, other := t.TempDir(), t.TempDir()
+			dir := filepath.Join(apps, tt.in)
+			if tt.in == "other" {
+				dir = other
+			}
+			path := installApp(t, dir, tt.app, tt.id)
 			noCasks(fake)
 			catalogued(t, fake)
-			found, unmatched, err := withApps(fake, apps).AppsByHand(t.Context())
+			found, err := withApps(fake, apps, other).AppsByHand(t.Context())
 			want := []brew.ByHand{{Path: path, Name: strings.TrimSuffix(tt.app, ".app"), ID: tt.id, Cask: tt.want}}
-			if err != nil || unmatched != nil || !slices.Equal(found, want) {
-				t.Errorf("AppsByHand() = %+v, %v, %v; want %+v", found, unmatched, err, want)
+			if err != nil || found.Unmatched != nil || !slices.Equal(found.Apps, want) {
+				t.Errorf("AppsByHand() = %+v, %v; want %+v", found, err, want)
 			}
 		})
 	}
@@ -170,17 +183,17 @@ func TestAppsByHandWithoutACatalogue(t *testing.T) {
 				writeFile(t, filepath.Join(cache, "api", "internal", "packages.arm64_tahoe.jws.json.payload"), tt.payload)
 			}
 			fake.On("brew", "--cache").Prints(cache + "\n")
-			found, unmatched, err := withApps(fake, apps).AppsByHand(t.Context())
+			found, err := withApps(fake, apps).AppsByHand(t.Context())
 			want := []brew.ByHand{{Path: path, Name: "Google Chrome", ID: "com.google.Chrome"}}
-			if err != nil || unmatched == nil || !strings.Contains(unmatched.Error(), tt.why) || !slices.Equal(found, want) {
-				t.Errorf("AppsByHand() = %+v, %v, %v; want %+v, unmatched: %s", found, unmatched, err, want, tt.why)
+			if err != nil || found.Unmatched == nil || !strings.Contains(found.Unmatched.Error(), tt.why) || !slices.Equal(found.Apps, want) {
+				t.Errorf("AppsByHand() = %+v, %v; want %+v, unmatched: %s", found, err, want, tt.why)
 			}
 		})
 	}
 	fake := runnertest.New(t)
 	noCasks(fake)
-	if found, unmatched, err := withApps(fake, t.TempDir()).AppsByHand(t.Context()); found != nil || unmatched != nil || err != nil || slices.Contains(fake.Calls(), "brew --cache") {
-		t.Errorf("AppsByHand() of none = %+v, %v, %v, running %q; want none, the catalogue not looked for", found, unmatched, err, fake.Calls())
+	if found, err := withApps(fake, t.TempDir()).AppsByHand(t.Context()); found.Apps != nil || found.Unmatched != nil || err != nil || slices.Contains(fake.Calls(), "brew --cache") {
+		t.Errorf("AppsByHand() of none = %+v, %v, running %q; want none, the catalogue not looked for", found, err, fake.Calls())
 	}
 }
 
@@ -207,11 +220,11 @@ func TestTheCatalogueIsTheNewestAsItChanges(t *testing.T) {
 	h := withApps(fake, apps)
 	cask := func() string {
 		t.Helper()
-		found, unmatched, err := h.AppsByHand(t.Context())
-		if err != nil || unmatched != nil || len(found) != 1 {
-			t.Fatalf("AppsByHand() = %+v, %v, %v", found, unmatched, err)
+		found, err := h.AppsByHand(t.Context())
+		if err != nil || found.Unmatched != nil || len(found.Apps) != 1 {
+			t.Fatalf("AppsByHand() = %+v, %v", found, err)
 		}
-		return found[0].Cask
+		return found.Apps[0].Cask
 	}
 	if got := cask(); got != "google-chrome" {
 		t.Errorf("by the newest catalogue, Chrome's cask is %q, want google-chrome", got)
@@ -233,8 +246,8 @@ func TestAppsByHandWithoutHomebrewsCache(t *testing.T) {
 	installApp(t, apps, "Tool.app", "com.example.tool")
 	noCasks(fake)
 	fake.On("brew", "--cache").Exits(1).PrintsToStderr("Error: broken")
-	_, unmatched, err := withApps(fake, apps).AppsByHand(t.Context())
-	if exit, ok := errors.AsType[*runner.ExitError](unmatched); err != nil || !ok || !strings.HasPrefix(unmatched.Error(), "find Homebrew's cache") || exit.Code != 1 {
-		t.Errorf("AppsByHand() = unmatched %v, %v; want Homebrew's cache not found", unmatched, err)
+	found, err := withApps(fake, apps).AppsByHand(t.Context())
+	if exit, ok := errors.AsType[*runner.ExitError](found.Unmatched); err != nil || !ok || !strings.HasPrefix(found.Unmatched.Error(), "find Homebrew's cache") || exit.Code != 1 {
+		t.Errorf("AppsByHand() = unmatched %v, %v; want Homebrew's cache not found", found.Unmatched, err)
 	}
 }

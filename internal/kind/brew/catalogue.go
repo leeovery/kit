@@ -27,9 +27,8 @@ type catalogue struct {
 	casks map[string]catalogued
 	// renames are the tokens casks had before, each to the one it has now.
 	renames map[string]string
-	// byApp are the casks by the names of the apps they install, lower
-	// case; byQuit, by the bundle ids their uninstalls quit.
-	byApp, byQuit map[string][]string
+	// byPlace are the casks by where they put their apps, lower case.
+	byPlace map[string][]string
 }
 
 // catalogued is a cask as the catalogue has it.
@@ -37,16 +36,31 @@ type catalogued struct {
 	token string
 	// apps are where it puts its apps, from the Applications folder, as in
 	// Example.app: each its app artifacts install, renamed by the target
-	// given after it, and, for a cask installing through a package, each
-	// its uninstall deletes there. None it puts elsewhere, as in ~/Library.
+	// given after it; for a cask installing through a package, with none,
+	// each its uninstall deletes there.
 	apps []string
 	// ids are the bundle ids it states, lower case: those it quits,
 	// signals or unloads (launchctl) as it's uninstalled or zapped, and
-	// those the files in ~/Library it removes are named for. quits are
-	// those its uninstall quits.
-	ids, quits []string
+	// those the files in ~/Library it removes are named for.
+	ids []string
 	// disabled is whether Homebrew has disabled it, or will on a date set.
 	disabled bool
+	// unvetted is whether it moves into place anything kit can't tell to
+	// be its own: anything but an app in the Applications folder.
+	unvetted bool
+}
+
+// vetted are the artifacts kit can tell a cask's own of: its apps in the
+// Applications folder, by their bundle ids; and those Homebrew moves
+// nothing into place for, as it links a binary or runs a package. --adopt
+// takes over whatever is at a moved artifact's target, unchecked for a
+// cask that updates itself, and --force deletes it, so a cask with any
+// other (a suite, a plugin, a font, or a sort Homebrew adds later) is
+// never adopted.
+var vetted = []string{
+	":app", ":uninstall", ":zap", ":pkg", ":installer", ":binary", ":command_wrapper", ":manpage",
+	":bash_completion", ":zsh_completion", ":fish_completion", ":generate_completions_from_executable", ":generated_script",
+	":preflight_steps", ":postflight_steps", ":uninstall_preflight_steps", ":uninstall_postflight_steps",
 }
 
 // payloads are the catalogue's files in Homebrew's cache, one a platform,
@@ -141,17 +155,14 @@ func readCatalogue(path string) (*catalogue, error) {
 	if p.Casks == nil {
 		return nil, errors.New("it lists no casks")
 	}
-	c := &catalogue{casks: make(map[string]catalogued, len(p.Casks)), renames: p.Renames, byApp: map[string][]string{}, byQuit: map[string][]string{}}
+	c := &catalogue{casks: make(map[string]catalogued, len(p.Casks)), renames: p.Renames, byPlace: map[string][]string{}}
 	for token, raw := range p.Casks {
 		k := caskOf(raw.Artifacts)
 		k.token, k.disabled = token, len(raw.Disable) > 0 && string(raw.Disable) != "null"
 		c.casks[token] = k
-		for _, app := range k.apps {
-			name := strings.ToLower(filepath.Base(app))
-			c.byApp[name] = append(c.byApp[name], token)
-		}
-		for _, id := range k.quits {
-			c.byQuit[id] = append(c.byQuit[id], token)
+		for _, at := range k.apps {
+			place := strings.ToLower(at)
+			c.byPlace[place] = append(c.byPlace[place], token)
 		}
 	}
 	return c, nil
@@ -169,22 +180,15 @@ func (c *catalogue) cask(name string) (catalogued, bool) {
 	return k, ok
 }
 
-// match is the cask that installs the app named app, as in Example.app,
-// whose bundle id is id: of the casks installing an app of that name, or,
-// if none does, those whose uninstall quits id, the one that states id;
-// one without @ in its token over those with (1password over
-// 1password@beta). None when no cask states id, as for a fork of the
-// cask's app, under its name, or when more than one would do. A disabled
-// cask is never matched.
-func (c *catalogue) match(app, id string) (string, bool) {
-	id = strings.ToLower(id)
-	candidates := c.byApp[strings.ToLower(app)]
-	if len(candidates) == 0 {
-		candidates = c.byQuit[id]
-	}
+// match is the cask that installs the app at at, from the Applications
+// folder, whose bundle id is id: of the casks putting an app there, the
+// one that states id, one without @ in its token over those with
+// (1password over 1password@beta). An app anywhere else is no cask's to
+// adopt: installing the cask would put a second copy in place.
+func (c *catalogue) match(at, id string) (string, bool) {
 	var stating []string
-	for _, token := range candidates {
-		if k := c.casks[token]; !k.disabled && k.states(id) {
+	for _, token := range c.byPlace[strings.ToLower(at)] {
+		if k := c.casks[token]; !k.disabled && !k.unvetted && k.states(id) {
 			stating = append(stating, token)
 		}
 	}
@@ -202,13 +206,12 @@ func (k catalogued) states(id string) bool {
 	return id != "" && slices.Contains(k.ids, strings.ToLower(id))
 }
 
-// there are the cask's apps already in dir, the Applications folder, by
-// path; or why one there isn't the cask's, as its bundle id isn't one the
-// cask states: a fork of the cask's app, under its name, or any app at all
-// when the cask states none. One that can't be looked at can't be told to
-// be the cask's.
-func (k catalogued) there(dir, home string) ([]string, error) {
-	var found []string
+// there reports whether the cask's apps are already in dir, the
+// Applications folder; or why one there isn't the cask's: its bundle id
+// isn't one the cask states, as a fork's under its name, or any app's for a
+// cask that states none; it's the App Store's; or it can't be looked at.
+func (k catalogued) there(dir, home string) (bool, error) {
+	var found bool
 	for _, at := range k.apps {
 		path := filepath.Join(dir, at)
 		_, err := os.Lstat(path)
@@ -216,12 +219,14 @@ func (k catalogued) there(dir, home string) ([]string, error) {
 		case errors.Is(err, fs.ErrNotExist):
 			continue
 		case err != nil:
-			return nil, fmt.Errorf("can't tell whose %s in %s is: %w", at, tilde.Shown(home, dir), err)
+			return false, fmt.Errorf("can't tell whose %s in %s is: %w", at, tilde.Shown(home, dir), err)
+		case fromAppStore(path):
+			return false, fmt.Errorf("%s is already in %s and is the App Store's", at, tilde.Shown(home, dir))
 		}
 		if id := apps.BundleID(path); !k.states(id) {
-			return nil, fmt.Errorf("%s is already in %s and isn't the cask's (%s)", at, tilde.Shown(home, dir), cmp.Or(id, "no bundle id"))
+			return false, fmt.Errorf("%s is already in %s and isn't the cask's (%s)", at, tilde.Shown(home, dir), cmp.Or(id, "no bundle id"))
 		}
-		found = append(found, path)
+		found = true
 	}
 	return found, nil
 }
@@ -231,12 +236,13 @@ func (k catalogued) there(dir, home string) ([]string, error) {
 // options, or both.
 func caskOf(artifacts []json.RawMessage) catalogued {
 	var k catalogued
-	var pkg bool
+	var app, pkg bool
 	var deleted []string
 	for _, raw := range artifacts {
 		var parts []json.RawMessage
 		var sort string
 		if json.Unmarshal(raw, &parts) != nil || len(parts) == 0 || json.Unmarshal(parts[0], &sort) != nil {
+			k.unvetted = true
 			continue
 		}
 		var names []string
@@ -245,22 +251,23 @@ func caskOf(artifacts []json.RawMessage) catalogued {
 			_ = json.Unmarshal(part, &names)
 			_ = json.Unmarshal(part, &options)
 		}
+		k.unvetted = k.unvetted || !slices.Contains(vetted, sort)
 		switch sort {
 		case ":app":
 			var target string
 			_ = json.Unmarshal(options[":target"], &target)
-			k.apps = append(k.apps, appsAt(names, target)...)
+			at, ok := appsAt(names, target)
+			k.apps, k.unvetted, app = append(k.apps, at...), k.unvetted || !ok, true
 		case ":pkg":
 			pkg = true
 		case ":uninstall", ":zap":
 			k.ids = append(k.ids, stated(options)...)
 			if sort == ":uninstall" {
-				k.quits = append(k.quits, bundleIDs(oneOrMore(options[":quit"]))...)
 				deleted = append(deleted, oneOrMore(options[":delete"])...)
 			}
 		}
 	}
-	if pkg {
+	if pkg && !app {
 		for _, path := range deleted {
 			if at, ok := inApplications(path); ok && filepath.Ext(at) == ".app" && !strings.Contains(at, "*") {
 				k.apps = append(k.apps, at)
@@ -274,19 +281,21 @@ func caskOf(artifacts []json.RawMessage) catalogued {
 
 // appsAt are where an app artifact naming names puts them, from the
 // Applications folder: each by its own name, the last where target says,
-// if it's given.
-func appsAt(names []string, target string) []string {
-	var at []string
+// if it's given; and whether every one goes there.
+func appsAt(names []string, target string) (at []string, all bool) {
+	all = true
 	for i, name := range names {
 		place := filepath.Base(name)
 		if target != "" && i == len(names)-1 {
 			place = target
 		}
-		if rel, ok := inApplications(place); ok {
+		rel, ok := inApplications(place)
+		if ok {
 			at = append(at, rel)
 		}
+		all = all && ok
 	}
-	return at
+	return at, all
 }
 
 // inApplications is path from the Applications folder: a relative one as
