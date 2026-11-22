@@ -2,7 +2,11 @@
 // things that need attention.
 package check
 
-import "time"
+import (
+	"slices"
+	"strings"
+	"time"
+)
 
 // State is how a step stands.
 type State string
@@ -132,11 +136,44 @@ func (r Result) Actions() bool {
 	return false
 }
 
+// Saying is r with its summary said in parts, each kept whole: kit's own
+// words a part each, and what a check printed one part, whatever it holds.
+// A part that says nothing isn't one.
+func (r Result) Saying(parts ...string) Result {
+	parts = slices.DeleteFunc(slices.Clone(parts), func(p string) bool { return p == "" })
+	r.Summary, r.Parts = strings.Join(parts, "; "), nil
+	if len(parts) > 1 {
+		r.Parts = parts
+	}
+	return r
+}
+
+// Adding is r with parts said after what its summary says.
+func (r Result) Adding(parts ...string) Result {
+	return r.Saying(slices.Concat(r.Says(), parts)...)
+}
+
+// Says is the parts of r's summary: the summary whole when it wasn't said
+// in parts, and none when it says nothing.
+func (r Result) Says() []string {
+	switch {
+	case len(r.Parts) > 0:
+		return r.Parts
+	case r.Summary == "":
+		return nil
+	}
+	return []string{r.Summary}
+}
+
 // Result is what a check found.
 type Result struct {
 	State State `json:"state"`
-	// Summary says how the step stands, as in "129 declared, all installed".
+	// Summary says how the step stands, as in "129 declared, all installed":
+	// its parts joined by "; ", when it's said in parts.
 	Summary string `json:"summary,omitempty"`
+	// Parts are the summary's parts, when Saying says it in more than one,
+	// as in "installed", "declared in laptop": a face shows each apart.
+	Parts []string `json:"parts,omitempty"`
 	// Glance is the step's summary as the at-a-glance view shows it, short,
 	// as in "Arq 01:05": none when the step has nothing worth a glance.
 	Glance string `json:"glance,omitempty"`

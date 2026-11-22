@@ -28,7 +28,7 @@ var docsAt = time.Date(2026, 11, 20, 16, 30, 0, 0, time.UTC)
 // came from, each a window as small as what it shows.
 var docs = []Fixture{
 	result("backups-add", "kit backup add arq: declared, kit-config committed and pushed", "backup add arq",
-		said{"arq", "declared in laptop"}, committed("laptop/declarations")),
+		said{"arq", []string{"declared in laptop"}}, committed("laptop/declarations")),
 	sectionOf("backups-status", "kit status's BACKUPS", "BACKUPS", "Time Machine", 37, 6, func() []event.Event {
 		return statusAt(docsAt, fineAt(docsAt, "time-machine", "last backup 02:35"), fineAt(docsAt, "arq", "last backup 02:10"))
 	}),
@@ -37,27 +37,27 @@ var docs = []Fixture{
 	sectionOf("drift-status", "kit status's CONFIG, ffmpeg installed by hand", "CONFIG", "ffmpeg", 64, 10, ffmpegDrifted),
 	{Name: "drift-reconcile", About: "kit reconcile's record: ffmpeg declared, kit-config committed and pushed", Width: 58, Height: 10,
 		Shows: "1 settled", at: docsAt, draw: onFace(func(at time.Time) []event.Event {
-			return reconciled(at, 6100*time.Millisecond, said{"brew:ffmpeg", "already installed; declared in laptop"}, committed("laptop/declarations"))
+			return reconciled(at, 6100*time.Millisecond, said{"brew:ffmpeg", []string{"already installed", "declared in laptop"}}, committed("laptop/declarations"))
 		})},
 	result("drift-temp", "kit brew add hello --temp: installed, not declared", "brew add hello --temp",
-		said{"hello", "installed, for now: not declared, quiet for 7 days, then kit reconcile asks"}, said{"kit-config", "nothing changed"}),
+		said{"hello", []string{"installed, for now: not declared, quiet for 7 days, then kit reconcile asks"}}, said{"kit-config", []string{"nothing changed"}}),
 	{Name: "first-config-done", About: "kit setup's end on a Mac in use: the Mac declared as it is, kit apply carrying on", Width: 82, Height: 36,
 		Shows: "carries on now", at: docsAt, draw: setupDone},
 	result("linked-files-add", "kit file add: the file moved into kit-config and linked back", "file add ~/.config/tool/conf",
-		said{"~/.config/tool/conf", "in kit-config, linked: laptop/home/.config/tool/conf"}, committed("laptop/home/.config/tool/conf")),
+		said{"~/.config/tool/conf", []string{"in kit-config, linked: laptop/home/.config/tool/conf"}}, committed("laptop/home/.config/tool/conf")),
 	{Name: "linked-files-revert", About: "kit reconcile --revert: kit-config's file linked back, the Mac's in the Bin", Width: 82, Height: 10,
 		Shows: "1 settled", at: docsAt, draw: onFace(func(at time.Time) []event.Event {
 			return reconciled(at, 400*time.Millisecond,
-				said{"file:~/.zshrc", "linked to kit-config's; the Mac's copy is in the Bin (~/.Trash/.zshrc)"}, said{"kit-config", "nothing changed"})
+				said{"file:~/.zshrc", []string{"linked to kit-config's", "the Mac's copy is in the Bin (~/.Trash/.zshrc)"}}, said{"kit-config", []string{"nothing changed"}})
 		})},
 	{Name: "new-mac-boot", About: "the boot's end in Terminal, Ghostty opening", Width: 63, Height: 34, Look: Terminal,
 		Shows: "choose Open", at: docsAt, draw: bootEnds},
 	{Name: "new-mac-record", About: "kit apply's record on a new Mac, two to-dos left", Width: 81, Height: 31,
 		Shows: "brings them back", at: docsAt, draw: onFace(func(time.Time) []event.Event { return backupsLeft() })},
 	result("packages-add", "kit brew add jq: installed, declared, kit-config committed and pushed", "brew add jq",
-		said{"jq", "installed; declared in laptop"}, committed("laptop/declarations")),
+		said{"jq", []string{"installed", "declared in laptop"}}, committed("laptop/declarations")),
 	result("running-by-itself-check", "kit check add db: declared, failing now", "check add db",
-		said{"db", "declared in laptop; it fails now: 127.0.0.1:5432 - no response"}, committed("laptop/declarations")),
+		said{"db", []string{"declared in laptop", "it fails now: 127.0.0.1:5432 - no response"}}, committed("laptop/declarations")),
 	{Name: "secrets-places", About: "kit secret places: the secrets blocks this Mac reads", Width: 88, Height: 5,
 		Shows: "references in full", at: docsAt, draw: secretPlaces},
 	sectionOf("settings-status", "kit status's CONFIG, a setting removed by hand", "CONFIG", "autohide", 79, 10, func() []event.Event {
@@ -65,7 +65,7 @@ var docs = []Fixture{
 			check.Item{ID: "defaults:com.apple.dock:autohide", Name: "com.apple.dock:autohide", State: kind.Removed, Since: docsAt.Add(-2 * 24 * time.Hour)}))
 	}),
 	result("steps-add", "kit step add: declared, its script a template", "step add tool",
-		said{"tool", "declared in laptop; its script, laptop/steps/tool/run, is a template: write its check and apply"},
+		said{"tool", []string{"declared in laptop", "its script, laptop/steps/tool/run, is a template: write its check and apply"}},
 		committed("laptop/declarations, laptop/steps/tool/run")),
 	sectionOf("steps-status", "kit status's STEPS, each step with what its check prints", "STEPS", "16 installed", 34, 5, func() []event.Event {
 		return statusAt(docsAt, fineAt(docsAt, "fonts", "16 installed"))
@@ -79,21 +79,24 @@ var docs = []Fixture{
 	}),
 	sectionOf("troubleshooting-differs", "kit apply's record, a linked file waiting", "DONE", "a file of its own", 69, 18, fileDiffers),
 	result("your-data-add", "kit restore add ~/Code: declared, nothing copied", "restore add ~/Code",
-		said{"~/Code", "declared in laptop; nothing copied"}, committed("laptop/declarations")),
+		said{"~/Code", []string{"declared in laptop", "nothing copied"}}, committed("laptop/declarations")),
 }
 
 // said is a step of a command's run and what it said.
-type said struct{ step, summary string }
+type said struct {
+	step string
+	says []string
+}
 
 // committed is kit-config's step, having committed and pushed what.
-func committed(what string) said { return said{"kit-config", "committed and pushed " + what} }
+func committed(what string) said { return said{"kit-config", []string{"committed and pushed " + what}} }
 
 // result is the still name of what kit command prints at a terminal once
 // done, a line a step, kit-config's last: as wide as its longest.
 func result(name, about, command string, steps ...said) Fixture {
 	width := 0
 	for _, s := range steps {
-		width = max(width, ansi.StringWidth(s.step+s.summary)+12)
+		width = max(width, ansi.StringWidth(s.step+strings.Join(s.says, "; "))+12)
 	}
 	return Fixture{Name: name, About: about, Width: min(width, look.Width+2), Height: len(steps) + 2, Shows: "kit-config",
 		at: docsAt, draw: onFace(func(at time.Time) []event.Event { return changeRun(at, command, steps) })}
@@ -107,7 +110,7 @@ func changeRun(at time.Time, command string, steps []said) []event.Event {
 	events := []event.Event{event.RunStarted{Time: at, Command: command, Machine: "laptop", Steps: infos}}
 	for i, s := range steps {
 		infos[i] = event.Step{Name: s.step, Title: s.step}
-		events = append(events, event.StepFinished{Time: at, Step: s.step, Result: check.Result{State: check.OK, Summary: s.summary}})
+		events = append(events, event.StepFinished{Time: at, Step: s.step, Result: check.Result{State: check.OK}.Saying(s.says...)})
 	}
 	return append(events, event.RunFinished{Time: at, Counts: map[check.State]int{check.OK: len(steps)}})
 }
@@ -123,7 +126,7 @@ func reconciled(at time.Time, took time.Duration, steps ...said) []event.Event {
 		if name == "" {
 			infos[i].Title = s.step
 		}
-		events = append(events, event.StepFinished{Time: at, Step: s.step, Result: check.Result{State: check.OK, Summary: s.summary}})
+		events = append(events, event.StepFinished{Time: at, Step: s.step, Result: check.Result{State: check.OK}.Saying(s.says...)})
 	}
 	return append(events, event.RunFinished{Time: at, Duration: took, Counts: map[check.State]int{check.OK: len(steps)}})
 }

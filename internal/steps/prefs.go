@@ -254,7 +254,7 @@ func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.R
 		return res
 	}
 	if res.State == check.OK {
-		res = check.Result{State: check.Attention, Summary: strings.Join(says, "; ")}
+		res = check.Result{State: check.Attention}.Saying(says...)
 	}
 	res.Items = append(res.Items, items...)
 	return res

@@ -1376,7 +1376,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	installed, err := k.Installed(ctx)
 	switch {
 	case errors.Is(err, runner.ErrNotFound) && len(declared.Entries) == 0:
-		return check.Result{State: check.OK, Summary: "none declared; " + k.Program() + " isn't installed"}
+		return check.Result{State: check.OK}.Saying("none declared", k.Program()+" isn't installed")
 	case errors.Is(err, runner.ErrNotFound):
 		return check.Result{State: check.Deferred, Reason: "needs " + k.Program() + ", which isn't installed"}
 	case err != nil:
@@ -1485,10 +1485,10 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		res.Summary = "none declared"
 	}
 	if len(changed) > 0 {
-		res.Summary += fmt.Sprintf("; %d changed", len(changed))
+		res = res.Adding(fmt.Sprintf("%d changed", len(changed)))
 	}
 	if off > 0 {
-		res.Summary += fmt.Sprintf("; %d off", off)
+		res = res.Adding(fmt.Sprintf("%d off", off))
 	}
 	missingItems := items(k, missing, Missing, "")
 	for i, it := range missingItems {

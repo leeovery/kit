@@ -258,7 +258,7 @@ func captureResult(report prefs.Report, err error) check.Result {
 	case err != nil:
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	res := check.Result{State: check.OK, Summary: report.Summary()}
+	res := check.Result{State: check.OK}.Saying(report.Says()...)
 	for _, e := range report.Errors {
 		res.Items = append(res.Items, check.Item{ID: "prefs:error:" + e, Name: e, State: "error"})
 	}
@@ -290,7 +290,7 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.Kept)+len(report.ToOpen) == 0 && report.Failures() == 0 {
 			return check.Result{State: check.OK, Summary: "nothing pending"}
 		}
-		res := check.Result{State: check.OK, Summary: report.Summary()}
+		res := check.Result{State: check.OK}.Saying(report.Says()...)
 		for _, d := range slices.Sorted(maps.Keys(report.Failed)) {
 			res.Items = append(res.Items, check.Item{ID: "prefs:failed:" + d, Name: d, State: "failed", Detail: report.Failed[d]})
 		}

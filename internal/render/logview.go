@@ -271,7 +271,7 @@ func resultRow(title string, r check.Result, s event.Step, start time.Time) look
 	case check.Deferred:
 		row.Says = look.Says(look.Muted("not checked"), look.Muted(r.Reason))
 	default:
-		row.Says = saying(row.State, r.Summary)
+		row.Says = saying(row.State, r.Says()...)
 	}
 	row.Under = append(whyFailed(r), whatsLeft(r, s, start)...)
 	return row

@@ -87,13 +87,16 @@ func (p *Pretty) listRow(s event.Step) look.Row {
 // something to do: what applying did, then what the step says, or why it
 // was deferred, white.
 func (p *Pretty) toDoRow(f event.StepFinished) look.Row {
-	says := f.Result.Summary
-	if f.Result.State == check.Deferred {
-		says = f.Result.Reason
+	var says []string
+	switch {
+	case f.Result.State != check.Deferred:
+		says = f.Result.Says()
+	case f.Result.Reason != "":
+		says = []string{f.Result.Reason}
 	}
-	parts := did(f.Result.Done, p.step(f.Step), says != "")
-	if says != "" {
-		parts = append(parts, saying(look.ToDo, says))
+	parts := did(f.Result.Done, p.step(f.Step), len(says) > 0)
+	if len(says) > 0 {
+		parts = append(parts, saying(look.ToDo, says...))
 	}
 	return look.Row{State: look.ToDo, Name: p.title(f.Step), Says: look.Says(parts...)}
 }

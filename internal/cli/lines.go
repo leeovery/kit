@@ -74,21 +74,21 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		summary := "declared in " + scope + said
+		says := []string{"declared in " + scope + said}
 		switch kind {
 		case config.ChecksKind:
-			summary += "; " + a.tryCheck(ctx, r, entry)
+			says = append(says, a.tryCheck(ctx, r, entry))
 		case config.ManualKind:
 			if m, err := steps.ParseManual(r.homeDir, entry); err == nil && m.Command != nil {
 				res, err := r.run.Run(ctx, *m.Command)
 				if steps.Outcome(*m.Command, res, err) == "" {
-					summary += "; done already"
+					says = append(says, "done already")
 				} else {
-					summary += "; not done yet"
+					says = append(says, "not done yet")
 				}
 			}
 		}
-		return check.Result{State: check.OK, Summary: summary}
+		return check.Result{State: check.OK}.Saying(says...)
 	})
 	c.sync(ctx, commitMessage("add", name, args[:1], r.machine, opts.note))
 	return c.finish()

@@ -35,14 +35,14 @@ func (a *app) addFiles(ctx context.Context, r *run, paths []string, opts addOpti
 			for _, l := range links {
 				c.changed(l.Path)
 			}
-			summary := fmt.Sprintf("%d files in kit-config, linked: %s", len(links), linked.HomeFolder(scope)+"/"+strings.TrimPrefix(name, "~/"))
+			says := []string{fmt.Sprintf("%d files in kit-config, linked: %s", len(links), linked.HomeFolder(scope)+"/"+strings.TrimPrefix(name, "~/"))}
 			if len(links) == 1 {
-				summary = "in kit-config, linked: " + links[0].Path
+				says[0] = "in kit-config, linked: " + links[0].Path
 			}
 			if len(ignored) > 0 {
-				summary += "; git ignores " + strings.Join(ignored, ", ") + map[bool]string{true: ", which stays", false: ", which stay"}[len(ignored) == 1] + " on this Mac only"
+				says = append(says, "git ignores "+strings.Join(ignored, ", ")+map[bool]string{true: ", which stays", false: ", which stay"}[len(ignored) == 1]+" on this Mac only")
 			}
-			return check.Result{State: check.OK, Summary: summary}
+			return check.Result{State: check.OK}.Saying(says...)
 		})
 	}
 	c.sync(ctx, commitMessage("add", linked.StepName, names, r.machine, opts.note))
@@ -74,7 +74,7 @@ func (a *app) removeFiles(ctx context.Context, r *run, paths []string, shared bo
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
 			c.changed(l.Path)
-			return check.Result{State: check.OK, Summary: "a copy in place of the link; out of kit-config (" + l.Path + ")"}
+			return check.Result{State: check.OK}.Saying("a copy in place of the link", "out of kit-config ("+l.Path+")")
 		})
 	}
 	c.sync(ctx, commitMessage("remove", linked.StepName, names, r.machine, ""))

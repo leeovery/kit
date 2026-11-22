@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -55,6 +56,35 @@ func TestLogViewOfARunThatDidntFinish(t *testing.T) {
 	want := "kit status · laptop · 2 Jan 2026 03:04:05\n/x.jsonl\n\n✗ Formulae   didn't finish\n\nThe run didn't finish\n"
 	if out.String() != want {
 		t.Errorf("printed\n%q\nwant\n%q", out.String(), want)
+	}
+}
+
+// A summary read back from a run's log shows as it did in the run: kit's
+// parts apart, after dots, and what a check printed whole, dig's
+// semicolons and all, as is a summary logged without parts.
+func TestLogRunKeepsASummarysParts(t *testing.T) {
+	dig := ";; connection timed out; no servers could be reached"
+	fails := "it fails now: ;; timed out; no servers"
+	var records []logs.Record
+	for _, line := range []string{
+		`{"event":"run_started","command":"status","machine":"laptop","steps":[{"name":"dns","title":"dns"},{"name":"db","title":"db"}]}`,
+		`{"event":"step_finished","step":"dns","result":{"state":"ok","summary":"` + dig + `"}}`,
+		`{"event":"step_finished","step":"db","result":{"state":"ok","summary":"declared in laptop; ` + fails + `","parts":["declared in laptop","` + fails + `"]}}`,
+	} {
+		var r logs.Record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, r)
+	}
+	var out bytes.Buffer
+	if err := render.LogRun(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, records); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dns  " + dig + "\n", "db  declared in laptop · " + fails + "\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("printed\n%s\nwant a line\n%s", out.String(), want)
+		}
 	}
 }
 

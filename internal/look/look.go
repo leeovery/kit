@@ -284,23 +284,28 @@ func Fold(indent string, w int, lines ...string) []string {
 
 // Wrapping keeps a dot between a row's parts with the words either side of
 // it, so no line ends or starts with one: its spaces are swapped for
-// unbreaking ones while text's wrapped, and back.
+// unbreaking ones while text's wrapped, and back. It keeps a word that fits
+// a line whole, as a flag such as --visibility-change: lipgloss breaks at
+// every hyphen, so the word's are swapped for unbreaking ones too.
 var (
 	unbreaking = strings.NewReplacer(dot, Dim("\u00a0·\u00a0"))
-	breaking   = strings.NewReplacer("\u00a0", " ")
+	breaking   = strings.NewReplacer("\u00a0", " ", unbreakingHyphen, "-")
 )
+
+const unbreakingHyphen = "\u2011"
 
 // wrap is s, styled, wrapped to w cells, what follows its first hang
 // cells under them on each line after the first: at spaces, or after a /
-// in a path, a word wider than that broken, its style carried on to the
-// lines it goes on to.
+// in a path, a word wider than that broken, after a / or a hyphen where it
+// has one, its style carried on to the lines it goes on to.
 func wrap(s string, w int, hang string) []string {
 	if ansi.StringWidth(s) <= w {
 		return []string{s}
 	}
 	n := len(hang)
-	body := unbreaking.Replace(ansi.TruncateLeft(s, n, ""))
-	lines := strings.Split(lipgloss.Wrap(body, max(w-n, 1), "/"), "\n")
+	room := max(w-n, 1)
+	body := wholeWords(unbreaking.Replace(ansi.TruncateLeft(s, n, "")), room)
+	lines := strings.Split(lipgloss.Wrap(body, room, "/"), "\n")
 	for i, l := range lines {
 		l = breaking.Replace(l)
 		if i == 0 {
@@ -310,6 +315,17 @@ func wrap(s string, w int, hang string) []string {
 		}
 	}
 	return lines
+}
+
+// wholeWords is s with the hyphens of each word no wider than w unbreaking.
+func wholeWords(s string, w int) string {
+	words := strings.Split(s, " ")
+	for i, word := range words {
+		if ansi.StringWidth(word) <= w {
+			words[i] = strings.ReplaceAll(word, "-", unbreakingHyphen)
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // Output is a tool's lines, as it printed them.

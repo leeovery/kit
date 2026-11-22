@@ -1,8 +1,8 @@
 
   CONFIG
   ▲ owner/kit-config
-    make it private: gh repo edit owner/kit-config --visibility private --
-    accept-visibility-change-consequences
+    make it private: gh repo edit owner/kit-config --visibility private
+    --accept-visibility-change-consequences
   ● Packages  102 installed
   ● Settings  105 set
   ● Files  61 linked

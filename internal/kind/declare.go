@@ -58,9 +58,9 @@ const SecretsKind = "secret"
 // Hold has e, a line of k's to declare in scope's declarations, shared or
 // the Mac called mac's, go in its kind's section held for the secret k says
 // installing it needs (Private), which every Mac the line reaches must
-// declare, said saying so; or that k couldn't tell, the line then declared
-// as it is. check judges the line as it'll be declared: nil for no more
-// than that. Refused, what finding out changed on the Mac is put back;
+// declare, said saying so, a part of a summary; or that k couldn't tell,
+// the line then declared as it is. check judges the line as it'll be
+// declared: nil for no more than that. Refused, what finding out changed on the Mac is put back;
 // stopped, it fails, rather than declare what it didn't check.
 func Hold(ctx context.Context, k Kind, cfg *config.Config, scope, mac string, e *config.Entry, check func(config.Entry) error) (said string, err error) {
 	private, ok := k.(Private)
@@ -70,9 +70,9 @@ func Hold(ctx context.Context, k Kind, cfg *config.Config, scope, mac string, e 
 	need, unchecked, err := hold(ctx, private.NeedsSecret, cfg, scope, mac, e, check)
 	switch {
 	case unchecked != nil:
-		said = "; couldn't check whether it needs a secret: " + engine.Reason(unchecked)
+		said = "couldn't check whether it needs a secret: " + engine.Reason(unchecked)
 	case need.Secret != "":
-		said = "; held for " + need.Secret + ": " + need.Why
+		said = "held for " + need.Secret + ": " + need.Why
 	}
 	return said, err
 }
