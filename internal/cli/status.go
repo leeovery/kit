@@ -411,7 +411,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		if needsAccess {
 			// At a terminal, after the step whose card it waits behind; the
 			// hourly run's probes for itself, and kit-app-access comes after
-			// Homebrew's formulae.
+			// it and Homebrew's formulae.
 			if !a.scheduled {
 				step.After = append(step.After, granting.Step)
 			}
@@ -576,7 +576,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	if err != nil {
 		return nil, err
 	}
-	scheduling, err := r.schedulingSteps(a, dirs, raise)
+	scheduling, err := r.schedulingSteps(a, dirs, raise, accessWaits)
 	if err != nil {
 		return nil, err
 	}
@@ -692,8 +692,11 @@ func unhealed(err error, pulled steps.Pulled) error {
 // the hourly launch, opening kit.app to run the kit on kit's PATH nightly,
 // whichever kit applies (steps.LaunchKit), found once Homebrew's formulae
 // are applied; and, after it, the step by hand
-// giving kit.app Full Disk Access, raised at a terminal (raise).
-func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]engine.Step, error) {
+// giving kit.app Full Disk Access, raised at a terminal (raise). In the
+// hourly run, that step also comes after the kinds whose programs need it
+// (held): one refused records kit.app without it, which the step's check
+// must read after, not before.
+func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise, held []string) ([]engine.Step, error) {
 	self, err := a.Self()
 	if err != nil {
 		return nil, fmt.Errorf("find kit: %w", err)
@@ -714,6 +717,9 @@ func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]e
 		StateDir: dirs.State, Raise: raise, Now: a.Now,
 	})
 	access.After = []string{steps.LaunchName}
+	if a.scheduled {
+		access.After = append(access.After, held...)
+	}
 	return []engine.Step{launch, access}, nil
 }
 
