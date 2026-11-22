@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/state"
 )
 
@@ -62,9 +63,9 @@ func Update(stateDir string, change func(*Record)) error {
 }
 
 // Quieten marks each of res's items quiet while its time hasn't come, saying
-// when it was first seen: left by hand, for good; new, first seen under
-// Grace ago, or now; snoozed, until a time still ahead; temporary,
-// installed so under TemporaryFor ago.
+// when it was first seen: installed by hand and left so, for good; new,
+// first seen under Grace ago, or now; snoozed, until a time still ahead;
+// temporary, installed so under TemporaryFor ago.
 // A step whose items are all quiet stands ok. One whose check couldn't look,
 // as macOS hasn't let it (check.Result's Refused), isn't drift, so is never
 // quiet. Nor is an item applying the step was given to act on, by id in
@@ -84,7 +85,7 @@ func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) c
 		switch {
 		case tried[it.ID] && it.Action != "":
 			loud, left = true, true
-		case !r.Left[it.ID].IsZero():
+		case it.State == kind.ByHand && !r.Left[it.ID].IsZero():
 			items[i].Quiet = Left
 		case r.Snoozed[it.ID].After(now):
 			items[i].Quiet = Snoozed
@@ -110,17 +111,20 @@ func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) c
 // wasn't seen before. For each kind whose check ran, standing ok or needing
 // attention, it forgets what's no longer drifting, what's left by hand
 // among it; a kind not checked, or whose check failed, was deferred or
-// couldn't look, keeps what it had. Snoozes that have ended go.
+// couldn't look, keeps what it had, as does one that couldn't look at all
+// it looks for (check.Result's Partial), of what it didn't report. A leave
+// ends once its item is reported otherwise than installed by hand.
+// Snoozes that have ended go.
 func (r *Record) Seen(results map[string]check.Result, now time.Time) {
-	present := make(map[string]bool)
+	present := make(map[string]string)
 	ran := make(map[string]bool)
-	for kind, res := range results {
+	for kindName, res := range results {
 		if _, refused := res.Refused(); refused || res.State != check.OK && res.State != check.Attention {
 			continue
 		}
-		ran[kind] = true
+		ran[kindName] = !res.Partial
 		for _, it := range res.Items {
-			present[it.ID] = true
+			present[it.ID] = it.State
 		}
 	}
 	if r.FirstSeen == nil {
@@ -132,13 +136,17 @@ func (r *Record) Seen(results map[string]check.Result, now time.Time) {
 		}
 	}
 	gone := func(id string) bool {
-		kind, _, _ := strings.Cut(id, ":")
-		return ran[kind] && !present[id]
+		kindName, _, _ := strings.Cut(id, ":")
+		_, there := present[id]
+		return ran[kindName] && !there
 	}
 	maps.DeleteFunc(r.FirstSeen, func(id string, _ time.Time) bool { return gone(id) })
 	maps.DeleteFunc(r.Snoozed, func(id string, until time.Time) bool { return gone(id) || !until.After(now) })
 	maps.DeleteFunc(r.Temporary, func(id string, _ time.Time) bool { return gone(id) })
-	maps.DeleteFunc(r.Left, func(id string, _ time.Time) bool { return gone(id) })
+	maps.DeleteFunc(r.Left, func(id string, _ time.Time) bool {
+		state, there := present[id]
+		return gone(id) || there && state != kind.ByHand
+	})
 }
 
 // Forget forgets everything of the kinds named but what's left by hand:
@@ -146,8 +154,8 @@ func (r *Record) Seen(results map[string]check.Result, now time.Time) {
 // old dates when they're looked after again.
 func (r *Record) Forget(kinds []string) {
 	of := func(id string, _ time.Time) bool {
-		kind, _, _ := strings.Cut(id, ":")
-		return slices.Contains(kinds, kind)
+		kindName, _, _ := strings.Cut(id, ":")
+		return slices.Contains(kinds, kindName)
 	}
 	maps.DeleteFunc(r.FirstSeen, of)
 	maps.DeleteFunc(r.Snoozed, of)
@@ -178,6 +186,12 @@ func (r *Record) Leave(now time.Time, ids ...string) {
 	for _, id := range ids {
 		r.Left[id] = now
 	}
+}
+
+// Unleave forgets that the item id was left by hand, as another answer
+// about it replaces the leave.
+func (r *Record) Unleave(id string) {
+	delete(r.Left, id)
 }
 
 // Leave leaves each item of ids installed by hand, in the record in the

@@ -35,11 +35,19 @@ type HandApps struct {
 // (pkgutil's receipts); each with the cask that installs it, if one does,
 // as Homebrew's catalogue has it (match). Without Homebrew, every app but
 // those is by hand, and none has a cask. With no app but those, Homebrew
-// is asked nothing.
+// is asked nothing; pkgutil only while an app is left that a cask's
+// package might have installed.
 func (h *Homebrew) AppsByHand(ctx context.Context) (HandApps, error) {
+	return h.appsByHand(ctx, false)
+}
+
+// appsByHand is AppsByHand; with casksOnly, only the apps a cask installs,
+// the rest dropped before pkgutil's asked about any: none, when the
+// catalogue can't be read.
+func (h *Homebrew) appsByHand(ctx context.Context, casksOnly bool) (HandApps, error) {
 	var found HandApps
 	for _, app := range apps.Installed(h.AppDirs) {
-		if id := apps.BundleID(app); h.byHand(app, id, Casked{}, nil) {
+		if id := apps.BundleID(app); !others(app, id) {
 			found.Apps = append(found.Apps, ByHand{Path: app, Name: strings.TrimSuffix(filepath.Base(app), ".app"), ID: id})
 		}
 	}
@@ -50,25 +58,37 @@ func (h *Homebrew) AppsByHand(ctx context.Context) (HandApps, error) {
 	if err != nil {
 		return HandApps{}, fmt.Errorf("find the casks' apps: %w", err)
 	}
+	found.Apps = slices.DeleteFunc(found.Apps, func(app ByHand) bool { return h.putBy(app.Path, casked) })
+	if len(found.Apps) == 0 {
+		return found, nil
+	}
+	if found.Unmatched = h.matched(ctx, found.Apps); casksOnly {
+		found.Apps = slices.DeleteFunc(found.Apps, func(app ByHand) bool { return app.Cask == "" })
+	}
+	if len(found.Apps) == 0 || len(casked.Receipts) == 0 {
+		return found, nil
+	}
 	packaged, err := installedBy(ctx, h.run, casked.Receipts)
 	if err != nil {
 		return HandApps{}, fmt.Errorf("find the casks' packages' apps: %w", err)
 	}
-	found.Apps = slices.DeleteFunc(found.Apps, func(app ByHand) bool { return !h.byHand(app.Path, app.ID, casked, packaged) })
-	if len(found.Apps) == 0 {
-		return found, nil
-	}
+	found.Apps = slices.DeleteFunc(found.Apps, func(app ByHand) bool { return packaged[app.Path] })
+	return found, nil
+}
+
+// matched gives each of hand, the apps installed by hand, the cask that
+// installs it, as Homebrew's catalogue has it, or says why it can't.
+func (h *Homebrew) matched(ctx context.Context, hand []ByHand) error {
 	cat, err := h.catalogue(ctx)
 	if err != nil {
-		found.Unmatched = err
-		return found, nil
+		return err
 	}
-	for i, app := range found.Apps {
+	for i, app := range hand {
 		if at, err := filepath.Rel(h.AppDirs[0], app.Path); err == nil && filepath.IsLocal(at) {
-			found.Apps[i].Cask, _ = cat.match(at, app.ID)
+			hand[i].Cask, _ = cat.match(at, app.ID)
 		}
 	}
-	return found, nil
+	return nil
 }
 
 // InstalledByHand finds the apps installed by hand that a cask installs
@@ -76,7 +96,7 @@ func (h *Homebrew) AppsByHand(ctx context.Context) (HandApps, error) {
 // Example.app: none, and why, when which casks install them couldn't be
 // told.
 func (c casks) InstalledByHand(ctx context.Context) (map[string]string, error) {
-	hand, err := c.AppsByHand(ctx)
+	hand, err := c.appsByHand(ctx, true)
 	if err == nil {
 		err = hand.Unmatched
 	}
@@ -85,26 +105,24 @@ func (c casks) InstalledByHand(ctx context.Context) (map[string]string, error) {
 	}
 	found := map[string]string{}
 	for _, app := range hand.Apps {
-		if _, had := found[app.Cask]; app.Cask != "" && !had {
+		if _, had := found[app.Cask]; !had {
 			found[app.Cask] = filepath.Base(app.Path)
 		}
 	}
 	return found, nil
 }
 
-// byHand reports whether the app at app, whose bundle id is id, was
-// installed by hand: not Apple's, nor the App Store's, nor Chrome's for a
-// website, nor put in place by a cask, as casked and packaged, the apps
-// the casks' packages installed, say.
-func (h *Homebrew) byHand(app, id string, casked Casked, packaged map[string]bool) bool {
+// others reports whether the app at app, whose bundle id is id, is another's
+// than the person's: Apple's, the App Store's, or Chrome's for a website.
+func others(app, id string) bool {
+	return strings.HasPrefix(id, "com.apple.") || strings.HasPrefix(id, chromeApp) || fromAppStore(app)
+}
+
+// putBy reports whether a cask put the app at app in place, as its app or
+// in its suite's folder, as casked says.
+func (h *Homebrew) putBy(app string, casked Casked) bool {
 	inSuite := slices.Contains(h.AppDirs, filepath.Dir(filepath.Dir(app))) && slices.Contains(casked.Suites, filepath.Base(filepath.Dir(app)))
-	switch {
-	case strings.HasPrefix(id, "com.apple."), strings.HasPrefix(id, chromeApp), fromAppStore(app):
-		return false
-	case slices.Contains(casked.Apps, filepath.Base(app)), inSuite, packaged[app]:
-		return false
-	}
-	return true
+	return inSuite || slices.Contains(casked.Apps, filepath.Base(app))
 }
 
 // chromeApp starts the bundle id of each app Chrome makes for a website,

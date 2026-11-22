@@ -1555,13 +1555,19 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 		finished(20, "brew", check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
 			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Detail: "installed, not declared"}}}),
 		finished(25, "cask", check.Result{State: check.Attention, Summary: "1 declared, all installed", Items: []check.Item{
-			{ID: "cask:editor", Name: "editor", State: "by-hand", Detail: "installed by hand as Editor.app"}}}),
+			{ID: "cask:editor", Name: "editor", State: "by-hand", Detail: "installed by hand as Editor.app"},
+			{ID: "cask:spaceman", Name: "spaceman", State: "by-hand", Detail: "installed by hand as Spaceman.app", Quiet: "left"},
+			{ID: "cask:zoom", Name: "zoom", State: "by-hand", Detail: "installed by hand as zoom.us.app", Quiet: "snoozed"}}}),
 		finished(30, "mas", check.Result{State: check.OK, Summary: "2 declared, 1 installed", Items: []check.Item{
 			{ID: "mas:bear", Name: "bear", State: "missing", Quiet: "new", Detail: "needs an administrator's password"}}}),
 	)
 	face, out, _ := applyAt(160, 64, time.Minute, events)
-	if log := strings.Join(logOf(screen(out.String()), 160), "\n"); !strings.Contains(log, "● App Store apps: 2 declared, 1 installed\n            │ bear · needs an administrator's password") {
+	log := strings.Join(logOf(screen(out.String()), 160), "\n")
+	if !strings.Contains(log, "● App Store apps: 2 declared, 1 installed\n            │ bear · needs an administrator's password") {
 		t.Errorf("the log is\n%s\nwant Bear waiting under the App Store's line", log)
+	}
+	if strings.Contains(log, "spaceman") || strings.Contains(log, "zoom") {
+		t.Errorf("the log is\n%s\nwant nothing of what's installed by hand and quiet", log)
 	}
 	face.Emit(event.RunFinished{Time: after(40), Duration: 40 * time.Second, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
 	if err := face.Close(); err != nil {
@@ -1570,11 +1576,18 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 	record := screen(out.String())
 	for _, want := range []string{
 		"\n  NEEDS YOU  2\n  ▲ Homebrew formulae  3 declared, all installed\n  │ ffmpeg · installed, not declared\n",
-		"\n  ▲ Homebrew casks  1 declared, all installed\n  │ editor · installed by hand as Editor.app\n",
+		"\n  ▲ Homebrew casks  1 declared, all installed\n  │ editor · installed by hand as Editor.app, not declared\n  │ → kit reconcile\n",
 		"\n  ● App Store apps  2 declared, 1 installed\n  │ bear · needs an administrator's password\n",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
+		}
+	}
+	// What's installed by hand and quiet, left or snoozed, is drift that
+	// doesn't need attention: nothing waits on it.
+	for _, quiet := range []string{"spaceman", "zoom"} {
+		if strings.Contains(record, quiet) {
+			t.Errorf("the record is\n%s\nwant nothing of %s, quiet", record, quiet)
 		}
 	}
 }
