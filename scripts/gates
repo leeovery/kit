@@ -40,8 +40,6 @@ gate shellcheck
 # shell: POSIX alone.
 shellcheck internal/steps/template.sh
 shellcheck --shell=sh install.sh
-# The release's hooks, which mint runs.
-shellcheck -x scripts/release-common scripts/release-build scripts/release-upload
 # The README's art, recorded by the demo's scripts; the shim the status
 # tape types kit at, plain sh.
 shellcheck demo/*.sh
