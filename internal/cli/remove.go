@@ -324,6 +324,16 @@ func couldnt(w kind.Words) string {
 	return "couldn't " + strings.ToLower(w.Label[:1]) + w.Label[1:] + ": "
 }
 
+// saysCouldnt is reason, why doing w failed, headed as couldnt heads it,
+// unless it says so already, as an install's own failure does: "couldn't
+// install fetcher: …".
+func saysCouldnt(w kind.Words, reason string) string {
+	if strings.HasPrefix(reason, "couldn't ") {
+		return reason
+	}
+	return couldnt(w) + reason
+}
+
 // removeOne uninstalls name, when it's installed, as how does, else as its
 // kind does, and takes it out of this Mac's file, and the shared one with
 // shared.

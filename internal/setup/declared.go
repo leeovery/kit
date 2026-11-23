@@ -12,6 +12,7 @@ import (
 
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/drift"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
@@ -95,10 +96,13 @@ func counted(ps []snapshot.Part) check.Result {
 // refused after.
 type question struct {
 	name, title, flags string
-	answered           func(rec record) (string, bool)
+	answered           func(ctx context.Context, rec record) (string, bool)
 	anew               func(rec record) bool
 	nothing            func(ctx context.Context, found *snapshot.Snapshot) (string, bool)
 	ask                func(ctx context.Context, found *snapshot.Snapshot) error
+	// edited, when set, is how a refusal once the edits are made says the
+	// answer recorded: else by the title, and the answer as its row says it.
+	edited func(ctx context.Context, rec record) string
 }
 
 // anew reports whether a flag gives an answer, given, other than the one
@@ -112,7 +116,7 @@ func (s *Setup) questionStep(q question) engine.Step {
 		Name: q.name, Title: q.title,
 		Check: func(ctx context.Context) check.Result {
 			rec := s.record()
-			said, ok := q.answered(rec)
+			said, ok := q.answered(ctx, rec)
 			switch {
 			case q.anew(rec):
 				return check.Result{State: check.Attention, Summary: "answered anew"}
@@ -130,11 +134,15 @@ func (s *Setup) questionStep(q question) engine.Step {
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
 			if rec := s.record(); rec.Declared && q.anew(rec) {
-				said, ok := q.answered(rec)
+				said, ok := q.answered(ctx, rec)
 				if !ok {
 					said = "unasked"
 				}
-				return fmt.Errorf("kit setup, part-way, has made its edits in kit-config, %s %s: run kit setup again without %s", strings.ToLower(q.title), said, q.flags)
+				made := strings.ToLower(q.title[:1]) + q.title[1:] + " " + said
+				if q.edited != nil {
+					made = q.edited(ctx, rec)
+				}
+				return fmt.Errorf("kit setup, part-way, has made its edits in kit-config, %s: run kit setup again without %s", made, q.flags)
 			}
 			found, _ := s.snapshot()
 			return q.ask(ctx, found)
@@ -164,7 +172,7 @@ func (s *Setup) dataStep() engine.Step {
 	}
 	return s.questionStep(question{
 		name: DataStep, title: snapshot.FoldersLabel, flags: "--restore or --no-restore",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			if rec.Restore == nil {
 				return "", false
 			}
@@ -213,17 +221,23 @@ func (s *Setup) restoreAnswer(ctx context.Context, found *snapshot.Snapshot) ([]
 
 // ticked asks which of items to keep: those kept, by name.
 func (s *Setup) ticked(ctx context.Context, step, question string, items []Item) ([]string, error) {
+	return s.tickedAs(ctx, step, question, items, func(i int) string { return items[i].Name })
+}
+
+// tickedAs asks which of items to keep: those kept, each as key names the
+// item at its index.
+func (s *Setup) tickedAs(ctx context.Context, step, question string, items []Item, key func(i int) string) ([]string, error) {
 	kept, err := s.Ask.Tick(ctx, step, question, items)
 	if err != nil {
 		return nil, err
 	}
-	names := []string{}
-	for i, it := range items {
+	keys := []string{}
+	for i := range items {
 		if i < len(kept) && kept[i] {
-			names = append(names, it.Name)
+			keys = append(keys, key(i))
 		}
 	}
-	return names, nil
+	return keys, nil
 }
 
 // prefsStep asks whether apps' settings are saved every night, suggested
@@ -235,7 +249,7 @@ func (s *Setup) ticked(ctx context.Context, step, question string, items []Item)
 func (s *Setup) prefsStep() engine.Step {
 	return s.questionStep(question{
 		name: PrefsStep, title: "Apps' settings", flags: "--prefs or --no-prefs",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			switch {
 			case rec.Prefs == nil:
 				return "", false
@@ -281,7 +295,7 @@ func (s *Setup) prefsAnswer(ctx context.Context) (bool, error) {
 func (s *Setup) filesStep() engine.Step {
 	return s.questionStep(question{
 		name: FilesStep, title: "Linked files", flags: "--link or --no-link",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			if rec.Link == nil {
 				return "", false
 			}
@@ -329,7 +343,7 @@ const NothingNew = "nothing: kit-config is new"
 func (s *Setup) installStep() engine.Step {
 	return s.questionStep(question{
 		name: InstallStep, title: "To install", flags: "--apply or --no-apply",
-		answered: func(rec record) (string, bool) {
+		answered: func(_ context.Context, rec record) (string, bool) {
 			switch {
 			case rec.Apply == nil:
 				return "", false
@@ -434,7 +448,7 @@ func (s *Setup) missing(ctx context.Context) *toInstall {
 	if m.Config == nil {
 		return nil
 	}
-	deps := &kind.Deps{Run: m.Run, Home: m.Home, ConfigHome: m.ConfigHome, StateDir: m.Dirs.State, AppDirs: m.AppDirs}
+	deps := kindDeps(m)
 	t := &toInstall{names: []string{}}
 	for _, d := range kinds.All {
 		k := d.New(deps)
@@ -468,6 +482,11 @@ func (s *Setup) missing(ctx context.Context) *toInstall {
 	s.toInstall = t
 	s.mu.Unlock()
 	return t
+}
+
+// kindDeps are what m's kinds are made from.
+func kindDeps(m snapshot.Mac) *kind.Deps {
+	return &kind.Deps{Run: m.Run, Home: m.Home, ConfigHome: m.ConfigHome, StateDir: m.Dirs.State, AppDirs: m.AppDirs}
 }
 
 // oneLine is why, its lines run together, to sit in a question's line.
@@ -512,7 +531,14 @@ func (s *Setup) commitStep() engine.Step {
 			if rec.Link != nil {
 				d.Link = *rec.Link
 			}
+			var left []string
+			d.Adopt, left = s.adopting(ctx, rec)
 			res := s.Declare(ctx, d)
+			if res.State != check.Failed && len(left) > 0 {
+				if err := drift.Leave(s.Dirs.State, s.Now(), left...); err != nil {
+					return fmt.Errorf("leave apps installed by hand: %w", err)
+				}
+			}
 			if res.State != check.OK {
 				res = s.stopped(res)
 			}
@@ -546,27 +572,31 @@ func (s *Setup) stopped(res check.Result) check.Result {
 	return res.Adding(said...)
 }
 
-// byHandStep says which apps were installed by hand: kit leaves them to
-// the person, to install through Homebrew or the App Store should kit set
-// the Mac up again.
+// byHandStep says which apps are left installed by hand: those no cask
+// installs, and those Homebrew wasn't to take over. kit leaves them to the
+// person, to install through Homebrew or the App Store should kit set the
+// Mac up again.
 func (s *Setup) byHandStep() engine.Step {
 	return engine.Step{
 		Name: ByHandStep, Title: "Installed by hand",
-		Check: func(context.Context) check.Result {
+		Check: func(ctx context.Context) check.Result {
 			found, _ := s.snapshot()
 			switch {
 			case found == nil:
 				return check.Result{State: check.Attention, Summary: "not looked at yet"}
 			case found.ByHandErr != nil:
 				return check.Result{State: check.OK, Summary: "couldn't tell which: " + found.ByHandErr.Error()}
-			case len(found.ByHand) == 0:
+			}
+			hand := s.handApps(ctx)
+			left := s.leftByHand(found, hand)
+			if len(left) == 0 {
 				return check.Result{State: check.OK, Summary: "none"}
 			}
-			res := check.Result{State: check.OK, Summary: fmt.Sprintf("%d, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there", len(found.ByHand))}
-			for _, app := range found.ByHand {
-				res.Items = append(res.Items, check.Item{ID: ByHandStep + ":" + app, Name: app, State: "installed by hand"})
+			said := fmt.Sprintf("%d, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there", len(left))
+			if hand.err != nil {
+				said += "; kit couldn't tell which Homebrew can take over: " + oneLine(hand.err.Error())
 			}
-			return res
+			return check.Result{State: check.OK, Summary: said, Items: left}
 		},
 	}
 }

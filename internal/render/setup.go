@@ -487,7 +487,11 @@ func (f *SetupFace) byHand(width int) (block, bool) {
 		lines[1], said = look.Header("Installed by hand", ""), res.Summary
 	}
 	for _, it := range res.Items {
-		lines = append(lines, look.Rows("  ", width, look.Row{State: look.Skipped, Name: it.Name})...)
+		row := look.Row{State: look.Skipped, Name: it.Name}
+		if strings.HasPrefix(it.Detail, setup.AddCask) {
+			row.Says = look.Cmd(it.Detail) + look.Muted(" takes it over later")
+		}
+		lines = append(lines, look.Rows("  ", width, row)...)
 	}
 	return block{state: look.Skipped, lines: append(lines, margined(toDo(width-2, said, ""))...)}, true
 }

@@ -118,6 +118,177 @@ app-store "Sign in to the App Store" --before mas
 kit then asks for the sign-in partway through the run. If an install still finds nobody signed
 in, kit asks again on the next run.
 
+## A cask fails because its app is already there
+
+kit has Homebrew take over or replace an app already in Applications only if it's the cask's
+own, at a version the cask accepts. If it isn't, the cask fails, and the app stays as it is.
+The version depends on the cask:
+
+| If the cask | It accepts |
+|---|---|
+| Updates itself, no package | Its major or later, kept as it is |
+| Doesn't, or has a package | Its version, or an older copy of its major |
+| Is a line, as `@14` or `@esr` | A copy of its own line only |
+| Is a channel, as `@beta` | A prerelease, as below |
+
+kit replaces an older copy: it deletes the app, and the cask's copy goes in its place. A
+prerelease app, such as a beta, goes only to a channel's cask if one is there. A channel that
+updates itself, with no package, takes a prerelease of its major. Any other channel takes only
+its exact version.
+
+The reason comes after the start of the message:
+
+| Command | Message starts |
+|---|---|
+| `kit apply` | `couldn't install <cask>:` |
+| `kit reconcile --install` | `couldn't install <cask>:` |
+| `kit cask add` | `couldn't install:` |
+| `kit reconcile --adopt` | `couldn't install:` |
+
+With four casks or more failing, `kit apply` starts `couldn't install 4 of 6:` instead. Two
+reasons or more are joined with `;`. The fix for each is the same: choose which copy you
+keep.
+
+### The app isn't the cask's
+
+```text
+Spaceman.app is already in /Applications and isn't the cask's (com.example.Spaceman)
+```
+
+**Cause:** the cask doesn't name the bundle id of the app there. A fork with the same name
+does this. If the message ends `(no bundle id)`, the app names no bundle id at all.
+
+### The App Store's copy is there
+
+```text
+Slack.app is already in /Applications and is the App Store's
+```
+
+**Cause:** the app came from the App Store. kit never hands the App Store's copy to Homebrew,
+even if the cask names its bundle id.
+
+### Another version is there
+
+```text
+Charles.app is 4.6.8 and the cask's is 5.2.3: kit replaces only an older copy of the same major version
+```
+
+**Cause:** the cask doesn't update itself, or installs through a package. kit replaces the
+app only if it's the same version or an older copy of the same major version. An earlier
+major version stays, such as Charles 4 beside the cask's 5. The message may add why:
+
+| The message ends | Because |
+|---|---|
+| `this one is newer` | The app is newer than the cask |
+| `this one is a prerelease` | The app is a beta or the like |
+| `the cask's is a prerelease` | The cask is a beta or the like |
+| `latest says no version` | The cask's version is `latest` |
+| `can't tell whether this one is` | kit can't compare the versions |
+
+If you want to keep an earlier major version, Homebrew may have a cask for it, such as
+`charles@4`. Declare that one instead.
+
+### An earlier major version is there
+
+```text
+BBEdit.app is 14.6.2 and the cask's is 16.1: kit takes over only a copy of the cask's major version or later, and bbedit@14 is this one's line
+```
+
+**Cause:** the cask updates itself, so it takes over a copy of its major version or later,
+a newer one too. An earlier major version may be one you have no licence past, so kit leaves
+it. The message names the cask for your version, if Homebrew has one.
+
+**Fix:** to keep your version, declare its line in place of the cask:
+
+```bash
+kit reconcile cask:bbedit --undeclare
+kit cask add bbedit@14
+```
+
+Or undeclare the cask, and keep the app by hand.
+
+### A later version is there, beside a line
+
+```text
+BBEdit.app is 16.1 and the cask's is 14.6.9: kit takes over by a line only a copy of that line, and bbedit is this one's
+```
+
+**Cause:** you declared a line, such as `bbedit@14`, and the app is a copy of another line or
+the main cask. A line takes over only its own copies. If the message ends `no cask here is
+this one's`, no cask matches the app.
+
+**Fix:** declare the cask the message names in place of the line, as above. Or undeclare the
+line, and keep the app by hand.
+
+### kit can't compare the versions
+
+The message ends `can't tell whether this one is`. That happens in these cases:
+
+- the app says no version kit can read;
+- the cask's version is `latest`, and a line of the cask is there too;
+- one version is a build number, such as Sublime Text's 4215, and the other has dots;
+- the app's build number is below the cask's, such as 4200 beside 4215.
+
+A build number below the cask's fails `kit apply` for a declared cask until the app updates
+itself past it. Run `kit apply cask` again then.
+
+### A prerelease is there
+
+```text
+Thaw.app is 3.0.0-beta.7 and the cask's is 2.1.0: kit takes over a prerelease only by its channel's cask, and thaw@beta is this one's
+```
+
+**Cause:** the app is a prerelease, and Homebrew has a channel's cask for it, such as a beta.
+kit hands a prerelease only to that cask. The message may end otherwise:
+
+| The message ends | Because |
+|---|---|
+| `none here is at its major version` | No channel matches the app's major version |
+| `lamp@beta and lamp@nightly are as near it` | Two channels match it equally |
+
+A prerelease beside a channel whose version has no major version, such as `ghostty@tip`, gets
+no offer.
+
+**Fix:** declare the channel's cask in place of this one, as for a line above:
+`kit cask add thaw@beta`. If two match, pick one. Or undeclare the cask, and keep the app by
+hand.
+
+### kit can't look at the app
+
+```text
+can't tell whose Spaceman.app in /Applications is: …
+```
+
+**Cause:** kit couldn't read the app, for the reason after the last colon. Put that right,
+then run `kit apply cask`.
+
+### Homebrew says there's already an App
+
+The message holds Homebrew's own words, `It seems there is already an App at`.
+
+**Cause:** kit couldn't check the cask, so Homebrew tried to install it without taking the app
+over. That happens for these casks:
+
+- a cask from a tap;
+- a cask that puts more than apps in place, such as a font;
+- a cask whose app goes outside Applications;
+- a cask missing from Homebrew's catalogue;
+- every cask, if the catalogue can't be read.
+
+### The fix: choose which copy you keep
+
+| To keep | Do this |
+|---|---|
+| The cask's | Move the app to the Bin, then `kit apply cask` |
+| Yours | `kit reconcile cask:<name> --undeclare` |
+
+If `[app store apps]` declares the app in the way, moving it to the Bin isn't enough:
+`kit apply` installs it again. Run `kit mas remove <app>` instead, which uninstalls it and takes
+its line out.
+
+If you keep yours, the app stays as it is. If the cask is in the shared file, add `--shared`.
+That takes the cask off every Mac: no answer keeps a shared cask off one Mac only.
+
 ## kit.app needs Full Disk Access again
 
 `kit status` shows the step `kit-app-access` as `not given to this build of kit.app`.

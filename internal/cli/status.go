@@ -150,7 +150,7 @@ type run struct {
 	// once the run's steps are known.
 	placing map[string]kind.Placing
 	repo    gitrepo.Repo
-	record  drift.Record
+	record  drift.Records
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
@@ -168,10 +168,7 @@ func (r *run) remember(report engine.Report) error {
 		results[steps.ConfigSyncName] = pullOf(res)
 	}
 	unmanaged := slices.DeleteFunc(slices.Clone(r.allKinds), func(k string) bool { return slices.Contains(r.kinds, k) })
-	return drift.Update(r.stateDir, func(rec *drift.Record) {
-		rec.Seen(results, r.now)
-		rec.Forget(unmanaged)
-	})
+	return drift.Remember(r.stateDir, results, r.now, unmanaged)
 }
 
 func (r *run) options(a *app, only []string) engine.Options {
@@ -433,7 +430,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		kindSteps = append(kindSteps, quietened(step, record, now))
 		r.kinds = append(r.kinds, d.Name)
 		r.drift = append(r.drift, d.Name)
-		r.drifters[d.Name] = kindDrifter{k: k, list: list, installing: d.Installs(), removing: d.Removes(), held: func() []kind.Held { return r.placing[d.Name].Held }}
+		r.drifters[d.Name] = kindDrifter{k: k, list: list, installing: d.Installs(), removing: d.Removes(), tool: d.Tool, held: func() []kind.Held { return r.placing[d.Name].Held }}
 		needed = withNeeded(needed, d, deps)
 	}
 	// One needing an administrator's password, as installing Homebrew
@@ -904,7 +901,7 @@ func (a *app) configHome() string {
 // the drift record says: new for a day, snoozed, or a temporary install;
 // but never what applying it was given to act on in the run and left still
 // to act on.
-func quietened(step engine.Step, record drift.Record, now time.Time) engine.Step {
+func quietened(step engine.Step, record drift.Records, now time.Time) engine.Step {
 	checks, applies := step.Check, step.Apply
 	acted := &tried{}
 	step.Check = func(ctx context.Context) check.Result {

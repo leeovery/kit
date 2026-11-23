@@ -131,15 +131,40 @@ func BundleID(app string) string {
 
 // bundleID is BundleID, or why its Info.plist doesn't read.
 func bundleID(app string) (string, error) {
+	info, err := infoOf(app)
+	id, _ := info["CFBundleIdentifier"].(string)
+	return id, err
+}
+
+// Version is the version of the app at app, from its Info.plist: the one
+// people are shown, as in 4.6.8; its build's, when only that starts with a
+// number, as Sublime Text shows Build 4215 for 4215; else the one shown, as
+// it is: "" when it says neither.
+func Version(app string) string {
+	info, _ := infoOf(app)
+	shown, _ := info["CFBundleShortVersionString"].(string)
+	build, _ := info["CFBundleVersion"].(string)
+	if !startsWithNumber(shown) && startsWithNumber(build) {
+		return build
+	}
+	return shown
+}
+
+// startsWithNumber reports whether s starts with a digit.
+func startsWithNumber(s string) bool {
+	return s != "" && s[0] >= '0' && s[0] <= '9'
+}
+
+// infoOf is what the app at app's Info.plist says, or why it doesn't read.
+func infoOf(app string) (map[string]any, error) {
 	data, err := os.ReadFile(filepath.Join(app, "Contents", "Info.plist"))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	v, err := plist.Decode(data)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	m, _ := v.(map[string]any)
-	id, _ := m["CFBundleIdentifier"].(string)
-	return id, nil
+	info, _ := v.(map[string]any)
+	return info, nil
 }

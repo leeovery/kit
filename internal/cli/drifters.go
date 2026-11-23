@@ -49,6 +49,7 @@ type choice struct {
 // The words of the choices more than one drifter offers.
 var (
 	declaring   = kind.Words{Label: "Declare", Doing: "declaring"}
+	takingOver  = kind.Words{Label: "Adopt", Doing: "adopting"}
 	keepingMacs = kind.Words{Label: "Keep the Mac's", Does: "declared as it is now", Doing: "declaring"}
 	committing  = kind.Words{Label: "Commit", Doing: "committing"}
 	reverting   = kind.Words{Label: "Revert", Doing: "putting back"}
@@ -91,20 +92,23 @@ func choiceActions(choices []choice) []string {
 }
 
 // kindDrifter is a kind's drift: what's installed and not declared, or
-// declared and not installed.
+// declared and not installed, or installed by hand that it could take
+// over.
 type kindDrifter struct {
 	k    kind.Kind
 	list config.List
 	// installing and removing are putting one of its things on the Mac
-	// and taking one off, in its kind's words.
+	// and taking one off, in its kind's words; tool, what installs them, as
+	// in Homebrew.
 	installing, removing kind.Words
+	tool                 string
 	// held are its sections holding their lines back, as the run placed
 	// them.
 	held func() []kind.Held
 }
 
 func (d kindDrifter) check(ctx context.Context) check.Result {
-	return kind.Compare(ctx, d.k, d.list)
+	return kind.Drift(ctx, d.k, d.list)
 }
 
 // choices are what can be done about it.
@@ -144,6 +148,17 @@ func (d kindDrifter) choices(it check.Item) []choice {
 			all = append(all, choice{action: adopt, words: keepingMacs})
 		}
 		all = append(all, snoozeChoice)
+	case kind.ByHand:
+		// Never removed: kit deletes nothing it didn't install.
+		// One set of words for both: "everywhere", after the label, tells
+		// them apart, and longer words would run past a terminal's width.
+		takes := does(takingOver, "declare it; "+d.tool+" takes it over as it is, or updates an older copy")
+		all = []choice{
+			{action: adopt, words: takes},
+			{action: adopt, words: takes, shared: true},
+			{action: leave, words: kind.Words{Label: "Leave by hand", Does: "leave it installed by hand, and stop asking", Doing: "leaving"}},
+			snoozeChoice,
+		}
 	default:
 		all = []choice{snoozeChoice}
 	}
@@ -151,8 +166,11 @@ func (d kindDrifter) choices(it check.Item) []choice {
 }
 
 func (d kindDrifter) describe(it check.Item) string {
-	if _, reverts := d.k.(kind.Reverter); reverts && it.State == kind.Extra {
+	switch _, reverts := d.k.(kind.Reverter); {
+	case reverts && it.State == kind.Extra:
 		return "changed on this Mac, not declared"
+	case it.State == kind.ByHand:
+		return it.Detail + ", not declared"
 	}
 	return map[string]string{
 		kind.Extra:            d.installing.Done + ", not declared",
@@ -199,7 +217,7 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared, nil)
 	case install:
 		if err := kind.InstallDeclared(event.WithChanging(ctx), d.k, d.list, d.held(), []string{dec.item.Name}); err != nil {
-			return check.Result{State: check.Failed, Reason: couldnt(d.installing) + engine.Reason(err)}
+			return check.Result{State: check.Failed, Reason: saysCouldnt(d.installing, engine.Reason(err))}
 		}
 		return check.Result{State: check.OK, Summary: d.installing.Done}
 	}

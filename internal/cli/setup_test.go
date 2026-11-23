@@ -245,6 +245,61 @@ func TestSetupWithoutATerminal(t *testing.T) {
 	}
 }
 
+// withHandApps is a Mac in use with Homebrew, a cask installed, and two
+// apps installed by hand, the editor's and the tally's casks installing
+// them, and the Kubius, which no cask installs.
+func withHandApps(t *testing.T) *world {
+	t.Helper()
+	w := inUse(t, map[string]bool{})
+	w.creates(t)
+	f := w.fake
+	f.On("brew", "list", "--formula", "--full-name", "-1")
+	f.On("brew", "leaves")
+	f.On("brew", "leaves", "--installed-on-request")
+	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n")
+	w.caskroom(t, map[string]string{"ghostty": "Ghostty.app"})
+	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
+{"casks": {"editor": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Editor.app"]]]}, "tally": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.tally"}], [":app", ["Tally.app"]]]}}}`)
+	w.installApp(t, "Editor", "com.example.editor")
+	w.installApp(t, "Tally", "com.example.tally")
+	w.installApp(t, "Kubius", "com.example.kubius")
+	w.expectCommit(t, commit{
+		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "shared", "laptop"},
+		files: []string{"kit.toml", "laptop/declarations", "shared/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00?? shared/declarations\x00",
+	})
+	return w
+}
+
+// Without a terminal, which apps installed by hand Homebrew takes over is
+// its flags' to answer, each cask named with its app. Those given are
+// declared with the snapshot's casks, once each; the rest are left by
+// hand, so kit status never asks of them; Installed by hand lists only
+// what's left.
+func TestSetupAdoptsAsItsFlagsSay(t *testing.T) {
+	w := withHandApps(t)
+	base := []string{"setup", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--no-link", "--no-apply"}
+	_, errOut, code := w.run(t, base...)
+	if want := "answer with --adopt <cask> for each app installed by hand that Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt leaves them as they are, for good"; code != 2 || !strings.Contains(errOut, want) {
+		t.Errorf("unanswered, kit setup said %q, exit %d; want it to name %q", errOut, code, want)
+	}
+
+	out, errOut, code := w.run(t, append(base, "--adopt", "tally")...)
+	for _, want := range []string{"adopt ok 1 app · kit apply takes it over\n", "commit ok 3 declared · committed and pushed", "by-hand ok 2, which kit doesn't look after", "by-hand installed by hand Editor (kit cask add editor), Kubius\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("kit setup --adopt tally printed\n%s%s\nwant it to hold %q", out, errOut, want)
+		}
+	}
+	if code != 0 {
+		t.Errorf("kit setup --adopt tally exited %d", code)
+	}
+	if got := w.readSection(t, "laptop", "homebrew casks"); got != "ghostty\ntally\n" {
+		t.Errorf("laptop's casks = %q, want ghostty and tally", got)
+	}
+	if left := w.read(t, handFile); !strings.Contains(left, `"left": {`+"\n"+`    "com.example.editor": "2026-01-02T03:04:05Z"`+"\n  }") {
+		t.Errorf("by-hand.json = %s, want the editor alone left by hand", left)
+	}
+}
+
 // Once it's committed, setup carries on as kit apply, as the command
 // would, in the same run: its steps, built from the config setup made.
 func TestSetupThenApplies(t *testing.T) {

@@ -58,6 +58,19 @@ type Item struct {
 	// project's MCP server whose folder isn't there yet: nothing for the
 	// person to settle.
 	Later bool `json:"later,omitempty"`
+	// App is the bundle id of the app it is, for a thing installed by
+	// hand: what leaving it so goes by.
+	App string `json:"app,omitempty"`
+}
+
+// Look is how a check's look went at something besides what it checks:
+// Unseen says why it couldn't look, when it couldn't, so what it doesn't
+// report of that may be there still. Apps are the bundle ids of every app
+// installed by hand it saw, reported or not: what's remembered of each
+// lasts while it's there. They're kit's own, never in its JSON.
+type Look struct {
+	Unseen string   `json:"unseen,omitempty"`
+	Apps   []string `json:"-"`
 }
 
 // ToDo is something for the person at the Mac to do, as applying raises it
@@ -187,6 +200,9 @@ type Result struct {
 	Counts map[string]int `json:"counts,omitempty"`
 	// Items are the things that need attention.
 	Items []Item `json:"items,omitempty"`
+	// HandLook is how the check's look went at the things installed by
+	// hand its kind could take over: none when it made none.
+	HandLook *Look `json:"by_hand,omitempty"`
 	// Done are the items applying the step dealt with, each with the action
 	// it took.
 	Done []Item `json:"done,omitempty"`

@@ -42,7 +42,10 @@ Each kind supplies five parts:
 - **adopt:** write a thing found on the Mac into the right file, in its sorted place.
 
 The engine does the rest: install what's declared but missing, offer what's on the Mac but
-undeclared for adopting, removing or snoozing, and report both.
+undeclared for adopting, removing or snoozing, and report both. A kind that can take over
+what was put on the Mac apart from it (`kind.Adoptable`: casks, an app installed by hand)
+reports each such thing not declared as drift of its own, `by-hand`, offered for adopting or
+leaving by hand, never removing.
 
 **A kind is self-contained.** Its package describes it (`kind.Descriptor`): its name and
 label, its section's header and how its lines read, its group (packages, settings or
@@ -122,7 +125,7 @@ those comments, as nothing written by hand goes without being asked.
   after mise, `--before npm`). Three orders stay, being kit's own data: each store's
   secrets after its sign-in, the sign-in after what its driver names it comes as, declared
   for the Mac (1Password's casks), so those install first, or till its program and app are
-  there however they came (an app installed by hand fails its cask); git's settings after the secrets
+  there however they came (by hand too, the cask then taking the app over); git's settings after the secrets
   they sign with; login items after the casks and App Store apps they open.
 - **A list's lines held back:** a list's section can say, after its header, what its lines
   wait for, each as often as wanted: `--after` a step, or one of a step's things
@@ -599,7 +602,7 @@ kit                          At a terminal, kit's menu, at once: what to run nex
 This Mac:
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)   [--restore-from mac|time-machine|arq] [--at]
-kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
+kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare, leave or snooze
 kit nightly [job...]         Run the scheduled jobs due, then every check (the hourly launch)   [--plan]
 kit list [kind]              What's declared for this Mac: file, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
@@ -608,7 +611,7 @@ kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's M
 kit machine add <name>       Add a Mac to kit-config, a copy of another's or empty   [--from] [--description]
 kit terminal [<name>]        The terminal a new Mac's boot hands over to: shown, or set in kit.toml   [--none]
 kit nightly at [<time>]      When the nightly run falls due: shown, or set in kit.toml (nightly_at)
-kit setup                    Set up a Mac in use: kit-config made or joined, the Mac declared as it is, then kit apply   [--create|--join] [--mac] [--from] [--restore|--no-restore] [--prefs|--no-prefs] [--link|--no-link] [--apply|--no-apply]
+kit setup                    Set up a Mac in use: kit-config made or joined, the Mac declared as it is, then kit apply   [--create|--join] [--mac] [--from] [--restore|--no-restore] [--prefs|--no-prefs] [--link|--no-link] [--adopt|--no-adopt] [--apply|--no-apply]
 
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
@@ -721,7 +724,12 @@ suggested, its flag, and its answer kept in the record: the folders a new Mac br
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
 does; asked unless this Mac's own record says capture's on, whatever kit-config declares, as a
 Mac joining as a copy of one saving them has saved nothing), the shell's and tools' files kept (`--link`, as `kit file
-add` moves and links them), and, joining, what kit-config declares that this Mac hasn't:
+add` moves and links them), the apps installed by hand Homebrew takes over (`--adopt <cask>`,
+To Homebrew: a row a cask of those that install them, as `brew.Homebrew` matches them, its apps
+named and the cask only when its name says more, all ticked, a cask the Mac declares already
+never offered; the ticked declared with the snapshot, so the `kit apply` after setup takes their
+apps over, the rest left by hand for good, by their apps' bundle ids, `kit reconcile` never asking of them),
+and, joining, what kit-config declares that this Mac hasn't:
 installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`); a kind
 whose check couldn't tell is asked about too, saying so and why, never taken for nothing to
 install; kit-config started on this Mac has nothing to install, its step saying so. Then,
@@ -734,8 +742,8 @@ isn't, links only what isn't, commits nothing new and pushes what's waiting, to 
 repository as one, its branch made by the push; what's waiting that can't be told is never
 taken for nothing. Till kit-config's own branch is on the remote, the prefs store pushes
 nothing, as GitHub makes a new repository's first branch pushed the one a new Mac's boot
-clones. It says what's refused and what couldn't be checked, each with why, the apps installed by hand
-(never Apple's, the App Store's, a cask's or those Chrome makes for websites, `com.google.Chrome.app.`;
+clones. It says what's refused and what couldn't be checked, each with why, the apps left installed by hand
+(none a cask takes over, never Apple's, the App Store's, a cask's or those Chrome makes for websites, `com.google.Chrome.app.`;
 the person's to install through Homebrew or the App Store should kit set the Mac up again),
 and that secrets go in a store with `kit secret add`; then `kit apply` runs in the same
 process, with its own screen at a terminal. Without a terminal it asks nothing: each question
@@ -883,11 +891,12 @@ or asked for: one refused fails alone, in its row, and the rest carry on.
 `kit reconcile` settles drift. At a terminal it goes through each item that needs attention
 (`--all`: quiet ones too; name kinds, as in `kit reconcile brew`, for theirs alone), asking
 what to do with it: declare it (for this Mac, or every Mac),
-uninstall it, install it, undeclare it, snooze it for 7 days, leave it, or stop. Every question
+uninstall it, install it, undeclare it, snooze it for 7 days, leave an app installed by hand
+so for good, skip it, or stop. Every question
 comes first; then it does it all, as `kit <kind> add` and
 `kit <kind> remove` would, and commits and pushes once. Without a terminal, or with `--json`, it lists
 the items with their ids and choices, and `kit reconcile <id>... --adopt` (or `--remove`,
-`--install`, `--undeclare`, `--snooze`; `--shared`, `--note`) settles those, every
+`--install`, `--undeclare`, `--snooze`, `--leave`; `--shared`, `--note`) settles those, every
 id checked before anything's done, in one run and one commit: how an agent carries out a
 person's decisions.
 
@@ -1241,13 +1250,15 @@ Formulae and casks are compared by full name: `owner/tap/name` for a tap's, the 
 Homebrew's own, so a tap's `php` and Homebrew's own `php` are never taken for each other. A
 declared name that matches nothing is looked up (`brew info`, all at once; one at a time when
 one is unknown, as brew then answers nothing) to resolve aliases and renames before it's
-called missing, and a name Homebrew doesn't know is missing and "unknown". Four states:
+called missing, and a name Homebrew doesn't know is missing and "unknown". Five states:
 
 - **ok:** declared and installed (installed as another formula's dependency counts);
 - **missing:** declared, not installed;
 - **extra:** installed on request, needed by nothing installed, not declared;
 - **unused dependency:** a formula installed as a dependency that nothing installed needs now
-  (what `brew autoremove` removes).
+  (what `brew autoremove` removes);
+- **by hand:** an app installed by hand that a cask of Homebrew's own installs, the cask not
+  declared for the Mac (below).
 
 **Installing and removing.** Before its first install in a run kit runs `brew update`, as
 installs from stale formulae fail, and runs nothing else through brew till it's done: Homebrew
@@ -1263,12 +1274,91 @@ and a step with one is applied even while its items are quiet, so a package decl
 another Mac is installed the same day. Removing is `brew uninstall`; Homebrew's refusal, when
 something needs the package, is passed on.
 
+**Apps installed by hand.** Homebrew 7 refuses `--eval-all`, so kit reads the catalogue in
+Homebrew's cache (`api/internal/packages.<arch>_<macos>.jws.json.payload`, Homebrew's internal
+format): each cask of Homebrew's own, its apps' places in /Applications (or the app a package
+cask deletes, or the one it alone quits) and the bundle ids it states (what its uninstall quits,
+signals or unloads, and the `~/Library` paths it zaps). An app installed by hand has a cask
+only when it's at that cask's place and the cask states its bundle id: a fork under the app's
+name, or a cask stating no id, has none, erring towards no offer; a disabled cask is never
+one. An app's version is its
+`CFBundleShortVersionString`, or its `CFBundleVersion` when the short one doesn't start with a
+number (Build 4215 is 4215; `apps.Version`); one that still can't be read gets no offer, but
+from a `latest` cask that updates itself with no numbered or LTS line at its place. A version
+without a dot (a build's, as Sublime Text's 4215) has no major (`major`), and is never told
+against a dotted version ("can't tell"): beside another build number, at or above the cask's
+it's taken (`atOrAbove`); below, no offer, and the install refuses it ("…, and can't tell
+whether this one is"), so an older build fails `kit apply` of its declared cask till the app
+updates past it, a known limit. Of several stating it, a prerelease app's, with a channel at
+its place, is the channel nearest its version at its major (`prereleaseOf`: `1password@beta`,
+`firefox@beta`, `thaw@beta`), never the cask of releases; with none at its major, or two as
+near, none. A version is a prerelease's when a channel's word (`marks`: alpha, beta, rc, tip,
+snapshot, eap, daily and the rest, with pre and insider) stands in it as a word of its own, or
+as in 3.0b2. A channel whose version has no major (`ghostty@tip`, `sublime-text@dev`) is at no
+app's major, so a prerelease beside it gets no offer, a known limit.
+Else, when the one without `@` updates itself (`lineOf`): that one for an app of its major version or
+later (such an app runs ahead of the catalogue, as Dropbox of dropbox); for an earlier major,
+the `@` line of that major (`bbedit@14`, `firefox@esr`), never a channel's (`channels`: beta,
+nightly and the like), or none, as the plain cask would declare a major version the person may
+have no licence for; a `latest` one only with no numbered or LTS `@` line at its place (a
+channel doesn't count). Else the one whose
+version shares the most leading numbers with the app's (`blender@lts` for Blender's LTS), a tie to the one without `@`,
+two without `@` none. The offer runs the install's own check (`match` calls `takesOver`), so
+nothing is offered that kit's install would refuse, as a cask of `latest` that doesn't update
+itself; Homebrew may yet refuse it. A cask that moves anything besides apps into place (a suite, a font, a Quick Look
+plugin) is never matched, nor vetted when installed. Every vetted cask installs with `brew
+install --cask --adopt`, Homebrew taking its app there over in place (an older copy kit
+replaces, below): for a cask that
+auto-updates, unchecked, so kit checks it first (`versioned`, `adoptable`), as the offer does,
+in `kit apply` of a declared cask too: only an app of the cask's major version or later, a
+newer copy included; an earlier major fails the cask, naming its line if one is ("BBEdit.app
+is 14.6.2 and the cask's is 16.1: kit takes over only a copy of the cask's major version or
+later, and bbedit@14 is this one's line", `notAdopting`); a prerelease beside a channel at the
+cask's place goes only to the channel, any other failing ("Thaw.app is 3.0.0-beta.7 and the
+cask's is 2.1.0: kit takes over a prerelease only by its channel's cask, and thaw@beta is this
+one's", "none here is at its major version", or, tied, "lamp@beta and lamp@nightly are as near
+it", `notChannel`); a line (`lineToken`: an `@` cask not a channel's, as `bbedit@14` or
+`firefox@esr`) takes over only a copy of its own line, as `pick` would give it ("BBEdit.app is
+16.1 and the cask's is 14.6.9: kit takes over by a line only a copy of that line, and bbedit is
+this one's", or "no cask here is this one's", `notLine`); for any other, Homebrew's own check,
+the versions must match. A cask that installs through a package is checked as a replace is
+before its installer runs over the app, whether it updates itself or not. One Homebrew didn't adopt, as the app differs from
+the download, is installed again alone with `--force`, which deletes the app and moves the
+cask's in (`--adopt --force` raises before force is read), but only for the same version (of
+another build) or an older copy of the same major version: both versions dotted numbers (the
+cask's before any comma), the app's lower, its first number the same. Another major version may be kept on purpose (an older line,
+an LTS), a newer copy or a prerelease is ahead of the cask, and `latest` or no version says
+nothing, so each fails the cask saying why, `whyNot` adding what it can ("Charles.app is 4.6.8
+and the cask's is 5.2.3: kit replaces only an older copy of the same major version"). Before either, an app at the cask's place whose bundle
+id it doesn't state, or the App Store's copy, isn't touched: the cask fails, saying so
+("Spaceman.app is already in /Applications and isn't the cask's (<id>)"). `kit apply` puts
+`couldn't install <cask>:` before a refusal; `kit cask add` and `kit reconcile`, `couldn't
+install:`. Taps' casks, casks
+the catalogue lacks, and every cask when it can't be read install as before, and none is
+offered. The casks' check reports each app installed by hand whose cask isn't declared for the
+Mac as `cask:<token>`, `by-hand`, "installed by hand as <App>.app", installed casks' apps read
+from their install receipts in the Caskroom, as `brew info` takes a second or more, on every
+check.
+`kit reconcile` adopts one (installs, then declares, as `kit cask add` does: a failed install
+declares nothing), or leaves it by hand, a leave that `--all` never asks about and status counts
+as quiet, lasting while the app is installed by hand, matched or not: it ends once the app's
+gone from the app folders or a cask has it.
+
 **Drift counts after a day.** An item a kind's check finds (missing, extra, an unused
 dependency) is new for its first 24 hours: shown, quiet, without needing attention, so a
 throwaway install that's soon removed never does. kit remembers when it first saw each item,
 the snoozes (7 days) and the temporary installs (quiet for 7 days) in
 `$XDG_STATE_HOME/kit/drift.json`, written whole under a lock; it forgets an item once a check
-of its kind no longer finds it. What applying was given to act on and left still to act on, as
+of its kind no longer finds it. What's installed by hand is kept beside it, in `by-hand.json`,
+which a kit from before it, writing drift.json whole, never touches: when each such item was
+first seen and its snooze, by kind and app, and the apps left by hand (quiet for good, this
+Mac's alone), by bundle id, so a cask renamed in the catalogue keeps its app's leave, as does
+an app that updates itself past its cask, matching it no more for a while. Those are
+forgotten only on a look at what's installed by hand that went well, once the app is
+installed by hand no more, gone or a cask's, the look seeing every app installed by hand,
+matched or not; a leave too once answered otherwise; a look that fails keeps them, the rest of its
+kind forgotten as ever, and status says, greyed, that kit can't tell which apps are installed
+by hand, and why. What applying was given to act on and left still to act on, as
 a formula whose install ended well but isn't there, is never quiet, whatever its age: its step
 needs attention, and the next apply tries it again.
 

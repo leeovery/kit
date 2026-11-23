@@ -118,3 +118,43 @@ func TestInstalledInOrder(t *testing.T) {
 		t.Errorf("WithHelpers() = %q, want %q", got, want)
 	}
 }
+
+// An app's version is the one its Info.plist shows people; its build's,
+// when only that starts with a number; else the one shown, as it is: none
+// when it says neither, or there's no app.
+func TestVersion(t *testing.T) {
+	dir := t.TempDir()
+	for _, tt := range []struct {
+		name, shown, build, want string
+	}{
+		{"shown", "4.6.8", "468", "4.6.8"},
+		{"shown as a build", "Build 4215", "4215", "4215"},
+		{"shown alone", "Build 4215", "", "Build 4215"},
+		{"neither starting with a number", "Build 4215", "r4215", "Build 4215"},
+		{"a build alone", "", "4215", "4215"},
+		{"neither", "", "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app := filepath.Join(dir, tt.name+".app")
+			info := `<?xml version="1.0"?><plist version="1.0"><dict>`
+			if tt.shown != "" {
+				info += `<key>CFBundleShortVersionString</key><string>` + tt.shown + `</string>`
+			}
+			if tt.build != "" {
+				info += `<key>CFBundleVersion</key><string>` + tt.build + `</string>`
+			}
+			if err := os.MkdirAll(filepath.Join(app, "Contents"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(info+`</dict></plist>`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := apps.Version(app); got != tt.want {
+				t.Errorf("Version() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	if got := apps.Version(filepath.Join(dir, "Missing.app")); got != "" {
+		t.Errorf("Version() of no app = %q", got)
+	}
+}

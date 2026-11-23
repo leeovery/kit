@@ -50,6 +50,9 @@ func (p *Plain) Emit(e event.Event) {
 				}
 				p.printf("%s\n", line)
 			}
+			if h := f.Result.HandLook; h != nil && h.Unseen != "" {
+				p.printf("%s unseen %s\n", f.Step, h.Unseen)
+			}
 		}
 	case event.RunFinished:
 		p.printf("%s\n", summary(e.Counts))

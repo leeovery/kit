@@ -35,6 +35,8 @@ func laptopWorld(t *testing.T) *world {
 	f.On("brew", "leaves").Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n")
 	f.On("brew", "leaves", "--installed-on-request").Prints("go\njq\nowner/tap/tool\nffmpeg\n")
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n")
+	w.caskroom(t, map[string]string{"ghostty": "Ghostty.app", "firefox": "Firefox.app"})
+	w.homebrewCache(t, "")
 	// Homebrew's own that tests add, by their names alone, as brew info
 	// describes them: none of a tap, so no download's asked after; and a
 	// name it doesn't know.

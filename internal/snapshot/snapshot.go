@@ -24,6 +24,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kind/defaults"
 	"github.com/leeovery/kit/internal/kind/gitconfig"
 	"github.com/leeovery/kit/internal/kinds"
@@ -111,10 +112,12 @@ type Snapshot struct {
 	// Files are the shell's and tools' files at their usual places, from ~,
 	// that could be linked in.
 	Files []string
-	// ByHand are the apps installed by hand, by name: kit never manages
-	// them. ByHandErr is why they couldn't be told, when they couldn't.
-	ByHand    []string
-	ByHandErr error
+	// ByHand are the apps installed by hand, each with the cask that
+	// installs it, if one does. ByHandErr is why they couldn't be told,
+	// when they couldn't; MatchErr, why which casks install them couldn't,
+	// when it couldn't.
+	ByHand              []brew.ByHand
+	ByHandErr, MatchErr error
 }
 
 // Part is a part of what a snapshot declares: a kind's things, or the
@@ -192,7 +195,8 @@ func Find(ctx context.Context, m Mac) (Snapshot, Mac, error) {
 	parts = append(parts, m.kindParts(ctx, deps, featuresLabel, backupsLabel)...)
 	parts = append(parts, m.lookAt(featuresLabel, func() Part { return m.featuresPart(ctx) }), m.lookAt(backupsLabel, func() Part { return m.backupsPart(ctx) }))
 	s := Snapshot{Parts: parts, Files: m.files(owned)}
-	s.ByHand, s.ByHandErr = m.byHand(ctx, deps)
+	hand, err := brew.Of(deps).AppsByHand(ctx)
+	s.ByHand, s.MatchErr, s.ByHandErr = hand.Apps, hand.Unmatched, err
 	select {
 	case s.Folders = <-sizes:
 	default:
@@ -377,6 +381,27 @@ func (m Mac) backupsPart(ctx context.Context) Part {
 	return p
 }
 
+// Adopt has s declare casks, each to take over an app installed by hand,
+// among the casks' lines: those it declares already as they are. With no
+// casks' part looked at, they're a part of their own.
+func (s *Snapshot) Adopt(casks []string) {
+	if len(casks) == 0 {
+		return
+	}
+	d := brew.CasksDescriptor
+	i := slices.IndexFunc(s.Parts, func(p Part) bool { return p.Kind == d.Name && p.Err == nil })
+	if i < 0 {
+		s.Parts = append(s.Parts, Part{Kind: d.Name, Label: d.Label, section: true})
+		i = len(s.Parts) - 1
+	}
+	p := &s.Parts[i]
+	for _, c := range casks {
+		if !slices.ContainsFunc(p.Lines, func(e config.Entry) bool { return e.Name == c }) {
+			p.Lines = append(p.Lines, config.Entry{Name: c})
+		}
+	}
+}
+
 // Write declares what s's parts found in the Mac's declarations file: one
 // edit, every section placed and sorted as kit writes them, the file
 // written whole or not at all once it reads back as the config's loader
@@ -403,7 +428,7 @@ func Write(m Mac, s *Snapshot) error {
 		return fmt.Errorf("declare the snapshot in %s: %w", config.DeclFile(m.Name), err)
 	}
 	for _, r := range refused {
-		i := slices.IndexFunc(s.Parts, func(p Part) bool { return p.Kind == r.Kind })
+		i := slices.IndexFunc(s.Parts, func(p Part) bool { return p.Kind == r.Kind && p.Err == nil })
 		if i < 0 {
 			continue
 		}

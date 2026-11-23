@@ -1,0 +1,387 @@
+{"protected":"eyJhbGciOiJQUzUxMiJ9","signature":"c2lnbmF0dXJl","source_size":4096,"source_mtime_ns":1795374814788778000}
+{
+  "metadata": {"homebrew_version": "7.0.15", "bottle_tag": "arm64_tahoe", "generated_at": 1795372776},
+  "formulae": {"jq": {"desc": "Lightweight and flexible command-line JSON processor", "versions": {"stable": "1.8.1"}}},
+  "casks": {
+    "google-chrome": {
+      "auto_updates": true, "names": ["Google Chrome"], "tap_string": "homebrew/cask", "version": "158.0.8127.37",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.google.Chrome"}],
+        [":app", ["Google Chrome.app"]],
+        [":zap", {
+          ":launchctl": ["com.google.keystone.agent", "com.google.keystone.daemon"],
+          ":trash": ["~/Library/Caches/com.google.Chrome", "~/Library/Preferences/com.google.Chrome.plist", "~/Library/Saved Application State/com.google.Chrome.app.*.savedState"],
+          ":rmdir": ["~/Library/Google"]
+        }]
+      ]
+    },
+    "spaceman": {
+      "auto_updates": true, "names": ["Spaceman"], "tap_string": "homebrew/cask", "version": "1.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "dev.original.Spaceman"}],
+        [":app", ["Spaceman.app"]],
+        [":zap", {":trash": ["~/Library/Application Scripts/dev.original.Spaceman-LaunchAtLoginHelper", "~/Library/Caches/dev.original.Spaceman", "~/Library/Preferences/dev.original.Spaceman.plist"]}]
+      ]
+    },
+    "zoom": {
+      "auto_updates": true, "names": ["Zoom"], "tap_string": "homebrew/cask", "version": "7.2.5.90525",
+      "raw_artifacts": [
+        [":uninstall", {
+          ":launchctl": ["us.zoom.updater", "us.zoom.ZoomDaemon"],
+          ":signal": ["KILL", "us.zoom.xos"],
+          ":pkgutil": "us.zoom.pkg.videomeeting",
+          ":delete": ["/Applications/zoom.us.app", "/Library/Internet Plug-Ins/ZoomUsPlugIn.plugin", "/Library/Logs/DiagnosticReports/zoom.us*"]
+        }],
+        [":pkg", ["zoomusInstallerFull.pkg"]],
+        [":zap", {":trash": ["~/Library/Preferences/us.zoom.*.plist", "~/Library/WebKit/us.zoom.xos"]}]
+      ]
+    },
+    "1password": {
+      "auto_updates": true, "names": ["1Password"], "tap_string": "homebrew/cask", "version": "8.12.46",
+      "conflicts_with_args": {":cask": ["1password@beta"]},
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["2BUA8C4S2C.com.1password.browser-helper", "com.1password.1password-launcher"], ":quit": "com.1password.1password"}],
+        [":app", ["1Password.app"]],
+        [":zap", {":trash": ["~/Library/Containers/com.1password.1password*", "~/Library/Preferences/com.1password.1password.plist"]}]
+      ]
+    },
+    "1password@beta": {
+      "auto_updates": true, "names": ["1Password"], "tap_string": "homebrew/cask", "version": "8.12.48-24.BETA",
+      "conflicts_with_args": {":cask": ["1password"]},
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["2BUA8C4S2C.com.1password.browser-helper", "com.1password.1password-launcher"], ":quit": "com.1password.1password"}],
+        [":app", ["1Password.app"]],
+        [":zap", {":trash": ["~/Library/Containers/com.1password.1password*", "~/Library/Preferences/com.1password.1password.plist"]}]
+      ]
+    },
+    "quiet-tool": {
+      "names": ["Quiet Tool"], "tap_string": "homebrew/cask", "version": "2.1",
+      "raw_artifacts": [
+        [":app", ["Quiet Tool.app"]],
+        [":zap", {":trash": ["~/Library/Application Support/Quiet Tool", "~/Library/Preferences/com.example.quiet.*.plist"]}]
+      ]
+    },
+    "browser": {
+      "names": ["Browser"], "tap_string": "homebrew/cask", "version": "140.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.browser"}],
+        [":app", ["Chromium.app"], {":target": "Browser.app"}],
+        [":zap", {":trash": "~/Library/Saved Application State/com.example.browser.savedState"}]
+      ]
+    },
+    "example-editor": {
+      "names": ["Example Editor"], "tap_string": "homebrew/cask", "version": "3.2",
+      "raw_artifacts": [
+        [":uninstall", {":quit": ["com.example.editor", "com.example.editor.helper"]}],
+        [":app", ["Example Editor.app"]],
+        [":binary", ["$APPDIR/Example Editor.app/Contents/MacOS/edit"]],
+        [":zap", {":trash": ["~/Library/Containers/com.example.editor", "~/Library/HTTPStorages/com.example.editor"]}]
+      ]
+    },
+    "signals": {
+      "names": ["Signals"], "tap_string": "homebrew/cask", "version": "1.4",
+      "raw_artifacts": [
+        [":uninstall", {":signal": [["TERM", "com.example.signals"], ["KILL", "com.example.signals.agent"]]}],
+        [":app", ["Signals/Signals.app"]],
+        [":zap"]
+      ]
+    },
+    "old-tool": {
+      "names": ["Old Tool"], "tap_string": "homebrew/cask", "version": "0.9",
+      "disable_args": {":date": "2026-09-01", ":because": ":unmaintained"},
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.oldtool"}],
+        [":app", ["Old Tool.app"]]
+      ]
+    },
+    "sidekick": {
+      "names": ["Sidekick"], "tap_string": "homebrew/cask", "version": "5.0",
+      "raw_artifacts": [
+        [":app", ["Sidekick Installer.app/Contents/Resources/Sidekick.app"], {":target": "~/Library/Application Support/Sidekick/Sidekick.app"}],
+        [":uninstall", {":quit": "com.example.sidekick"}]
+      ]
+    },
+    "office-tools": {
+      "auto_updates": true, "names": ["Office Tools"], "tap_string": "homebrew/cask", "version": "16.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.office"}],
+        [":app", ["Office.app"]],
+        [":suite", ["Office Extras"]]
+      ]
+    },
+    "monitor": {
+      "auto_updates": true, "names": ["Monitor"], "tap_string": "homebrew/cask", "version": "2.8.1.316",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": "com.example.monitor.helper", ":quit": "com.example.monitor", ":pkgutil": "com.example.monitor"}],
+        [":pkg", ["Monitor.pkg"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.example.monitor.plist"]}]
+      ]
+    },
+    "relay": {
+      "names": ["Relay"], "tap_string": "homebrew/cask", "version": "4.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.relay", ":pkgutil": "com.example.relay"}],
+        [":pkg", ["Relay.pkg"]]
+      ]
+    },
+    "relay-enterprise": {
+      "names": ["Relay Enterprise"], "tap_string": "homebrew/cask", "version": "4.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.relay", ":pkgutil": "com.example.relay.enterprise"}],
+        [":pkg", ["RelayEnterprise.pkg"]]
+      ]
+    },
+    "charles": {
+      "names": ["Charles"], "tap_string": "homebrew/cask", "version": "5.2.3",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": "com.xk72.Charles.ProxyHelper", ":quit": "com.xk72.Charles", ":delete": "/Library/PrivilegedHelperTools/com.xk72.Charles.ProxyHelper"}],
+        [":app", ["Charles.app"]],
+        [":uninstall_postflight_steps", {":steps": [{":name": "Charles", ":type": "delete_keychain_certificate"}]}]
+      ]
+    },
+    "charles@4": {
+      "names": ["Charles"], "tap_string": "homebrew/cask", "version": "4.6.8",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": "com.xk72.Charles.ProxyHelper", ":quit": "com.xk72.Charles", ":delete": "/Library/PrivilegedHelperTools/com.xk72.Charles.ProxyHelper"}],
+        [":app", ["Charles.app"]],
+        [":uninstall_postflight_steps", {":steps": [{":name": "Charles", ":type": "delete_keychain_certificate"}]}]
+      ]
+    },
+    "godot": {
+      "names": ["Godot Engine"], "tap_string": "homebrew/cask", "version": "4.7.2",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.godotengine.godot"}],
+        [":app", ["Godot.app"]],
+        [":binary", ["$APPDIR/Godot.app/Contents/MacOS/Godot"], {":target": "godot"}]
+      ]
+    },
+    "godot@3": {
+      "names": ["Godot Engine"], "tap_string": "homebrew/cask", "version": "3.6.3",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.godotengine.godot"}],
+        [":app", ["Godot.app"]],
+        [":binary", ["$APPDIR/Godot.app/Contents/MacOS/Godot"], {":target": "godot"}]
+      ]
+    },
+    "blender": {
+      "names": ["Blender"], "tap_string": "homebrew/cask", "version": "5.3.0",
+      "raw_artifacts": [
+        [":app", ["Blender.app"]],
+        [":command_wrapper", ["blender"], {":executable": "$APPDIR/Blender.app/Contents/MacOS/Blender"}],
+        [":zap", {":trash": ["~/Library/Caches/Blender", "~/Library/Saved Application State/org.blenderfoundation.blender.savedState"]}]
+      ]
+    },
+    "blender@lts": {
+      "names": ["Blender"], "tap_string": "homebrew/cask", "version": "5.2.4",
+      "raw_artifacts": [
+        [":app", ["Blender.app"]],
+        [":command_wrapper", ["blender"], {":executable": "$APPDIR/Blender.app/Contents/MacOS/Blender"}],
+        [":zap", {":trash": ["~/Library/Caches/Blender", "~/Library/Saved Application State/org.blenderfoundation.blender.savedState"]}]
+      ]
+    },
+    "keepassxc": {
+      "names": ["KeePassXC"], "tap_string": "homebrew/cask", "version": "2.8.0,2.8.0-1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.keepassxc.keepassxc"}],
+        [":app", ["KeePassXC.app"]],
+        [":binary", ["$APPDIR/KeePassXC.app/Contents/MacOS/keepassxc-cli"]]
+      ]
+    },
+    "keepassxc@beta": {
+      "names": ["KeePassXC"], "tap_string": "homebrew/cask", "version": "2.8.0-beta1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.keepassxc.keepassxc"}],
+        [":app", ["KeePassXC.app"]],
+        [":binary", ["$APPDIR/KeePassXC.app/Contents/MacOS/keepassxc-cli"]]
+      ]
+    },
+    "dropbox": {
+      "auto_updates": true, "names": ["Dropbox"], "tap_string": "homebrew/cask", "version": "280.4.5053",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["com.dropbox.DropboxMacUpdate.agent"], ":quit": "com.getdropbox.dropbox"}],
+        [":app", ["Dropbox.app"]]
+      ]
+    },
+    "dropbox@beta": {
+      "auto_updates": true, "names": ["Dropbox"], "tap_string": "homebrew/cask", "version": "281.3.5397",
+      "raw_artifacts": [
+        [":uninstall", {":launchctl": ["com.dropbox.DropboxMacUpdate.agent"], ":quit": "com.getdropbox.dropbox"}],
+        [":app", ["Dropbox.app"]]
+      ]
+    },
+    "bbedit": {
+      "auto_updates": true, "names": ["BBEdit"], "tap_string": "homebrew/cask", "version": "16.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.barebones.bbedit"}],
+        [":app", ["BBEdit.app"]],
+        [":binary", ["$APPDIR/BBEdit.app/Contents/Helpers/bbedit_tool"], {":target": "bbedit"}]
+      ]
+    },
+    "bbedit@14": {
+      "auto_updates": true, "names": ["BBEdit"], "tap_string": "homebrew/cask", "version": "14.6.9",
+      "raw_artifacts": [
+        [":app", ["BBEdit.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.barebones.bbedit.plist"]}]
+      ]
+    },
+    "firefox": {
+      "auto_updates": true, "names": ["Mozilla Firefox"], "tap_string": "homebrew/cask", "version": "160.0.1",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.mozilla.firefox"}],
+        [":app", ["Firefox.app"]]
+      ]
+    },
+    "firefox@esr": {
+      "auto_updates": true, "names": ["Mozilla Firefox ESR"], "tap_string": "homebrew/cask", "version": "153.7.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.mozilla.firefox"}],
+        [":app", ["Firefox.app"]]
+      ]
+    },
+    "firefox@beta": {
+      "auto_updates": true, "names": ["Mozilla Firefox Beta"], "tap_string": "homebrew/cask", "version": "161.0b5",
+      "raw_artifacts": [
+        [":app", ["Firefox.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/org.mozilla.firefox.plist"]}]
+      ]
+    },
+    "little-snitch": {
+      "auto_updates": true, "names": ["Little Snitch"], "tap_string": "homebrew/cask", "version": "6.5",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "at.obdev.littlesnitch"}],
+        [":app", ["Little Snitch.app"]]
+      ]
+    },
+    "little-snitch@5": {
+      "auto_updates": true, "names": ["Little Snitch"], "tap_string": "homebrew/cask", "version": "5.8",
+      "raw_artifacts": [
+        [":app", ["Little Snitch.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/at.obdev.littlesnitch.plist"]}]
+      ]
+    },
+    "little-snitch@nightly": {
+      "auto_updates": true, "names": ["Little Snitch Nightly"], "tap_string": "homebrew/cask", "version": "5.9,7309",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "at.obdev.littlesnitch"}],
+        [":app", ["Little Snitch.app"]]
+      ]
+    },
+    "sublime-text": {
+      "auto_updates": true, "names": ["Sublime Text"], "tap_string": "homebrew/cask", "version": "4215",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.sublimetext.4"}],
+        [":app", ["Sublime Text.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.sublimetext.3.plist", "~/Library/Saved Application State/com.sublimetext.4.savedState"]}]
+      ]
+    },
+    "sublime-text@dev": {
+      "auto_updates": true, "names": ["Sublime Text"], "tap_string": "homebrew/cask", "version": "4214",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.sublimetext.4"}],
+        [":app", ["Sublime Text.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.sublimetext.3.plist"]}]
+      ]
+    },
+    "thaw": {
+      "auto_updates": true, "names": ["Thaw"], "tap_string": "homebrew/cask", "version": "2.1.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.thaw"}],
+        [":app", ["Thaw.app"]]
+      ]
+    },
+    "thaw@beta": {
+      "auto_updates": true, "names": ["Thaw"], "tap_string": "homebrew/cask", "version": "3.0.0-beta.7",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.thaw"}],
+        [":app", ["Thaw.app"]]
+      ]
+    },
+    "stream": {
+      "auto_updates": true, "names": ["Stream"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.stream"}],
+        [":app", ["Stream.app"]]
+      ]
+    },
+    "board": {
+      "auto_updates": true, "names": ["Board"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.board"}],
+        [":app", ["Board.app"]]
+      ]
+    },
+    "board@2": {
+      "auto_updates": true, "names": ["Board"], "tap_string": "homebrew/cask", "version": "2.4",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.board"}],
+        [":app", ["Board.app"]]
+      ]
+    },
+    "ghostty": {
+      "auto_updates": true, "names": ["Ghostty"], "tap_string": "homebrew/cask", "version": "1.4.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.mitchellh.ghostty"}],
+        [":app", ["Ghostty.app"]]
+      ]
+    },
+    "ghostty@tip": {
+      "auto_updates": true, "names": ["Ghostty"], "tap_string": "homebrew/cask", "version": "18872,6d244209978e599277904ff3ced7b8a2ebcc528d",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.mitchellh.ghostty"}],
+        [":app", ["Ghostty.app"]]
+      ]
+    },
+    "lamp": {
+      "auto_updates": true, "names": ["Lamp"], "tap_string": "homebrew/cask", "version": "2.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.lamp"}],
+        [":app", ["Lamp.app"]]
+      ]
+    },
+    "lamp@beta": {
+      "auto_updates": true, "names": ["Lamp Beta"], "tap_string": "homebrew/cask", "version": "3.0b4",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.lamp"}],
+        [":app", ["Lamp.app"]]
+      ]
+    },
+    "lamp@nightly": {
+      "auto_updates": true, "names": ["Lamp Nightly"], "tap_string": "homebrew/cask", "version": "3.0a9",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.lamp"}],
+        [":app", ["Lamp.app"]]
+      ]
+    },
+    "google-chrome@beta": {
+      "auto_updates": true, "names": ["Google Chrome Beta"], "tap_string": "homebrew/cask", "version": "159.0.8190.4",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.google.Chrome.beta"}],
+        [":app", ["Google Chrome Beta.app"]]
+      ]
+    },
+    "spaceman@classic": {
+      "auto_updates": true, "names": ["Spaceman Classic"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "dev.original.Spaceman"}],
+        [":app", ["Spaceman.app"]]
+      ]
+    },
+    "wireshark-app": {
+      "auto_updates": true, "names": ["Wireshark"], "tap_string": "homebrew/cask", "version": "4.6.10",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.wireshark.Wireshark", ":pkgutil": "org.wireshark.ChmodBPF.pkg"}],
+        [":app", ["Wireshark.app"]],
+        [":pkg", ["Install ChmodBPF.pkg"]]
+      ]
+    },
+    "nightly": {
+      "names": ["Nightly"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.nightly"}],
+        [":app", ["Nightly.app"]]
+      ]
+    }
+  },
+  "cask_renames": {"chrome": "google-chrome"},
+  "cask_tap_git_head": "0c6dce3e499deb37b57859e0944e742eddfcf869"
+}

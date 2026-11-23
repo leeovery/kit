@@ -36,4 +36,8 @@ func TestReconcileQuestion(t *testing.T) {
 	if q := render.ReconcileQuestion(render.Drifted{Name: "jq", Kind: "brew", What: "declared, not installed"}, nil, now); ansi.Strip(q.About.Says) != "brew · declared, not installed" {
 		t.Errorf("with nothing more known, says %q", ansi.Strip(q.About.Says))
 	}
+	byHand := "installed by hand as Editor.app"
+	if q := render.ReconcileQuestion(render.Drifted{Name: "editor", Kind: "cask", What: byHand + ", not declared", Detail: byHand}, nil, now); ansi.Strip(q.About.Says) != "cask · "+byHand+", not declared" {
+		t.Errorf("with what's wrong saying its detail, says %q; want it said once", ansi.Strip(q.About.Says))
+	}
 }

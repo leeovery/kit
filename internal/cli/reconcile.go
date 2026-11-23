@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/drift"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
@@ -27,6 +28,8 @@ const (
 	// revert puts back what's declared, in place of what the Mac has: the
 	// declared file, or value.
 	revert = "revert"
+	// leave leaves a thing installed by hand so, quiet for good.
+	leave = "leave"
 )
 
 // reconcileSchema is kit reconcile --json's document's version.
@@ -34,9 +37,9 @@ const reconcileSchema = 1
 
 // reconcileOptions are kit reconcile's flags.
 type reconcileOptions struct {
-	adopt, remove, install, undeclare, snooze, revert bool
-	shared, all                                       bool
-	note                                              string
+	adopt, remove, install, undeclare, snooze, revert, leave bool
+	shared, all                                              bool
+	note                                                     string
 }
 
 // driftItem is an item of drift, of a kind, and what can be done about it.
@@ -58,12 +61,13 @@ func newReconcileCommand(a *app) *cobra.Command {
 	var opts reconcileOptions
 	cmd := &cobra.Command{
 		Use:         "reconcile [<kind>...] [<id>...]",
-		Short:       "Settle drift: adopt, remove, install, undeclare or snooze what differs from the config",
+		Short:       "Settle drift: adopt, remove, install, undeclare, revert, leave or snooze what differs from the config",
 		Annotations: map[string]string{brief: "settle what differs from the config"},
 		Long: `Settle drift: what's installed but not declared, declared but not installed,
-or left by something since removed. At a terminal, kit goes through each item
-that needs attention (--all: every item, new and snoozed too), asking what to
-do with it, then does it all, committing and pushing the config's changes.
+left by something since removed, or installed by hand that a cask installs. At
+a terminal, kit goes through each item that needs attention (--all: every item,
+new and snoozed too, but those left by hand), asking what to do with it, then
+does it all, committing and pushing the config's changes.
 Name kinds (kit reconcile brew cask) to go through only theirs. It brings in
 kit-config's remote commits first, leaving your edits as they are.
 
@@ -76,6 +80,7 @@ run and one commit:
   kit reconcile cask:zoom --install
   kit reconcile brew:jq --undeclare [--shared]
   kit reconcile cask:firefox --snooze           (quiet for 7 days)
+  kit reconcile cask:spaceman --leave           (by hand, quiet for good)
   kit reconcile file:~/.zshrc --revert          (kit-config's copy back)
   kit reconcile go:example.com/a go:example.com/b --remove`,
 		Args: cobra.ArbitraryArgs,
@@ -93,14 +98,15 @@ run and one commit:
 		},
 	}
 	f := cmd.Flags()
-	f.BoolVar(&opts.adopt, "adopt", false, "declare it: for this Mac, or every Mac with --shared; a setting removed from the Mac, accept it gone")
+	f.BoolVar(&opts.adopt, "adopt", false, "declare it, for this Mac or with --shared every Mac (a setting removed: accept it gone)")
 	f.BoolVar(&opts.remove, "remove", false, "uninstall it")
 	f.BoolVar(&opts.install, "install", false, "install it, as it's declared")
 	f.BoolVar(&opts.undeclare, "undeclare", false, "take it out of this Mac's file, or the shared one with --shared")
 	f.BoolVar(&opts.snooze, "snooze", false, "quiet it for 7 days")
 	f.BoolVar(&opts.revert, "revert", false, "put back what's declared, in place of what the Mac has")
+	f.BoolVar(&opts.leave, "leave", false, "leave it installed by hand, and stop asking")
 	f.BoolVar(&opts.shared, "shared", false, "for every Mac: adopt into, or undeclare from, the shared file")
-	f.BoolVar(&opts.all, "all", false, "at a terminal, every item, quiet ones too")
+	f.BoolVar(&opts.all, "all", false, "at a terminal, every item, quiet ones too, but apps left by hand")
 	f.StringVar(&opts.note, "note", "", "why it's adopted, kept after its name")
 	return cmd
 }
@@ -149,7 +155,7 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 	}
 	if len(decisions) == 0 {
 		said := "Nothing to reconcile"
-		if slices.ContainsFunc(items, func(it driftItem) bool { return it.Quiet == "" || opts.all }) {
+		if slices.ContainsFunc(items, func(it driftItem) bool { return toAsk(it, opts) }) {
 			said = "Nothing decided"
 		}
 		_, err := fmt.Fprint(a.colors(a.Stdout), look.Rows("  ", look.Width, look.Row{State: look.Done, Name: said})[0]+"\n")
@@ -187,7 +193,7 @@ func decide(items []driftItem, id string, opts reconcileOptions) (decision, erro
 	}
 	item := items[i]
 	var actions []string
-	for action, set := range map[string]bool{adopt: opts.adopt, remove: opts.remove, install: opts.install, undeclare: opts.undeclare, snooze: opts.snooze, revert: opts.revert} {
+	for action, set := range map[string]bool{adopt: opts.adopt, remove: opts.remove, install: opts.install, undeclare: opts.undeclare, snooze: opts.snooze, revert: opts.revert, leave: opts.leave} {
 		if set {
 			actions = append(actions, action)
 		}
@@ -200,6 +206,8 @@ func decide(items []driftItem, id string, opts reconcileOptions) (decision, erro
 		return decision{}, fmt.Errorf("one thing at a time: --%s", strings.Join(actions, " and --"))
 	case !slices.Contains(item.Choices, actions[0]):
 		return decision{}, fmt.Errorf("%s can't be %s: %s", id, past(actions[0]), flagList(item.Choices))
+	case actions[0] == leave && opts.shared:
+		return decision{}, fmt.Errorf("%s is left by hand on this Mac only: drop --shared", id)
 	}
 	return decision{item: item, action: actions[0], shared: opts.shared}, nil
 }
@@ -221,6 +229,8 @@ func past(action string) string {
 	switch action {
 	case adopt, install, revert:
 		return action + "ed"
+	case leave:
+		return "left"
 	}
 	return action + "d"
 }
@@ -264,15 +274,22 @@ func (a *app) listDrift(r *run, items []driftItem) error {
 	return nil
 }
 
+// toAsk reports whether a terminal asks about it: when it needs attention,
+// or, with --all, unless it's left by hand.
+func toAsk(it driftItem, opts reconcileOptions) bool {
+	return it.Quiet == "" || opts.all && it.Quiet != drift.Left
+}
+
 // askAbout asks, of each item that needs attention (every item, with
-// --all), what to do with it, one after another: every question before
-// anything is done. Stopping keeps what's decided so far.
+// --all, but those left by hand), what to do with it, one after another:
+// every question before anything is done. Stopping keeps what's decided so
+// far.
 func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reconcileOptions) ([]decision, error) {
 	var asked []driftItem
 	var offered [][]choice
 	var qs []ask.Question
 	for _, it := range items {
-		if it.Quiet != "" && !opts.all {
+		if !toAsk(it, opts) {
 			continue
 		}
 		dr := r.drifters[it.Kind]
@@ -318,7 +335,7 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	installs, wanted := make(map[string][]string), make(map[string][]string)
 	for _, d := range decisions {
 		_, isKind := r.drifters[d.item.Kind].(kindDrifter)
-		if (isKind || r.isAdminStep(d.item.Kind)) && d.action == install {
+		if (isKind || r.isAdminStep(d.item.Kind)) && (d.action == install || d.action == adopt && d.item.State == kind.ByHand) {
 			installs[d.item.Kind] = append(installs[d.item.Kind], d.item.Name)
 			wanted[d.item.Kind] = append(wanted[d.item.Kind], d.item.Name)
 		}
@@ -357,13 +374,25 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	return c.finish()
 }
 
-// carryOutOne does what d decided about its item.
+// carryOutOne does what d decided about its item. Any answer but leaving
+// an item left by hand ends the leave: the last answer holds.
 func carryOutOne(ctx context.Context, r *run, c *changes, d decision, note string) check.Result {
-	if d.action == snooze {
-		if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Snooze(d.item.ID, r.now) }); err != nil {
+	if d.item.Quiet == drift.Left && d.action != leave {
+		if err := drift.Unleave(r.stateDir, d.item.App); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+	}
+	switch d.action {
+	case snooze:
+		if err := drift.Snooze(r.stateDir, d.item.Item, r.now); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "snoozed till " + r.now.Add(drift.SnoozeFor).Format("2 Jan")}
+	case leave:
+		if err := drift.Leave(r.stateDir, r.now, d.item.App); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+		return check.Result{State: check.OK, Summary: "left installed by hand"}
 	}
 	return r.drifters[d.item.Kind].settle(ctx, r, c, d, note)
 }

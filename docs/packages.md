@@ -1,8 +1,8 @@
 # Packages: install once, and your next Mac has it
 
 One kit command installs a package and declares it in [kit-config](glossary.md). A Mac that
-replaces this one installs it too, and `--shared` puts it on every Mac. It covers nine kinds,
-from Homebrew casks to Claude Code skills. You'd want it for every install you mean to keep.
+replaces this one installs it too, and `--shared` puts it on every Mac. You'd want it for every
+install you mean to keep.
 
 ## Try it
 
@@ -55,35 +55,37 @@ A few kinds take more than the name they keep:
 
 ## What happens
 
-- **This Mac only, unless you say.** Without `--shared`, the line goes in this Mac's file, such
-  as `laptop/declarations`. With `--shared`, it goes in `shared/declarations` for every Mac,
+- **This Mac only, unless you say.** Without `--shared`, the line goes in this Mac's file. With `--shared`, it goes in `shared/declarations` for every Mac,
   and comes out of each Mac's own file. Other Macs install it at their next `kit apply`.
 - **Removing undoes the install.** A formula is uninstalled, a login item stops opening at
   login, and an MCP server leaves Claude Code. If something installed still needs the package,
   kit changes nothing and says why.
-- **`kit apply` installs what's missing.** It installs what's declared and not installed, and
-  never removes anything.
+- **`kit apply` installs what's missing,** and never removes anything.
 - **A new Mac installs it all,** once what each kind needs is in place, such as npm for npm
   packages. [A new Mac from one line](new-mac.md) says what waits for what.
 
 ## Your own installs show up
 
-If you install a package with brew or npm yourself, kit-config doesn't have it. That's drift.
-After its first day, `kit status` lists it under CONFIG:
+A package you install with brew or npm yourself is drift. After its first day, `kit status` lists it under CONFIG:
 
 <img src="../art/drift-status.webp" alt="kit status under CONFIG: ffmpeg installed, not declared, for 2 days, with kit reconcile to settle it" width="456">
 
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
+
+Apps you dragged into Applications show up too, if kit can match them to a cask. Adopting one
+has Homebrew take the app over, if its cask takes that version: see
+[Troubleshooting](troubleshooting.md). `--leave` keeps the app by hand.
 
 ## Good to know
 
 - **Removing an app asks about its files.** `kit cask remove` and `kit mas remove` ask at a
   terminal whether to keep what the app leaves behind. `--keep` and `--zap` answer without
   asking. Without a terminal, kit keeps it.
-- **Trying something out?** `--temp` installs without declaring. The package stays quiet for 7
-  days, then `kit reconcile` asks about it.
+- **Trying something out?** `--temp` installs without declaring, quiet for 7 days.
 - **Private taps need a token.** kit checks a tap's download as you add it. If it's private, the
   line waits on a secret: see [Secrets from 1Password](secrets.md).
+- **`--adopt --shared` declares the cask for every Mac.** Each Mac with the app has Homebrew
+  take it over, even one where you left it by hand. Every Mac without it installs it.
 - **Installing isn't setting up.** A sign-in or a licence a package needs is a
   [step of your own](steps.md) or a step by hand, after the package.
 
@@ -100,7 +102,7 @@ After its first day, `kit status` lists it under CONFIG:
 | `kit list [<kind>]` | List what's declared for this Mac |
 | `kit why <name>` | Where it's declared, and what needs it |
 
-Each of these takes `--json`, and `--help` says what it needs and what it changes.
+Each takes `--json`, and `--help` says what it changes.
 
 ## Related
 

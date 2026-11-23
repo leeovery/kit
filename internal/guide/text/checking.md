@@ -29,10 +29,16 @@
 couldn't find out; `deferred`, not checked, as what it needs isn't there.
 
 - Its `items` say what: each an `id`, as in brew:jq, and a `state`, in its
-  kind's words (missing, extra), or `problem` or `manual` for what only
-  the person can put right or do, its `to_do` saying what.
+  kind's words (missing, extra, `by-hand` for an app a cask could take
+  over, its `app` the app's bundle id), or `problem` or `manual` for what
+  only the person can put right or do, its `to_do` saying what.
+- `by_hand`, on the casks' step, says how its look at the apps installed
+  by hand went: `unseen` is why kit couldn't tell which they are, as
+  Homebrew's catalogue can't be read. Then no `by-hand` item is listed,
+  and the leaves are kept.
 - An item with `quiet` needs nothing yet, whatever it says, as in `new` on
-  its first day, `snoozed` or `temporary`. A step whose items are all quiet
+  its first day, `snoozed` or `temporary`; `left` is an app the person
+  chose to keep by hand, quiet for good. A step whose items are all quiet
   reads `ok`: read its items too. `later` is one that comes by itself;
   `action` is what `kit apply` would do about it.
 - The `config` step reads `ok` on an edit's first day: each of its items

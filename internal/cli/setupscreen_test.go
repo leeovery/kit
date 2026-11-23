@@ -149,7 +149,7 @@ func signedOut(t *testing.T, repos map[string]bool) *world {
 	f.On("brew", "leaves").Prints("jq\nripgrep\n")
 	f.On("brew", "leaves", "--installed-on-request").Prints("jq\nripgrep\n")
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n")
-	f.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
+	w.caskroom(t, nil)
 	for _, path := range []string{"Documents/notes.txt", "Pictures/photo.jpg", "Downloads/archive.zip", ".zshrc", ".tmux.conf", ".config/ghostty/config"} {
 		w.write(t, path, "something\n")
 	}
@@ -163,8 +163,8 @@ func signedOut(t *testing.T, repos map[string]bool) *world {
 }
 
 // settingUp is kit setup's screen's Mac in use: signed out, kit-config to
-// be created, two apps installed by hand; kit apply, carrying on, finding
-// it all as setup left it.
+// be created, two apps installed by hand, Tally one a cask installs; kit
+// apply, carrying on, finding it all as setup left it.
 func settingUp(t *testing.T) *world {
 	w := signedOut(t, map[string]bool{})
 	w.creates(t)
@@ -175,6 +175,8 @@ func settingUp(t *testing.T) *world {
 	dir := filepath.Join(w.home, ".config", "kit")
 	w.fake.On("git", "-C", dir, "check-ignore", "--verbose", "--stdin", "-z").Exits(1)
 	w.fake.On("brew", "--prefix").Prints("/opt/homebrew\n")
+	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
+{"casks": {"tally": {"auto_updates": true, "raw_artifacts": [[":uninstall", {":quit": "com.example.tally"}], [":app", ["Tally.app"]]]}}}`)
 	w.fake.On("sudo", "-S", "-p", "[kit: sudo wants the password]", "-v")
 	w.fake.On("git", "-C", dir, "--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "laptop/home").Prints("laptop/home/.zshrc\x00")
 	return w
@@ -224,6 +226,7 @@ func TestSetupScreenStoppedAtAQuestion(t *testing.T) {
 		{"which folders should a new Mac bring back", "– Your data  stopped"},
 		{"save them every night", "– Apps' settings  stopped"},
 		{"which should kit-config keep", "– Linked files  stopped"},
+		{"which apps should Homebrew take over", "– To Homebrew  stopped"},
 	}
 	for at, q := range questions {
 		t.Run(q.row, func(t *testing.T) {
@@ -262,7 +265,7 @@ func TestSetupScreenStoppedWhileFinding(t *testing.T) {
 	screen.showing(t, "◐ macOS settings")
 	screen.press(t, "esc")
 	read()
-	stoppedAs(t, screen, ended, "– Linked files  stopped\n  – To install  stopped")
+	stoppedAs(t, screen, ended, "– Linked files  stopped\n  – To Homebrew  stopped\n  – To install  stopped")
 }
 
 // Esc while setup commits and pushes stops it: kit-config's row as it was
@@ -272,7 +275,7 @@ func TestSetupScreenStoppedWhileCommitting(t *testing.T) {
 	w.expectCommit(t, laptopCommit)
 	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "push", "--quiet", "origin", "HEAD:refs/heads/main").Hangs()
 	screen := atTerminal(t, w, 80, 48)
-	ended := running(t, w, "setup", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--link", "~/.zshrc")
+	ended := running(t, w, "setup", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--link", "~/.zshrc", "--no-adopt")
 	screen.showing(t, "how will you sign in?")
 	screen.press(t, "enter")
 	screen.showing(t, boottest.Code)
@@ -286,7 +289,8 @@ func TestSetupScreenStoppedWhileCommitting(t *testing.T) {
 // from a Mac in use, its GitHub's CLI signed out, kit-config made anew:
 // signing in, the way chosen; the code, with the phone, the whole window;
 // the config; this Mac's name, typed; the snapshot part-way, a row a part;
-// your data, ticked; apps' settings; the files to link.
+// your data, ticked; apps' settings; the files to link; the apps Homebrew
+// can take over, Tally left by hand, so kit apply never asks of it.
 func TestSetupScreen(t *testing.T) {
 	w := settingUp(t)
 	w.expectCommit(t, laptopCommit)
@@ -311,7 +315,7 @@ func TestSetupScreen(t *testing.T) {
 	screen.press(t, "enter")
 
 	matches(t, "setup-snapshot", screen.when(t, "the snapshot, macOS's settings alone being read", func(s string) bool {
-		return strings.Contains(s, "◐ macOS settings") && strings.Count(s, "◐") == 1 && strings.Count(s, "○") == 5
+		return strings.Contains(s, "◐ macOS settings") && strings.Count(s, "◐") == 1 && strings.Count(s, "○") == 6
 	}))
 	read()
 
@@ -326,6 +330,11 @@ func TestSetupScreen(t *testing.T) {
 	matches(t, "setup-linked-files", screen.showing(t, "which should kit-config keep"))
 	screen.press(t, "down", "space", "down", "space", "enter")
 
+	screen.showing(t, "which apps should Homebrew take over")
+	screen.press(t, "space")
+	matches(t, "setup-to-homebrew", screen.showing(t, "❯ □  Tally"))
+	screen.press(t, "enter")
+
 	done := screen.when(t, "setup done, kit apply carrying on", func(s string) bool {
 		return strings.Contains(s, "kit apply carries on now") && !strings.Contains(s, "esc stop")
 	})
@@ -334,6 +343,9 @@ func TestSetupScreen(t *testing.T) {
 	matches(t, "setup-done", strings.Join(lines[:last+1], "\n"))
 	if code := <-ended; code != 0 {
 		t.Errorf("kit setup exited %d, want 0", code)
+	}
+	if left := w.read(t, handFile); !strings.Contains(left, `"left": {`+"\n"+`    "com.example.tally": "2026-01-02T03:04:05Z"`) {
+		t.Errorf("by-hand.json = %s, want Tally left by hand", left)
 	}
 }
 
@@ -349,7 +361,7 @@ func TestSetupScreenJoining(t *testing.T) {
 	f.On("brew", "leaves").Prints("jq\n")
 	f.On("brew", "leaves", "--installed-on-request").Prints("jq\n")
 	f.On("brew", "list", "--cask", "--full-name", "-1")
-	f.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
+	w.caskroom(t, nil)
 	f.On("brew", "info", "--json=v2", "--formula", "fd", "lazygit", "ripgrep").Prints(`{"formulae": [{"name": "fd", "full_name": "fd"}, {"name": "lazygit", "full_name": "lazygit"}, {"name": "ripgrep", "full_name": "ripgrep"}], "casks": []}`)
 	w.clones(t, "someone/kit-config", map[string]string{
 		"kit.toml": twoMacs, "laptop/declarations": "", "studio/declarations": "",

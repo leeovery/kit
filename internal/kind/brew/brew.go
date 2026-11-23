@@ -1,5 +1,6 @@
 // Package brew is Homebrew's kinds, formulae and casks, and the step that
-// checks Homebrew is there.
+// checks Homebrew is there; and the apps installed by hand, each with the
+// cask that installs it, as Homebrew's catalogue of casks has it.
 package brew
 
 import (
@@ -43,6 +44,11 @@ type Homebrew struct {
 	// Home is the user's home, where the files a cask leaves are looked
 	// for.
 	Home string
+	// AppDirs are the folders apps are installed in, where the apps
+	// installed by hand are looked for. The first is the one casks put
+	// their apps in, /Applications as kit runs, where a cask installing
+	// adopts its app already there: none, and nothing is adopted.
+	AppDirs []string
 	// Admin reports whether an administrator's password is at hand, for
 	// installing Homebrew and casks that install through a package: nil
 	// when kit isn't installing, and asks nothing.
@@ -65,6 +71,14 @@ type Homebrew struct {
 	// its own code and Ruby, and a command running meanwhile fails ("Another
 	// brew vendor-install ruby process is already running": the sixth run).
 	updating sync.RWMutex
+	// cached is Homebrew's cache, as brew --cache names it, once it has, and
+	// the catalogue of casks there, as read from its file as it was then.
+	cached struct {
+		mu        sync.Mutex
+		dir       string
+		file      stamp
+		catalogue *catalogue
+	}
 }
 
 // formulaeName and casksName name Homebrew's kinds.
@@ -124,7 +138,7 @@ var shared = kind.NewKey[*Homebrew]("Homebrew")
 func Of(d *kind.Deps) *Homebrew {
 	return kind.Share(d, shared, func() *Homebrew {
 		h := New(d.Run)
-		h.Home = d.Home
+		h.Home, h.AppDirs = d.Home, d.AppDirs
 		return h
 	})
 }
@@ -332,14 +346,14 @@ func (h *Homebrew) updated(ctx context.Context) {
 	}
 }
 
-// install runs brew install, after brew update, of names, the kind named
-// kindName's, with which says what they are: --formula or --cask. Each
-// tap's go in apart, so a tap that fails, as one Homebrew refuses (the
-// sixth run), fails its own alone; and first, so a tap's formula claims a
-// name it shares with one of Homebrew's own before anything pulls that in
-// as a dependency (a tap's php, wanted, and Homebrew's, which composer
-// needs a php of, share a keg). Then Homebrew's own, in one go.
-func (h *Homebrew) install(ctx context.Context, kindName, which string, names []string) error {
+// install installs names, the kind named kindName's, after brew update,
+// each batch as each installs it. Each tap's go in apart, so a tap that
+// fails, as one Homebrew refuses (the sixth run), fails its own alone; and
+// first, so a tap's formula claims a name it shares with one of Homebrew's
+// own before anything pulls that in as a dependency (a tap's php, wanted,
+// and Homebrew's, which composer needs a php of, share a keg). Then
+// Homebrew's own, in one go.
+func (h *Homebrew) install(ctx context.Context, kindName string, names []string, each func(ctx context.Context, batch []string) error) error {
 	h.updated(ctx)
 	defer h.take(ctx, kindName)()
 	var errs []error
@@ -347,15 +361,21 @@ func (h *Homebrew) install(ctx context.Context, kindName, which string, names []
 		if ctx.Err() != nil {
 			break
 		}
-		kind.Starting(ctx)
-		if err := h.changes(ctx, runner.Command{
-			Name: "brew", Args: slices.Concat([]string{"install", which}, batch),
-			Timeout: installTimeout(len(batch)), Lines: kind.Lines(ctx),
-		}); err != nil {
+		if err := each(ctx, batch); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return kind.Joined(errs)
+}
+
+// installs runs brew install with args, then names, as one command, saying
+// it's starting (kind.Starting), its lines counted.
+func (h *Homebrew) installs(ctx context.Context, args, names []string) error {
+	kind.Starting(ctx)
+	return h.changes(ctx, runner.Command{
+		Name: "brew", Args: slices.Concat([]string{"install"}, args, names),
+		Timeout: installTimeout(len(names)), Lines: kind.Lines(ctx),
+	})
 }
 
 // changes runs cmd, brew installing, as Homebrew's turn to change things
@@ -541,8 +561,9 @@ func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) 
 type formulae struct{ *Homebrew }
 
 var (
-	_ kind.Resolver = formulae{}
-	_ kind.Resolver = casks{}
+	_ kind.Resolver  = formulae{}
+	_ kind.Resolver  = casks{}
+	_ kind.Adoptable = casks{}
 )
 
 func (formulae) Name() string    { return formulaeName }
@@ -586,7 +607,9 @@ func (f formulae) Resolve(ctx context.Context, names []string) (map[string]strin
 
 // Install installs names, each tap's apart and first (install).
 func (f formulae) Install(ctx context.Context, names []string) error {
-	return f.install(ctx, f.Name(), "--formula", names)
+	return f.install(ctx, f.Name(), names, func(ctx context.Context, batch []string) error {
+		return f.installs(ctx, []string{"--formula"}, batch)
+	})
 }
 
 // Done is which of names line, from brew install, says is installed.
@@ -678,9 +701,10 @@ func (c casks) Resolve(ctx context.Context, names []string) (map[string]string, 
 	return resolve(ctx, c.Homebrew, "--cask", names)
 }
 
-// Install installs names, each tap's apart and first (install).
+// Install installs names, each tap's apart and first (install), adopting
+// an app already there that's the cask's (adopting).
 func (c casks) Install(ctx context.Context, names []string) error {
-	return c.install(ctx, c.Name(), "--cask", names)
+	return c.install(ctx, c.Name(), names, c.adopting)
 }
 
 // Done is which of names line, from brew install, says is installed.
