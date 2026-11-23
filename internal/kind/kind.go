@@ -1403,7 +1403,7 @@ func withMissed(ctx context.Context, k Kind, installed []Installed, names []stri
 	if !ok {
 		return installed, nil
 	}
-	key := keyOf(k)
+	key := KeyOf(k)
 	listed := make(map[string]bool, len(installed))
 	for _, it := range installed {
 		listed[key(it.Name)] = true
@@ -1421,9 +1421,9 @@ func withMissed(ctx context.Context, k Kind, installed []Installed, names []stri
 	return append(installed, found...), err
 }
 
-// keyOf is how k matches its things' names: as they are, unless it says
+// KeyOf is how k matches its things' names: as they are, unless it says
 // (Keyed).
-func keyOf(k Kind) func(string) string {
+func KeyOf(k Kind) func(string) string {
 	if kd, ok := k.(Keyed); ok {
 		return kd.Key
 	}
@@ -1461,7 +1461,7 @@ func (t Taking) Off(name string) bool { return t.off[t.key(name)] }
 // when what's installed couldn't be looked at.
 func Taken(ctx context.Context, k Kind, declared config.List) (Taking, error) {
 	c := compare(ctx, k, declared)
-	t := Taking{key: keyOf(k), taken: c.taken, off: c.off}
+	t := Taking{key: KeyOf(k), taken: c.taken, off: c.off}
 	switch {
 	case c.looked:
 		return t, nil
@@ -1507,7 +1507,7 @@ func drift(ctx context.Context, k Kind, declared config.List, look func(context.
 		return res
 	}
 	res.HandLook = &check.Look{Apps: found.Apps}
-	key := keyOf(k)
+	key := KeyOf(k)
 	var names []string
 	for name := range found.Things {
 		if !c.taken[key(name)] {
@@ -1582,7 +1582,7 @@ func compare(ctx context.Context, k Kind, declared config.List) comparison {
 	if installed, err = withMissed(ctx, k, installed, declared.On()); err != nil {
 		return comparison{res: failed(k, err)}
 	}
-	key := keyOf(k)
+	key := KeyOf(k)
 	byKey := make(map[string]Installed, len(installed))
 	for _, it := range installed {
 		byKey[key(it.Name)] = it

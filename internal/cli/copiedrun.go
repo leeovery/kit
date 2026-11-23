@@ -23,12 +23,19 @@ import (
 
 // runLine runs l through the program of d's kind, then has each name in
 // it declared, installed, or undeclared, uninstalled, a step each, and one
-// commit and push of the config's changes; a dry run, none.
+// commit and push of the config's changes; a dry run, none. A kind that
+// finds what's typed, as an App Store app by its id, has each name found
+// first, as kit <kind> add finds it, and goes by the name found.
 func (a *app) runLine(ctx context.Context, r *run, d kind.Descriptor, l copiedLine) error {
 	liner, ks, err := copiedKinds(r, d, l.args)
-	switch {
-	case err != nil:
+	if err != nil {
 		return err
+	}
+	if l.names, err = a.find(ctx, r.kindsByName[d.Name], l.names); err != nil {
+		return fmt.Errorf("%w; nothing was %s", err, lineWords(d, l).Done)
+	}
+	l.names = once(l.names)
+	switch {
 	case l.dryRun:
 		return a.dryLine(ctx, r, d, liner, ks, l)
 	case l.installs:
@@ -79,7 +86,7 @@ func (a *app) dryLine(ctx context.Context, r *run, d kind.Descriptor, liner kind
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: saysCouldnt(lineWords(d, l), err.Error())}
 		}
-		line := kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: l.installs, DryRun: true}
+		line := kind.CopiedLine{Verb: l.typed, Args: l.args, Installs: l.installs, DryRun: true}
 		res := ranLine(runner.WithSecretEnv(ctx, env...), liner, line, lineWords(d, l))
 		if res.State == check.OK {
 			res.Summary = "a dry run: nothing declared or undeclared"
@@ -127,7 +134,7 @@ func (a *app) installLine(ctx context.Context, r *run, d kind.Descriptor, liner 
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: saysCouldnt(words, err.Error())}
 			}
-			return ranLine(runner.WithSecretEnv(ctx, env...), liner, kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: true, New: missing}, words)
+			return ranLine(runner.WithSecretEnv(ctx, env...), liner, kind.CopiedLine{Verb: l.typed, Args: l.args, Installs: true, New: missing}, words)
 		}
 		if settings == nil {
 			return install()
@@ -171,7 +178,7 @@ func planInstall(ctx context.Context, r *run, liner kind.Liner, ks []kind.Kind, 
 		}
 		plans[name] = pl
 	}
-	if err := liner.Refuses(ctx, kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: true, New: missingOf(plans, l.names)}); err != nil {
+	if err := liner.Refuses(ctx, kind.CopiedLine{Verb: l.typed, Args: l.args, Installs: true, New: missingOf(plans, l.names)}); err != nil {
 		refused = append(refused, err)
 	}
 	if len(refused) > 0 {
@@ -350,6 +357,15 @@ type removing struct {
 	forgot error
 }
 
+// zapping is what an uninstall line does with what its apps leave: on, it
+// removes it, as the program's flag for it says (LineHelp.Zap); else it's
+// kept, and by is what removes it: that flag, or kit's own remove --zap
+// for a program without one.
+type zapping struct {
+	on bool
+	by string
+}
+
 // uninstallLine runs l, an uninstall line, once each name in it is found
 // by whichever names it's declared by, one declared for every Mac refusing
 // the line whole without --shared; then undeclares each name it took off,
@@ -360,8 +376,8 @@ func (a *app) uninstallLine(ctx context.Context, r *run, d kind.Descriptor, line
 	if err != nil {
 		return err
 	}
-	zap := d.Help.Line.Zap != "" && slices.Contains(l.args, d.Help.Line.Zap)
-	p, err := a.lineLeftovers(ctx, r, l, plans, zap)
+	zap := zapping{on: d.Help.Line.Zap != "" && slices.Contains(l.args, d.Help.Line.Zap), by: cmp.Or(d.Help.Line.Zap, "kit "+d.Name+" remove --zap")}
+	p, err := a.lineLeftovers(ctx, r, l, plans, zap.on)
 	if err != nil {
 		return err
 	}
@@ -378,11 +394,11 @@ func (a *app) uninstallLine(ctx context.Context, r *run, d kind.Descriptor, line
 	c.step(ctx, d.Help.Line.Program, func(ctx context.Context) check.Result {
 		for _, name := range l.names {
 			// Deleted while the app's there, as kit cask remove --zap does.
-			if rm := plans[name]; zap && rm.lo != nil {
+			if rm := plans[name]; zap.on && rm.lo != nil {
 				rm.forgot = p.Forget(ctx, rm.lo.saved)
 			}
 		}
-		return ranLine(ctx, liner, kind.CopiedLine{Verb: l.verb, Args: l.args}, words)
+		return ranLine(ctx, liner, kind.CopiedLine{Verb: l.typed, Args: l.args}, words)
 	})
 	after := newLookup(ks, l.names)
 	for _, name := range l.names {
@@ -488,7 +504,7 @@ var errStillInstalled = errors.New("it's still installed")
 // uninstalled leaves a cask of the same name declared: one still installed
 // as it was stays declared, the saved settings deleted for it put back,
 // even when what's installed can't be told. words are what l does.
-func undeclareUninstalled(ctx context.Context, c *changes, after *lookup, name string, rm *removing, l copiedLine, words kind.Words, p *prefs.Prefs, zap bool) check.Result {
+func undeclareUninstalled(ctx context.Context, c *changes, after *lookup, name string, rm *removing, l copiedLine, words kind.Words, p *prefs.Prefs, zap zapping) check.Result {
 	still := false
 	var err error
 	if rm.was != nil {
@@ -496,7 +512,7 @@ func undeclareUninstalled(ctx context.Context, c *changes, after *lookup, name s
 	}
 	if err != nil || still {
 		why := cmp.Or(err, errStillInstalled)
-		if zap && rm.lo != nil {
+		if zap.on && rm.lo != nil {
 			why = putBack(ctx, p, rm.lo.saved, why)
 		}
 		if err != nil {
@@ -554,17 +570,17 @@ func undeclareGone(ctx context.Context, c *changes, after *lookup, rm *removing,
 // said is what became of rm's name, taken off, in parts, as words say it:
 // an app saying what became of what it leaves, as kit cask remove says it,
 // with zap removed, else kept.
-func (rm *removing) said(ctx context.Context, p *prefs.Prefs, words kind.Words, zap bool) []string {
+func (rm *removing) said(ctx context.Context, p *prefs.Prefs, words kind.Words, zap zapping) []string {
 	var said []string
 	switch lo := rm.lo; {
 	case rm.was == nil:
 		return []string{"wasn't " + kind.InstallWords.Done}
 	case lo == nil:
 		said = []string{words.Done}
-	case zap:
+	case zap.on:
 		said = lo.zappedSaid(ctx, p, rm.forgot)
 	case len(lo.files)+len(lo.saved) > 0:
-		said = []string{lo.done + ", " + lo.kept()}
+		said = []string{lo.done + ", " + lo.kept(zap.by)}
 	default:
 		said = []string{lo.done}
 	}

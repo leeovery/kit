@@ -20,7 +20,7 @@ func TestLeftoverWords(t *testing.T) {
 		{"nothing known", leftover{done: "uninstalled", app: "Example App"}, "Example App's settings", "its saved settings from kit prefs' store", "uninstalled", "its saved settings kept: --zap removes them"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := [4]string{tt.lo.title(), tt.lo.removes(), tt.lo.removed(), tt.lo.kept()}; got != [4]string{tt.title, tt.removes, tt.removed, tt.kept} {
+			if got := [4]string{tt.lo.title(), tt.lo.removes(), tt.lo.removed(), tt.lo.kept("--zap")}; got != [4]string{tt.title, tt.removes, tt.removed, tt.kept} {
 				t.Errorf("words = %q\nwant %q", got, [4]string{tt.title, tt.removes, tt.removed, tt.kept})
 			}
 		})

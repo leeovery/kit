@@ -147,7 +147,7 @@ func (lo leftover) uninstaller(p *prefs.Prefs, k kind.Kind, l kind.Leaver, name 
 			if err := k.Remove(ctx, []string{name}); err != nil {
 				return nil, err
 			}
-			return []string{lo.done + ", " + lo.kept()}, nil
+			return []string{lo.done + ", " + lo.kept("--zap")}, nil
 		}
 	}
 	return nil
@@ -296,12 +296,13 @@ func (lo leftover) removed() string {
 	return lo.done
 }
 
-// kept is what's become of them, kept, and how to remove them.
-func (lo leftover) kept() string {
+// kept is what's become of them, kept, and that by, a flag or a command,
+// removes them.
+func (lo leftover) kept(by string) string {
 	if len(lo.files) > 0 {
-		return "its files kept: --zap removes them"
+		return "its files kept: " + by + " removes them"
 	}
-	return "its saved settings kept: --zap removes them"
+	return "its saved settings kept: " + by + " removes them"
 }
 
 // takeOff takes name off the Mac, when it's on it (isIn), as how does, or,

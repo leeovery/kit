@@ -49,9 +49,9 @@ func TestALinesVerbOfTwoWords(t *testing.T) {
 	}
 	cmd, _, _ := root.Find([]string{"gh", "ext", "i"})
 	a.args = []string{"--plain", "gh", "ext", "i", "--force", "owner/gh-tool"}
-	line, err := a.lineAfter(cmd)
-	if err != nil || !slices.Equal(line, []string{"--force", "owner/gh-tool"}) || !a.plain {
-		t.Errorf("lineAfter = %q, %v, --plain read %v; want the line after the verb, kit's flag read", line, err, a.plain)
+	named, line, err := a.lineAfter(cmd)
+	if err != nil || !slices.Equal(named, []string{"gh", "ext", "i"}) || !slices.Equal(line, []string{"--force", "owner/gh-tool"}) || !a.plain {
+		t.Errorf("lineAfter = %q, %q, %v, --plain read %v; want the words as typed, the line after the verb, kit's flag read", named, line, err, a.plain)
 	}
 }
 

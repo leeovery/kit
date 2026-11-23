@@ -33,8 +33,7 @@ func addLineCommands(a *app, cmd *cobra.Command, d kind.Descriptor) {
 			fmt.Sprintf("Then each name it installed is declared for this Mac, or every Mac with --shared, %s. "+
 				"The line's flags are this install's alone: kit-config records the names. "+
 				"A name installed already is declared too, and one that didn't install isn't. "+
-				"With %s, nothing is declared. "+
-				"The change is committed and pushed to the config repository.", l.Declares, strings.Join(l.DryRun, " or ")),
+				"%sThe change is committed and pushed to the config repository.", l.Declares, dryRunSaid(l.DryRun)),
 			fmt.Sprintf("Before anything runs, each name is checked as kit %[1]s add checks it, and the whole line is refused if one can't be declared, "+
 				"or needs an administrator's password with no terminal to ask at. %[2]s", noun, l.Install.More),
 			fmt.Sprintf("kit's own flags in the line are --shared, and --note, which records why after each name: %[1]s has neither. "+
@@ -57,6 +56,15 @@ func addLineCommands(a *app, cmd *cobra.Command, d kind.Descriptor) {
 	uninstalls.Flags().Bool("shared", false, "take it out of the shared file, every Mac's list")
 	parentOf(cmd, l.Install, program).AddCommand(installs)
 	parentOf(cmd, l.Uninstall, program).AddCommand(uninstalls)
+}
+
+// dryRunSaid says a line with one of dryRun, a program's flags for a dry
+// run, declares nothing: "" for a program without one.
+func dryRunSaid(dryRun []string) string {
+	if len(dryRun) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("With %s, nothing is declared. ", strings.Join(dryRun, " or "))
 }
 
 // parentOf is the command under cmd that holds the command of v's last
@@ -93,7 +101,7 @@ func paragraphs(paras ...string) string {
 // by hand (readLine), and kit's other flags, before its name, are read as
 // it starts (lineAfter).
 func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, short, long string) *cobra.Command {
-	var given []string
+	var named, given []string
 	h := d.Help.Line
 	return &cobra.Command{
 		Use:                v.Words[len(v.Words)-1] + " <name>...",
@@ -102,7 +110,7 @@ func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, sho
 		Long:               long,
 		DisableFlagParsing: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) (err error) {
-			given, err = a.lineAfter(cmd)
+			named, given, err = a.lineAfter(cmd)
 			return err
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -117,6 +125,7 @@ func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, sho
 				return err
 			}
 			l.names, l.verb, l.installs = once(l.names), v.Words, installs
+			l.typed = named[len(named)-len(v.Words):]
 			l.dryRun = slices.ContainsFunc(l.args, func(arg string) bool { return slices.Contains(h.DryRun, arg) })
 			command := strings.Join(slices.Concat([]string{d.Name}, v.Words, l.args), " ")
 			return a.preparedAs(cmd.Context(), command, d.Name+"-"+strings.Join(v.Words, "-"), func(ctx context.Context, r *run) error {
@@ -128,11 +137,12 @@ func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, sho
 
 // lineAfter reads kit's own flags before cmd's name in kit's command line,
 // cmd being one that takes a line copied for a program, as kit starts, and
-// returns the line: what's after its name. cobra gives cmd both, run
-// together, and the line can hold flags of kit's names, as brew's
-// --verbose, which are the program's. kit's own take no values, so a word
-// that isn't a flag is a command's name.
-func (a *app) lineAfter(cmd *cobra.Command) ([]string, error) {
+// returns the words that named cmd, as typed, aliases and all, and the
+// line: what's after them. cobra gives cmd both, run together, and the
+// line can hold flags of kit's names, as brew's --verbose, which are the
+// program's. kit's own take no values, so a word that isn't a flag is a
+// command's name.
+func (a *app) lineAfter(cmd *cobra.Command) (named, line []string, err error) {
 	words := len(strings.Fields(cmd.CommandPath())) - 1
 	var before []string
 	for i, arg := range a.args {
@@ -140,27 +150,29 @@ func (a *app) lineAfter(cmd *cobra.Command) ([]string, error) {
 			before = append(before, arg)
 			continue
 		}
-		if words--; words > 0 {
+		if named = append(named, arg); len(named) < words {
 			continue
 		}
 		if err := cmd.InheritedFlags().Parse(before); err != nil {
-			return nil, usageError{err}
+			return nil, nil, usageError{err}
 		}
 		a.ready(cmd)
-		return a.args[i+1:], nil
+		return named, a.args[i+1:], nil
 	}
-	return nil, fmt.Errorf("%s isn't in kit's command line", cmd.CommandPath())
+	return nil, nil, fmt.Errorf("%s isn't in kit's command line", cmd.CommandPath())
 }
 
 // copiedLine is a line copied for a kind's program: the program's verb, as
-// words, and whether it installs; the arguments after it, kit's own flags
-// taken out: --shared; --note, for an install; and -h or --help, which
-// show kit's help; the names in it; and whether it's a dry run.
+// words, and as typed, which the program runs, an alias perhaps, as npm's
+// i; whether it installs; the arguments after it, kit's own flags taken
+// out: --shared; --note, for an install; and -h or --help, which show
+// kit's help; the names in it; and whether it's a dry run.
 type copiedLine struct {
-	verb, args, names []string
-	installs, dryRun  bool
-	shared, help      bool
-	note              string
+	verb, typed      []string
+	args, names      []string
+	installs, dryRun bool
+	shared, help     bool
+	note             string
 }
 
 // errNoteUninstalling is --note given to an uninstall.
@@ -259,13 +271,13 @@ func (l *lookup) lists(ctx context.Context, k kind.Kind, name string, resolve bo
 	switch {
 	case err != nil:
 		return false, err
-	case listsName(all, name):
+	case listsName(k, all, name):
 		return true, nil
 	case !resolve:
 		return false, nil
 	}
 	full, err := l.resolved(ctx, k, name)
-	return full != "" && listsName(all, full), err
+	return full != "" && listsName(k, all, full), err
 }
 
 // settle is the kind of kinds name is, and whether it's installed: the
@@ -313,22 +325,36 @@ func (l *lookup) list(ctx context.Context, k kind.Kind) ([]kind.Installed, error
 	return all, err
 }
 
-// listsName reports whether all holds name, in any case, as a package's
-// name is taken.
-func listsName(all []kind.Installed, name string) bool {
-	return slices.ContainsFunc(all, func(it kind.Installed) bool { return strings.EqualFold(it.Name, name) })
+// listsName reports whether all, k's things, holds name, by k's key, in
+// any case, as a package's name is taken: npm's typescript@5 is the
+// typescript it lists.
+func listsName(k kind.Kind, all []kind.Installed, name string) bool {
+	key := kind.KeyOf(k)
+	return slices.ContainsFunc(all, func(it kind.Installed) bool { return strings.EqualFold(key(it.Name), key(name)) })
+}
+
+// sameName reports whether a and b, names of k's things, are the same
+// thing: by k's key, in any case, for a kind that matches by key (Keyed);
+// else as sameThing has them, a tap's thing by its short name or its full
+// one. A key never goes by a short name, as npm's @scope/tool isn't tool.
+func sameName(k kind.Kind, a, b string) bool {
+	if kd, ok := k.(kind.Keyed); ok {
+		return strings.EqualFold(kd.Key(a), kd.Key(b))
+	}
+	return sameThing(strings.ToLower(a), strings.ToLower(b))
 }
 
 // declaredAs are the names each of names, things of k, is declared by in
-// this Mac's list, shared or its own: as given, or a tap's thing by its
-// short name or its full one (sameThing); else, with resolve, by any that's
-// the same thing as k resolves them, as an alias, resolved all at once.
+// this Mac's list, shared or its own: as given, as k matches them
+// (sameName); else, with resolve, by any that's the same thing as k
+// resolves them, as an alias, resolved all at once.
 func declaredAs(ctx context.Context, r *run, k kind.Kind, names []string, resolve bool) (map[string][]string, error) {
 	declared := r.lists[k.Name()].Names()
+	key := kind.KeyOf(k)
 	as := map[string][]string{}
 	var unmatched []string
 	for _, name := range names {
-		if i := slices.IndexFunc(declared, func(d string) bool { return sameThing(strings.ToLower(d), strings.ToLower(name)) }); i >= 0 {
+		if i := slices.IndexFunc(declared, func(d string) bool { return sameName(k, d, name) }); i >= 0 {
 			as[name] = declared[i : i+1]
 		} else {
 			unmatched = append(unmatched, name)
@@ -343,7 +369,7 @@ func declaredAs(ctx context.Context, r *run, k kind.Kind, names []string, resolv
 	}
 	for _, name := range unmatched {
 		if thing, ok := full[name]; ok {
-			as[name] = slices.DeleteFunc(slices.Clone(declared), func(d string) bool { return !strings.EqualFold(full[d], thing) })
+			as[name] = slices.DeleteFunc(slices.Clone(declared), func(d string) bool { return !strings.EqualFold(key(full[d]), key(thing)) })
 		}
 	}
 	return as, nil
