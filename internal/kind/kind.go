@@ -138,18 +138,21 @@ type Liner interface {
 	// Line runs l, as given, in the program's turn to change things,
 	// watched for going quiet as an install is.
 	Line(ctx context.Context, l CopiedLine) error
+	// Refuses says why l, an install line, isn't to run, as the kind's own
+	// install of a thing in it would refuse it, judged before anything
+	// runs: nil when it runs.
+	Refuses(ctx context.Context, l CopiedLine) error
 }
 
 // CopiedLine is a line copied for a kind's program, to run: the program's
-// verb, as words, then the arguments given after it; whether it installs;
-// and
-// the names in it kit found aren't installed yet, by the kind each
-// installs as, for what the program's own installs of them do, as
-// Homebrew's casks adopting an app already there.
+// verb, as words, then the arguments given after it; whether it installs,
+// and whether it's a dry run; and the names in it kit found aren't
+// installed yet, by the kind each installs as, for what the program's own
+// installs of them do, as Homebrew's casks adopting an app already there.
 type CopiedLine struct {
-	Verb, Args []string
-	Installs   bool
-	New        map[string][]string
+	Verb, Args       []string
+	Installs, DryRun bool
+	New              map[string][]string
 }
 
 // HeldEnv is the environment an install of names, held as h says, runs

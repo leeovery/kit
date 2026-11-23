@@ -78,6 +78,7 @@ func TestAnInstallLineDeclaresACaskGivenWithoutCask(t *testing.T) {
 func TestAnInstallLineDeclaresAFormula(t *testing.T) {
 	w := lineWorld(t)
 	w.fake.On("brew", "install", "ripgrep")
+	w.notACask("ripgrep")
 	w.listedAfter("ripgrep\n", "")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install ripgrep (laptop): for search")
 
@@ -133,7 +134,7 @@ func TestAnInstallLineGetsAPrivateDownloadsToken(t *testing.T) {
 func TestAnInstallLineThatPartlyFails(t *testing.T) {
 	w := lineWorld(t)
 	w.fake.On("brew", "install", "ffmpeg", "hello", "nosuch").Exits(1).PrintsToStderr(`Error: No available formula with the name "nosuch".`)
-	w.notACask("nosuch")
+	w.notACask("nosuch", "hello")
 	w.listedAfter("hello\n", "")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install ffmpeg, hello (laptop)")
 
@@ -277,6 +278,7 @@ func TestAnInstallLineDryRun(t *testing.T) {
 func TestAnInstallLineFindsAnAliasByItsFullName(t *testing.T) {
 	w := lineWorld(t)
 	w.fake.On("brew", "install", "rg")
+	w.notACask("rg")
 	w.listedAfter("ripgrep\n", "")
 	w.fake.On("brew", "info", "--json=v2", "--formula", "rg").Prints(`{"formulae": [{"name": "ripgrep", "full_name": "ripgrep", "aliases": ["rg"], "oldnames": []}], "casks": []}`)
 	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install rg (laptop)")
@@ -291,6 +293,7 @@ func TestAnInstallLineFindsAnAliasByItsFullName(t *testing.T) {
 func TestAnInstallLineAsJSON(t *testing.T) {
 	w := lineWorld(t)
 	w.fake.On("brew", "install", "ripgrep")
+	w.notACask("ripgrep")
 	w.listedAfter("ripgrep\n", "")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install ripgrep (laptop)")
 	out, errOut, code := w.run(t, "--json", "brew", "install", "ripgrep")
@@ -307,6 +310,7 @@ func TestAnInstallLineAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	w.terminal = true
 	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
 	w.notAFormula("zoom")
+	w.notACask("hello")
 	w.listedAfter("hello\n", "zoom\n")
 	w.expectPassword()
 	w.fake.On("brew", "install", "hello", "zoom")
@@ -332,11 +336,145 @@ func TestAnInstallLineRestoresTheSettingsKeptForAnApp(t *testing.T) {
 	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(listedCasks).Then().Prints(listedCasks + "example-app\n")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install example-app (laptop)")
 	out, errOut, code := w.run(t, "brew", "install", "--cask", "example-app")
-	if want := "brew ok installed; its saved settings restored\n"; !strings.Contains(out, want) || code != 0 {
+	if want := "brew ok installed; Example App's saved settings restored\n"; !strings.Contains(out, want) || code != 0 {
 		t.Errorf("kit brew install printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
 	}
 	if !ran(w, "defaults import com.example.app "+filepath.Join(w.home, ".local", "share", "kit", "prefs", "laptop", "domains", "com.example.app.plist")) {
 		t.Errorf("ran %q, want its settings imported", w.fake.Calls())
+	}
+}
+
+// The settings kept for each app a line installs are restored even when
+// brew fails on another name, each app named.
+func TestAnInstallLineThatFailsStillRestoresKeptSettings(t *testing.T) {
+	w := keptWorld(t)
+	w.write(t, filepath.Join(".local", "state", "kit", "prefs.json"), `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app", "com.example.other"],
+		"why": {"com.example.app": "kept till its app is installed", "com.example.other": "kept till its app is installed"}}}`)
+	clone := filepath.Join(w.home, ".local", "share", "kit", "prefs")
+	w.write(t, filepath.Join(".local", "share", "kit", "prefs", "laptop", "domains", "com.example.other.plist"), exampleSettings)
+	otherInfo := `{"token": "other-app", "full_token": "other-app", "old_tokens": [], "artifacts": [{"app": ["Other App.app"]}]}`
+	w.fake.On("brew", "info", "--json=v2", "--cask", "other-app").Prints(`{"formulae": [], "casks": [` + otherInfo + `]}`)
+	w.fake.On("brew", "info", "--json=v2", "--cask", "example-app", "other-app").Prints(strings.TrimSuffix(exampleInfo, `]}`) + `, ` + otherInfo + `]}`)
+	w.notACask("nosuch")
+	w.fake.On("brew", "install", "--cask", "example-app", "other-app", "nosuch").Does(func() {
+		for name, id := range map[string]string{"Example App": "com.example.app", "Other App": "com.example.other"} {
+			w.write(t, filepath.Join("Applications", name+".app", "Contents", "Info.plist"),
+				`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>`+id+`</string></dict></plist>`)
+		}
+	}).Exits(1).PrintsToStderr(`Error: Cask 'nosuch' is unavailable: No Cask with this name exists.`)
+	w.fake.On("osascript", "-e", `application id "com.example.other" is running`).Prints("false\n")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", filepath.Join(w.home, "Applications", "Other App.app"))
+	w.fake.On("defaults", "export", "com.example.other", "-").Prints(noSettings).Then().Prints(exampleSettings)
+	w.fake.On("defaults", "delete", "com.example.other")
+	w.fake.On("defaults", "import", "com.example.other", filepath.Join(clone, "laptop", "domains", "com.example.other.plist"))
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(listedCasks).Then().Prints(listedCasks + "example-app\nother-app\n")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install example-app, other-app (laptop)")
+
+	out, errOut, code := w.run(t, "brew", "install", "--cask", "example-app", "other-app", "nosuch")
+	want := "brew failed couldn't install: Error: Cask 'nosuch' is unavailable: No Cask with this name exists.; " +
+		"Example App's saved settings restored; Other App's saved settings restored\n"
+	if !strings.Contains(out, want) || code != 1 {
+		t.Errorf("kit brew install printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+	for _, id := range []string{"com.example.app", "com.example.other"} {
+		if !ran(w, "defaults import "+id+" "+filepath.Join(clone, "laptop", "domains", id+".plist")) {
+			t.Errorf("ran %q, want %s's settings imported", w.fake.Calls(), id)
+		}
+	}
+}
+
+// casksWorld is laptopWorld with example-editor a cask of version 3.2, its
+// app, Example Editor.app, at version have there already, installed by
+// hand, and brew install --adopt failing on it, as Homebrew does when the
+// app there differs from its download.
+func casksWorld(t *testing.T, have string) *world {
+	t.Helper()
+	w := laptopWorld(t)
+	w.homebrewCache(t, `{"protected":"e30","signature":"c2ln"}
+{"casks": {"example-editor": {"version": "3.2", "raw_artifacts": [[":uninstall", {":quit": "com.example.editor"}], [":app", ["Example Editor.app"]]]}}}`)
+	w.installAppOf(t, "Example Editor", "com.example.editor", have)
+	w.fake.On("brew", "info", "--json=v2", "--cask", "example-editor").Prints(`{"formulae": [], "casks": [{"token": "example-editor", "full_token": "example-editor", "old_tokens": [], "artifacts": [{"app": ["Example Editor.app"]}]}]}`)
+	w.notAFormula("example-editor")
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--adopt", "example-editor").Exits(1).PrintsToStderr("Error: example-editor: It seems the existing App is different from the one being installed.\n")
+	return w
+}
+
+// An app there already that's an older copy of the same major version is
+// replaced, as kit's own cask installs replace it; one of another major
+// version isn't, saying why.
+func TestAnInstallLineReplacesAnOlderCopy(t *testing.T) {
+	w := casksWorld(t, "3.1")
+	w.fake.On("brew", "install", "--cask", "--force", "example-editor")
+	w.listedAfter("", "example-editor\n")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install example-editor (laptop)")
+	out, errOut, code := w.run(t, "brew", "install", "example-editor")
+	if want := "brew ok installed\nexample-editor ok installed as a cask; declared in laptop\n"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit brew install printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+
+	w = casksWorld(t, "2.0")
+	out, _, code = w.run(t, "brew", "install", "example-editor")
+	want := "brew failed couldn't install: Example Editor.app is 2.0 and the cask's is 3.2: kit replaces only an older copy of the same major version\n"
+	if !strings.Contains(out, want) || code != 1 || ran(w, "brew install --cask --force example-editor") {
+		t.Errorf("kit brew install printed\n%s exit %d, ran %q; want it to hold %q, nothing replaced", out, code, w.fake.Calls(), want)
+	}
+}
+
+// An app there that isn't the cask's own refuses the line before anything
+// runs, with the other refusals, as kit cask add refuses it; a line with a
+// flag that changes where or how a cask installs runs as given instead.
+func TestAnInstallLineRefusesAnAppThatIsntTheCasks(t *testing.T) {
+	w := casksWorld(t, "3.1")
+	w.installAppOf(t, "Example Editor", "dev.fork.editor", "3.1")
+	_, errOut, code := w.run(t, "brew", "install", "example-editor")
+	want := "kit: Example Editor.app is already in ~/Applications and isn't the cask's (dev.fork.editor); nothing was installed\n"
+	if errOut != want || code == 0 || installRan(w) || ran(w, "brew update --quiet") {
+		t.Errorf("kit brew install printed %q, exit %d, ran %q; want\n%s", errOut, code, w.fake.Calls(), want)
+	}
+
+	w = casksWorld(t, "3.1")
+	w.installAppOf(t, "Example Editor", "dev.fork.editor", "3.1")
+	w.fake.On("brew", "install", "--no-quarantine", "example-editor")
+	w.listedAfter("", "example-editor\n")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew install example-editor (laptop)")
+	if _, errOut, code := w.run(t, "brew", "install", "--no-quarantine", "example-editor"); code != 0 {
+		t.Errorf("kit brew install --no-quarantine: exit %d, %s; want the line run as given", code, errOut)
+	}
+}
+
+// A dry run readies nothing: no brew update, no tap added; and runs with
+// the secrets the line declared for its name is held for, as an install
+// of it would.
+func TestAnInstallLineDryRunsWithItsToken(t *testing.T) {
+	w := privateWorld(t, "404")
+	w.writeSection(t, "laptop", "homebrew casks --secret "+tokenName, privateCask+"\n")
+	w.fake.On("brew", "install", "-n", "--cask", privateCask)
+	if _, errOut, code := w.run(t, "brew", "install", "-n", "--cask", privateCask); code != 0 {
+		t.Fatalf("kit brew install -n: exit %d, %s", code, errOut)
+	}
+	if got := tokensOf(t, w, "brew install -n --cask "+privateCask); !slices.Equal(got, []string{"plain-token-value"}) {
+		t.Errorf("the dry run ran with the token %q, want kit's own", got)
+	}
+	if ran(w, "brew update --quiet") || ran(w, "brew tap") {
+		t.Errorf("ran %q; want no update, and no tap looked for", w.fake.Calls())
+	}
+}
+
+// A name no kind knew before the line ran, installed, is judged as kit
+// <kind> add judges it before it's declared: refused, it isn't declared.
+func TestAnInstallLineJudgesANameItFoundAfter(t *testing.T) {
+	w := privateWorld(t, "404")
+	unknown := `Error: No available cask with the name "` + privateCask + `".`
+	w.fake.On("brew", "info", "--json=v2", "--cask", privateCask).Exits(1).PrintsToStderr(unknown).Then().Exits(1).PrintsToStderr(unknown).Then().Prints(privateInfo)
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(listedCasks).Then().Prints(listedCasks + privateCask + "\n")
+	out, errOut, code := w.run(t, "brew", "install", "--shared", "--cask", privateCask)
+	want := "owner/tools/app failed installed, but couldn't declare: "
+	if !strings.Contains(out, want) || code != 1 {
+		t.Errorf("kit brew install --shared printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+	if got := w.readSection(t, "shared", "homebrew casks"); got != "ghostty\n" {
+		t.Errorf("shared's casks = %q, want nothing declared", got)
 	}
 }
 
@@ -508,5 +646,47 @@ func TestAnUninstallLineOfACaskCleansUp(t *testing.T) {
 	out, _, _ = w.run(t, "brew", "uninstall", "example-app")
 	if want := "example-app ok uninstalled, its files kept: --zap removes them; out of laptop\n"; !strings.Contains(out, want) || ran(w, "defaults delete com.example.app") {
 		t.Errorf("kit brew uninstall printed\n%s\nwant it to hold %q, nothing deleted", out, want)
+	}
+}
+
+// A formula uninstalled is undeclared, and a cask of the same name, still
+// installed, stays declared, as it's undeclared only once its own kind
+// has it no more.
+func TestAnUninstallLineKeepsAnotherKindsThingDeclared(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew formulae", "foo\ngo\n")
+	w.writeSection(t, "laptop", "homebrew casks", "owner/tap/foo\n")
+	w.fake.On("brew", "list", "--formula", "--full-name", "-1").Prints(listedFormulae + "foo\n").Then().Prints(listedFormulae)
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(listedCasks + "owner/tap/foo\n")
+	w.fake.On("brew", "uninstall", "foo")
+	w.fake.On("brew", "info", "--json=v2", "--formula", "foo").Prints(`{"formulae": [{"name": "foo", "full_name": "foo", "aliases": [], "oldnames": []}], "casks": []}`)
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew uninstall foo (laptop)")
+
+	out, errOut, code := w.run(t, "brew", "uninstall", "foo")
+	if want := "foo ok uninstalled; out of laptop; owner/tap/foo stays declared, still installed\n"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit brew uninstall foo printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n" {
+		t.Errorf("laptop's formulae = %q, want foo out of it", got)
+	}
+	if got := w.readSection(t, "laptop", "homebrew casks"); got != "owner/tap/foo\n" {
+		t.Errorf("laptop's casks = %q, want owner/tap/foo still declared", got)
+	}
+}
+
+// A name whose kind can't be listed after the line ran stays declared,
+// saying why.
+func TestAnUninstallLineThatCantTellUndeclaresNothing(t *testing.T) {
+	w := leavingWorld(t, false)
+	w.notAFormula("example-app")
+	w.fake.On("brew", "uninstall", "--zap", "example-app").Exits(1).PrintsToStderr("Error: example-app: uninstall failed")
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nexample-app\n").Then().Exits(1).PrintsToStderr("Error: brew list failed")
+
+	out, errOut, code := w.run(t, "brew", "uninstall", "--zap", "example-app")
+	if want := "example-app failed couldn't tell whether it's installed: brew list --cask --full-name -1 exited 1: Error: brew list failed\n"; code != 1 || !strings.Contains(out, want) {
+		t.Errorf("kit brew uninstall --zap printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+	if got := w.readSection(t, "laptop", "homebrew casks"); got != "example-app\n" {
+		t.Errorf("laptop's casks = %q, want example-app still declared", got)
 	}
 }

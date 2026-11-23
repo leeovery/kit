@@ -55,21 +55,22 @@ func addLineCommands(a *app, cmd *cobra.Command, d kind.Descriptor) {
 			fmt.Sprintf("kit's own flag in the line is --shared; kit's other flags go before %s.", noun),
 		))
 	uninstalls.Flags().Bool("shared", false, "take it out of the shared file, every Mac's list")
-	parentOf(cmd, l.Install.Words, program).AddCommand(installs)
-	parentOf(cmd, l.Uninstall.Words, program).AddCommand(uninstalls)
+	parentOf(cmd, l.Install, program).AddCommand(installs)
+	parentOf(cmd, l.Uninstall, program).AddCommand(uninstalls)
 }
 
-// parentOf is the command under cmd that holds the command of a verb's
-// last word, of words: one for each word before it, made when it isn't
-// there yet.
-func parentOf(cmd *cobra.Command, words []string, program string) *cobra.Command {
-	for _, word := range words[:len(words)-1] {
-		i := slices.IndexFunc(cmd.Commands(), func(c *cobra.Command) bool { return c.Name() == word })
+// parentOf is the command under cmd that holds the command of v's last
+// word: one for each word before it, going by its aliases too, made when
+// it isn't there yet. A command of kit's own of the word holds nothing:
+// another is made, so the two clash.
+func parentOf(cmd *cobra.Command, v kind.LineVerb, program string) *cobra.Command {
+	for _, word := range v.Words[:len(v.Words)-1] {
+		i := slices.IndexFunc(cmd.Commands(), func(c *cobra.Command) bool { return c.Name() == word && !c.Runnable() })
 		if i >= 0 {
 			cmd = cmd.Commands()[i]
 			continue
 		}
-		sub := &cobra.Command{Use: word, Short: fmt.Sprintf("Run a copied %s %s line", program, word)}
+		sub := &cobra.Command{Use: word, Aliases: v.Aliases[word], Short: fmt.Sprintf("Run a copied %s %s line", program, word)}
 		cmd.AddCommand(sub)
 		cmd = sub
 	}
@@ -96,7 +97,7 @@ func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, sho
 	h := d.Help.Line
 	return &cobra.Command{
 		Use:                v.Words[len(v.Words)-1] + " <name>...",
-		Aliases:            v.Aliases,
+		Aliases:            v.Aliases[v.Words[len(v.Words)-1]],
 		Short:              short,
 		Long:               long,
 		DisableFlagParsing: true,
@@ -238,29 +239,33 @@ type listing struct {
 }
 
 // as is the kind of kinds name is installed as: the first listing it by
-// the name given; else the first that knows it, when that one lists it by
-// its full name, as an alias names a formula; nil for none.
+// the name given; else the first listing it by its full name, as that
+// kind resolves it, as an alias names a formula; nil for none.
 func (l *lookup) as(ctx context.Context, name string) (kind.Kind, error) {
-	for _, k := range l.kinds {
-		all, err := l.list(ctx, k)
-		if err != nil || listsName(all, name) {
-			return k, err
+	for _, resolve := range []bool{false, true} {
+		for _, k := range l.kinds {
+			if in, err := l.lists(ctx, k, name, resolve); err != nil || in {
+				return k, err
+			}
 		}
-	}
-	for _, k := range l.kinds {
-		full, err := l.resolved(ctx, k, name)
-		switch {
-		case err != nil:
-			return nil, err
-		case full == "":
-			continue
-		}
-		if all, _ := l.list(ctx, k); listsName(all, full) {
-			return k, nil
-		}
-		return nil, nil
 	}
 	return nil, nil
+}
+
+// lists reports whether k has name installed: by the name given; or, with
+// resolve, by its full name, as k resolves it.
+func (l *lookup) lists(ctx context.Context, k kind.Kind, name string, resolve bool) (bool, error) {
+	all, err := l.list(ctx, k)
+	switch {
+	case err != nil:
+		return false, err
+	case listsName(all, name):
+		return true, nil
+	case !resolve:
+		return false, nil
+	}
+	full, err := l.resolved(ctx, k, name)
+	return full != "" && listsName(all, full), err
 }
 
 // settle is the kind of kinds name is, and whether it's installed: the

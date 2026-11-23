@@ -130,12 +130,14 @@ type LineHelp struct {
 }
 
 // LineVerb is a verb of a program's a line starts with: its words, as in
-// gh's extension install, each but the last a command of kit's holding
-// the next; the other words its last goes by, as npm's i for install; and
-// what else its command's help says, of what kit does for the program.
+// gh's extension install, each a command of kit's holding the next; the
+// other words each goes by, by the word, as gh's ext for extension and
+// npm's i for install; and what else its command's help says, of what kit
+// does for the program.
 type LineVerb struct {
-	Words, Aliases []string
-	More           string
+	Words   []string
+	Aliases map[string][]string
+	More    string
 }
 
 // SwitchHelp is what kit <name> on and off do, for a kind whose things can

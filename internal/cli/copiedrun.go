@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
@@ -29,7 +30,7 @@ func (a *app) runLine(ctx context.Context, r *run, d kind.Descriptor, l copiedLi
 	case err != nil:
 		return err
 	case l.dryRun:
-		return a.dryLine(ctx, r, d, liner, l)
+		return a.dryLine(ctx, r, d, liner, ks, l)
 	case l.installs:
 		return a.installLine(ctx, r, d, liner, ks, l)
 	}
@@ -66,13 +67,20 @@ func ranLine(ctx context.Context, liner kind.Liner, line kind.CopiedLine, words 
 	return check.Result{State: check.OK, Summary: words.Done}
 }
 
-// dryLine runs l, a dry run, its program saying what it would do: nothing
-// is declared or undeclared.
-func (a *app) dryLine(ctx context.Context, r *run, d kind.Descriptor, liner kind.Liner, l copiedLine) error {
+// dryLine runs l, a dry run, of ks, its program saying what it would do,
+// with the secrets the lines declared for its names hold them for: nothing
+// is readied, declared or undeclared.
+func (a *app) dryLine(ctx context.Context, r *run, d kind.Descriptor, liner kind.Liner, ks []kind.Kind, l copiedLine) error {
+	names := l.names
 	l.names = nil
 	c := startLine(r, d, l, "")
 	c.step(ctx, d.Help.Line.Program, func(ctx context.Context) check.Result {
-		res := ranLine(ctx, liner, kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: l.installs}, lineWords(d, l))
+		env, err := dryEnv(ctx, r, ks, names)
+		if err != nil {
+			return check.Result{State: check.Failed, Reason: saysCouldnt(lineWords(d, l), err.Error())}
+		}
+		line := kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: l.installs, DryRun: true}
+		res := ranLine(runner.WithSecretEnv(ctx, env...), liner, line, lineWords(d, l))
 		if res.State == check.OK {
 			res.Summary = "a dry run: nothing declared or undeclared"
 		}
@@ -97,7 +105,7 @@ type planned struct {
 // the casks that need it, the line refused whole otherwise; then declares
 // each name it installed, or found installed already.
 func (a *app) installLine(ctx context.Context, r *run, d kind.Descriptor, liner kind.Liner, ks []kind.Kind, l copiedLine) error {
-	plans, err := planInstall(ctx, r, ks, l)
+	plans, err := planInstall(ctx, r, liner, ks, l)
 	if err != nil {
 		return err
 	}
@@ -112,13 +120,14 @@ func (a *app) installLine(ctx context.Context, r *run, d kind.Descriptor, liner 
 		return err
 	}
 	c := startLine(r, d, l, "declaring")
+	words := lineWords(d, l)
 	c.step(ctx, d.Help.Line.Program, func(ctx context.Context) check.Result {
 		install := func() check.Result {
 			env, err := lineEnv(ctx, r, plans, l.names)
 			if err != nil {
-				return check.Result{State: check.Failed, Reason: couldnt(lineWords(d, l)) + err.Error()}
+				return check.Result{State: check.Failed, Reason: saysCouldnt(words, err.Error())}
 			}
-			return ranLine(runner.WithSecretEnv(ctx, env...), liner, kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: true, New: missing}, lineWords(d, l))
+			return ranLine(runner.WithSecretEnv(ctx, env...), liner, kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: true, New: missing}, words)
 		}
 		if settings == nil {
 			return install()
@@ -138,14 +147,11 @@ func (a *app) installLine(ctx context.Context, r *run, d kind.Descriptor, liner 
 // planInstall judges each name in l, of ks, before the line runs, as kit
 // <kind> add does: its tap added first, as kit's installs add it, so it's
 // known; one installed or known that can't be declared refuses the line
-// whole. A name no kind knows is left to the line, which says so.
-func planInstall(ctx context.Context, r *run, ks []kind.Kind, l copiedLine) (map[string]planned, error) {
-	for _, k := range ks {
-		if rd, ok := k.(kind.Readier); ok {
-			if err := rd.Ready(ctx, l.names); err != nil {
-				return nil, fmt.Errorf("%w; nothing was installed", err)
-			}
-		}
+// whole, as does what liner, its program's kind, refuses of it. A name no
+// kind knows is left to the line, which says so.
+func planInstall(ctx context.Context, r *run, liner kind.Liner, ks []kind.Kind, l copiedLine) (map[string]planned, error) {
+	if err := readyLine(ctx, ks, l.names); err != nil {
+		return nil, fmt.Errorf("%w; nothing was installed", err)
 	}
 	before := newLookup(ks, l.names)
 	scope := r.scope(l.shared)
@@ -159,19 +165,51 @@ func planInstall(ctx context.Context, r *run, ks []kind.Kind, l copiedLine) (map
 		}
 		pl := planned{k: k, isIn: isIn}
 		if k != nil {
-			if pl.p, err = prepareAdding(ctx, r, k, scope, name, opts, isIn); err == nil && pl.p.ready {
-				err = r.holdLine(ctx, k, scope, &pl.p)
-			}
-			if err != nil {
+			if pl.p, err = judgedAdding(ctx, r, k, scope, name, opts, isIn); err != nil {
 				refused = append(refused, fmt.Errorf("%s can't be declared: %w", name, err))
 			}
 		}
 		plans[name] = pl
 	}
+	if err := liner.Refuses(ctx, kind.CopiedLine{Verb: l.verb, Args: l.args, Installs: true, New: missingOf(plans, l.names)}); err != nil {
+		refused = append(refused, err)
+	}
 	if len(refused) > 0 {
 		return nil, fmt.Errorf("%w; nothing was installed", kind.Joined(refused))
 	}
 	return plans, nil
+}
+
+// readyLine readies what names, of ks, need before they're installed, as
+// the taps they're from, once for kinds sharing a program, as readying
+// one readies the others'.
+func readyLine(ctx context.Context, ks []kind.Kind, names []string) error {
+	var readied []string
+	for _, k := range ks {
+		rd, ok := k.(kind.Readier)
+		if !ok || slices.Contains(readied, k.Name()) {
+			continue
+		}
+		if err := rd.Ready(ctx, names); err != nil {
+			return err
+		}
+		readied = append(readied, k.Name())
+		if s, ok := k.(kind.Sharing); ok {
+			readied = append(readied, s.Shares()...)
+		}
+	}
+	return nil
+}
+
+// judgedAdding is what adding name, of k, declares, judged as kit <kind>
+// add judges it (prepareAdding), and held for the secret installing it
+// needs (holdLine).
+func judgedAdding(ctx context.Context, r *run, k kind.Kind, scope, name string, opts addOptions, isIn bool) (adding, error) {
+	p, err := prepareAdding(ctx, r, k, scope, name, opts, isIn)
+	if err == nil && p.ready {
+		err = r.holdLine(ctx, k, scope, &p)
+	}
+	return p, err
 }
 
 // missingOf are those of names plans has as not installed, of a kind that
@@ -212,7 +250,7 @@ func adminRefused(ctx context.Context, r *run, d kind.Descriptor, l copiedLine, 
 func (a *app) lineSettings(r *run, missing map[string][]string) (func(context.Context, func() check.Result) check.Result, error) {
 	for kindName := range missing {
 		if d, _ := kinds.Named(kindName); d.Apps {
-			return a.keptSettings(r, kindName)
+			return a.keptSettings(r, kindName, true)
 		}
 	}
 	return nil, nil
@@ -224,35 +262,57 @@ func (a *app) lineSettings(r *run, missing map[string][]string) (func(context.Co
 func lineEnv(ctx context.Context, r *run, plans map[string]planned, names []string) ([]string, error) {
 	var env []string
 	for _, name := range names {
-		pl := plans[name]
-		if pl.k == nil || pl.isIn {
-			continue
+		if pl := plans[name]; pl.k != nil && !pl.isIn {
+			held, err := r.heldEnv(ctx, pl.p.declared(), name)
+			if err != nil {
+				return nil, err
+			}
+			env = append(env, held...)
 		}
-		line := pl.p.line
-		if len(pl.p.mine) > 0 {
-			line = pl.p.mine[0]
-		}
-		secrets := line.Secrets()
-		if len(secrets) == 0 {
-			continue
-		}
-		waits, vars, err := r.needing(secrets)
-		if err != nil {
-			return nil, err
-		}
-		held, err := kind.HeldEnv(ctx, kind.Held{Hold: line.Hold, Waits: waits, Env: vars}, []string{name})
-		if err != nil {
-			return nil, err
-		}
-		env = append(env, held...)
 	}
 	return env, nil
 }
 
+// dryEnv is the environment a dry run of a line of names, of ks, runs in:
+// a variable for each secret the line declared for one, for this Mac,
+// holds it for, as an install of it would have it; nothing is found out
+// that changes the Mac, so a name not declared runs without.
+func dryEnv(ctx context.Context, r *run, ks []kind.Kind, names []string) ([]string, error) {
+	var env []string
+	for _, name := range names {
+		for _, k := range ks {
+			mine, err := declaredFor(r, k.Name(), name, false)
+			if err != nil {
+				return nil, err
+			}
+			if len(mine) == 0 {
+				continue
+			}
+			held, err := r.heldEnv(ctx, mine[0], name)
+			if err != nil {
+				return nil, err
+			}
+			env = append(env, held...)
+			break
+		}
+	}
+	return env, nil
+}
+
+// heldEnv is the environment installing name, of e, its line, runs in:
+// a variable for each secret e is held for, from kit's own secrets.
+func (r *run) heldEnv(ctx context.Context, e config.Entry, name string) ([]string, error) {
+	h, held, err := r.heldBy(e)
+	if err != nil || !held {
+		return nil, err
+	}
+	return kind.HeldEnv(ctx, h, []string{name})
+}
+
 // declareInstalled declares name, a name in l, as the thing after finds
 // it installed as, as kit <kind> add declares a thing installed already,
-// as pl, its plan, judged it, when it's that kind's still; one that isn't
-// installed isn't declared.
+// as pl, its plan, judged it, when it's that kind's still, else judged
+// now as the plan was; one that isn't installed isn't declared.
 func declareInstalled(ctx context.Context, r *run, c *changes, after *lookup, name string, pl planned, l copiedLine) check.Result {
 	k, err := after.as(ctx, name)
 	switch {
@@ -268,15 +328,13 @@ func declareInstalled(ctx context.Context, r *run, c *changes, after *lookup, na
 	if h := descriptorOf(k).Help; len(after.kinds) > 1 && h != nil && h.One != "" {
 		verb += " as " + h.One
 	}
-	p := pl.p
+	scope, opts, p := r.scope(l.shared), addOptions{shared: l.shared, note: l.note}, pl.p
 	if pl.k == nil || pl.k.Name() != k.Name() {
-		mine, err := declaredFor(r, k.Name(), name, l.shared)
-		if err != nil {
+		if p, err = judgedAdding(ctx, r, k, scope, name, opts, true); err != nil {
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 		}
-		p = adding{mine: mine}
 	}
-	return declareAdding(ctx, r, c, k, r.scope(l.shared), name, addOptions{shared: l.shared, note: l.note}, verb, p)
+	return declareAdding(ctx, r, c, k, scope, name, opts, verb, p)
 }
 
 // removing is a name in an uninstall line as kit found it before the line
@@ -426,39 +484,71 @@ var errStillInstalled = errors.New("it's still installed")
 
 // undeclareUninstalled takes name, a name in l, out of this Mac's
 // declarations, and the shared ones with --shared, by each name it's
-// declared by, once after finds it installed as none of its kinds: one
-// still installed stays declared, the saved settings deleted for it put
-// back. words are what l does.
+// declared by whose own kind after finds no longer has it, as a formula
+// uninstalled leaves a cask of the same name declared: one still installed
+// as it was stays declared, the saved settings deleted for it put back,
+// even when what's installed can't be told. words are what l does.
 func undeclareUninstalled(ctx context.Context, c *changes, after *lookup, name string, rm *removing, l copiedLine, words kind.Words, p *prefs.Prefs, zap bool) check.Result {
-	k, err := after.as(ctx, name)
-	switch {
-	case err != nil:
-		return check.Result{State: check.Failed, Reason: "couldn't tell whether it's installed: " + err.Error()}
-	case k != nil:
-		why := errStillInstalled
+	still := false
+	var err error
+	if rm.was != nil {
+		still, err = after.lists(ctx, rm.was, name, true)
+	}
+	if err != nil || still {
+		why := cmp.Or(err, errStillInstalled)
 		if zap && rm.lo != nil {
 			why = putBack(ctx, p, rm.lo.saved, why)
 		}
+		if err != nil {
+			return check.Result{State: check.Failed, Reason: "couldn't tell whether it's installed: " + why.Error()}
+		}
 		return check.Result{State: check.Failed, Reason: "couldn't undeclare: " + why.Error()}
 	}
-	var from []string
-	for _, k := range after.kinds {
-		for _, form := range rm.forms[k.Name()] {
-			out, err := c.undeclareHere(k.Name(), form, l.shared)
-			if err != nil {
-				return check.Result{State: check.Failed, Reason: words.Done + ", but couldn't undeclare: " + err.Error()}
-			}
-			from = append(from, out...)
-		}
+	from, kept, err := undeclareGone(ctx, c, after, rm, l.shared)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: words.Done + ", but couldn't undeclare: " + err.Error()}
 	}
 	said := rm.said(ctx, p, words, zap)
 	switch {
 	case len(from) > 0:
-		return check.Result{State: check.OK}.Saying(append(said, "out of "+strings.Join(once(from), " and "))...)
-	case rm.was != nil:
-		return check.Result{State: check.OK}.Saying(append(said, "it wasn't declared")...)
+		said = append(said, "out of "+strings.Join(once(from), " and "))
+	case rm.was != nil && len(kept) == 0:
+		said = append(said, "it wasn't declared")
+	case len(kept) == 0:
+		return check.Result{State: check.OK, Summary: "wasn't installed or declared: nothing to undeclare"}
 	}
-	return check.Result{State: check.OK, Summary: "wasn't installed or declared: nothing to undeclare"}
+	if len(kept) > 0 {
+		said = append(said, strings.Join(kept, " and ")+" stays declared, still installed")
+	}
+	return check.Result{State: check.OK}.Saying(said...)
+}
+
+// undeclareGone undeclares each name rm's declared by, from this Mac's
+// declarations, and the shared ones with shared, once after finds it gone
+// from its own kind: the files it's out of; and those still installed,
+// kept. Those of the kind rm's name was installed as name it, found gone
+// already.
+func undeclareGone(ctx context.Context, c *changes, after *lookup, rm *removing, shared bool) (from, kept []string, err error) {
+	for _, k := range after.kinds {
+		for _, form := range rm.forms[k.Name()] {
+			in := false
+			if rm.was == nil || rm.was.Name() != k.Name() {
+				if in, err = after.lists(ctx, k, form, true); err != nil {
+					return nil, nil, fmt.Errorf("couldn't tell whether %s is installed: %w", form, err)
+				}
+			}
+			if in {
+				kept = append(kept, form)
+				continue
+			}
+			out, err := c.undeclareHere(k.Name(), form, shared)
+			if err != nil {
+				return nil, nil, err
+			}
+			from = append(from, out...)
+		}
+	}
+	return from, kept, nil
 }
 
 // said is what became of rm's name, taken off, in parts, as words say it:

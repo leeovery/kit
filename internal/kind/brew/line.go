@@ -17,7 +17,8 @@ import (
 var lineHelp = &kind.LineHelp{
 	Program: "brew",
 	Install: kind.LineVerb{Words: []string{"install"}, More: "kit adds --adopt to a line of casks it can vet, as its own cask installs do, " +
-		"so the app already there is taken over, or replaced when it's an older copy of the same major version; not to a line with --adopt or --force."},
+		"so the app already there is taken over, or replaced when it's an older copy of the same major version: " +
+		"only to a line whose flags change neither where nor how a cask installs, such as --cask or --verbose; any other line runs as given."},
 	Uninstall: kind.LineVerb{Words: []string{"uninstall"}, More: "With --zap, an app's settings kit prefs saved go too, as with kit cask remove --zap; " +
 		"without it, they're kept."},
 	Example:  "--cask --force owner/tap/tool",
@@ -41,7 +42,9 @@ func (f formulae) Line(ctx context.Context, l kind.CopiedLine) error {
 	}
 	names, _ := lineNames(l.Args)
 	cmd.Timeout = installTimeout(len(names))
-	f.updated(ctx)
+	if !l.DryRun {
+		f.updated(ctx)
+	}
 	defer f.take(ctx, f.Name())()
 	c := casks(f)
 	a, adopting := c.lineAdoption(ctx, l)
@@ -58,13 +61,28 @@ func (f formulae) Line(ctx context.Context, l kind.CopiedLine) error {
 	return err
 }
 
+// Refuses says why l, an install line, isn't to run, as kit's own install
+// of a cask in it would refuse it, its app already there not one it takes
+// over (lineAdoption): nil when it runs.
+func (f formulae) Refuses(ctx context.Context, l kind.CopiedLine) error {
+	a, _ := casks(f).lineAdoption(ctx, l)
+	return kind.Joined(a.refused)
+}
+
+// plainFlags are brew install's flags that change neither where nor how a
+// cask installs: what its names are given as, and what brew says.
+var plainFlags = []string{"--cask", "--casks", "--verbose", "-v", "--quiet", "-q", "--debug", "-d", "--display-times"}
+
 // lineAdoption is how the casks l installs, that aren't installed yet, go
-// in, each as kit's own install of it would (adoption), and whether l's to
-// adopt their apps already there: when it doesn't say how itself, with
-// --adopt or --force, which Homebrew refuses together, and every one is a
-// cask kit can vet; one kit can't, as a tap's, has the line run as given.
+// in, each as kit's own install of it would (adoption), and whether kit
+// adopts their apps already there, as its own installs do: when every one
+// is a cask kit can vet; one kit can't, as a tap's, has the line run as
+// given. Only a line whose flags are plainFlags alone is judged, so a
+// replace (replace) installs each as l would; another, or a dry run, runs
+// as given, nothing refused.
 func (c casks) lineAdoption(ctx context.Context, l kind.CopiedLine) (adoption, bool) {
-	if slices.ContainsFunc(l.Args, func(arg string) bool { return arg == "--adopt" || arg == "--force" || arg == "-f" }) {
+	plain := !slices.ContainsFunc(l.Args, func(arg string) bool { return strings.HasPrefix(arg, "-") && !slices.Contains(plainFlags, arg) })
+	if l.DryRun || !plain {
 		return adoption{}, false
 	}
 	var all adoption

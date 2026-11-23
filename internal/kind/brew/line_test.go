@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -134,6 +135,9 @@ func TestALineOfCasksAdopts(t *testing.T) {
 		{"--adopt given", []string{"--adopt", "google-chrome"}, []string{"google-chrome"}, "brew install --adopt google-chrome"},
 		{"a tap's among them", []string{"google-chrome", "owner/tap/tool"}, []string{"google-chrome", "owner/tap/tool"}, "brew install google-chrome owner/tap/tool"},
 		{"installed already", []string{"google-chrome"}, nil, "brew install google-chrome"},
+		{"saying more", []string{"--verbose", "-q", "--casks", "google-chrome"}, []string{"google-chrome"}, "brew install --adopt --verbose -q --casks google-chrome"},
+		{"elsewhere", []string{"--appdir=/Users/someone/Applications", "google-chrome"}, []string{"google-chrome"}, "brew install --appdir=/Users/someone/Applications google-chrome"},
+		{"otherwise", []string{"--no-quarantine", "google-chrome"}, []string{"google-chrome"}, "brew install --no-quarantine google-chrome"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake, _, _ := adopting(t)
@@ -171,8 +175,46 @@ func TestALineOfCasksReplacesOrRefuses(t *testing.T) {
 	fake, apps, _ = adopting(t)
 	installApp(t, apps, "Spaceman.app", "dev.fork.Spaceman")
 	line = kind.CopiedLine{Verb: []string{"install"}, Args: []string{"spaceman"}, Installs: true, New: map[string][]string{"cask": {"spaceman"}}}
-	err := withApps(fake, apps, t.TempDir()).Formulae().(kind.Liner).Line(t.Context(), line)
-	if err == nil || !strings.Contains(err.Error(), "Spaceman.app is already in "+apps+" and isn't the cask's (dev.fork.Spaceman)") || len(installs(fake)) != 0 {
+	liner := withApps(fake, apps, t.TempDir()).Formulae().(kind.Liner)
+	refused := "Spaceman.app is already in " + apps + " and isn't the cask's (dev.fork.Spaceman)"
+	if err := liner.Refuses(t.Context(), line); err == nil || err.Error() != refused {
+		t.Errorf("Refuses = %v, want %q", err, refused)
+	}
+	err := liner.Line(t.Context(), line)
+	if err == nil || err.Error() != refused || len(installs(fake)) != 0 {
 		t.Errorf("Line = %v, running %q; want it refused, nothing installed", err, installs(fake))
+	}
+	line.Args = []string{"--appdir=/Users/someone/Applications", "spaceman"}
+	if err := liner.Refuses(t.Context(), line); err != nil {
+		t.Errorf("Refuses = %v, want a line kit doesn't adopt run as given", err)
+	}
+}
+
+// A replace never hides another failure of the line's: a formula's stays
+// brew's error.
+func TestALinesReplaceKeepsAFormulasFailure(t *testing.T) {
+	fake, apps, _ := adopting(t)
+	h := withApps(fake, apps, t.TempDir())
+	installVersion(t, apps, "Example Editor.app", "com.example.editor", "3.1")
+	fake.On("brew", "install", "--adopt", "example-editor", "hello").Exits(1).PrintsToStderr("Error: hello: Download failed\n" + notAdopted)
+	fake.On("brew", "install", "--cask", "--force", "example-editor")
+	fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("example-editor\n")
+	line := kind.CopiedLine{Verb: []string{"install"}, Args: []string{"example-editor", "hello"}, Installs: true, New: map[string][]string{"cask": {"example-editor"}, "brew": {"hello"}}}
+	err := h.Formulae().(kind.Liner).Line(t.Context(), line)
+	if err == nil || engine.Reason(err) != "Error: hello: Download failed" {
+		t.Errorf("Line = %v, want hello's failure alone", err)
+	}
+}
+
+// A dry run runs without brew update, and adopts nothing.
+func TestALineDryRun(t *testing.T) {
+	fake, _, _ := adopting(t)
+	fake.On("brew", "install", "-n", "google-chrome")
+	line := kind.CopiedLine{Verb: []string{"install"}, Args: []string{"-n", "google-chrome"}, Installs: true, DryRun: true, New: map[string][]string{"cask": {"google-chrome"}}}
+	if err := withApps(fake, t.TempDir()).Formulae().(kind.Liner).Line(t.Context(), line); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.Calls(); !slices.Equal(got, []string{"brew install -n google-chrome"}) {
+		t.Errorf("ran %q, want the line alone", got)
 	}
 }

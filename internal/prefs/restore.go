@@ -526,6 +526,15 @@ func (p *Prefs) owned() func(domain string) bool {
 	return func(d string) bool { return len(p.owningApps(d, installed)) > 0 }
 }
 
+// AppName is the installed app whose bundle id is id, by the name its
+// bundle has, as the Finder shows it: id, when none is installed.
+func (p *Prefs) AppName(id string) string {
+	if app, ok := p.installedApps()[id]; ok {
+		return appName(app)
+	}
+	return id
+}
+
 // Apps are the bundle ids of the apps installed, sorted.
 func (p *Prefs) Apps() []string {
 	return slices.Sorted(maps.Keys(p.installedApps()))
