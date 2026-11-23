@@ -16,14 +16,24 @@ const Placeholder = "[redacted]"
 // token in a header.
 var tokenShaped = regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]+|ops_[A-Za-z0-9_-]{20,})|(?i:(bearer|token)\s+)[A-Za-z0-9._~+/=-]{16,}`)
 
-// Text returns text with each of secrets, and anything shaped like a token,
-// replaced by Placeholder.
+// npmAuth matches the value of one of npm's credentials, given as a
+// setting, as in --//registry.npmjs.org/:_authToken=value; userinfo, the
+// password in an address, as in https://user:password@host.
+var (
+	npmAuth  = regexp.MustCompile(`(?i)\b(_authToken|_auth|_password)=(['"]?)[^\s'"]+`)
+	userinfo = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]+):[^/\s@]+@`)
+)
+
+// Text returns text with each of secrets, anything shaped like a token,
+// npm's credentials and an address's password replaced by Placeholder.
 func Text(text string, secrets ...string) string {
 	for _, secret := range secrets {
 		if secret != "" {
 			text = strings.ReplaceAll(text, secret, Placeholder)
 		}
 	}
+	text = npmAuth.ReplaceAllString(text, "${1}=${2}"+Placeholder)
+	text = userinfo.ReplaceAllString(text, "${1}:"+Placeholder+"@")
 	return tokenShaped.ReplaceAllStringFunc(text, func(match string) string {
 		if prefix := bearerPrefix(match); prefix != "" {
 			return prefix + Placeholder

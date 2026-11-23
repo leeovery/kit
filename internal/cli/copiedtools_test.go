@@ -70,7 +70,7 @@ func TestAnNPMLineIsRefusedBeforeItRuns(t *testing.T) {
 	}
 	w := laptopWorld(t)
 	_, errOut, _ := w.run(t, "npm", "install", "typescript")
-	if want := "kit: the line isn't global: kit declares npm's global packages alone, so give it -g\n"; errOut != want {
+	if want := "kit: the line isn't global: kit declares only npm's global packages, so give it -g\n"; errOut != want {
 		t.Errorf("kit npm install typescript: %q, want\n%s", errOut, want)
 	}
 }
@@ -107,6 +107,12 @@ func TestALinesHelpIsItsPrograms(t *testing.T) {
 	if out := help("npm", "install"); !strings.Contains(out, "kit npm install -g <name>...") {
 		t.Errorf("kit npm install --help printed\n%s\nwant its usage to show -g", out)
 	}
+	if out := help("gh", "extension", "install"); !strings.Contains(out, "a name without its owner, as gh-tool, is refused") {
+		t.Errorf("kit gh extension install --help printed\n%s\nwant it to say a name without its owner is refused", out)
+	}
+	if out := help("mas", "uninstall"); !strings.Contains(out, "To remove them too, run kit mas remove --zap in place of the line.") {
+		t.Errorf("kit mas uninstall --help printed\n%s\nwant its advice on removing the saved settings", out)
+	}
 	if out := help("mas", "install"); strings.Contains(out, "--dry-run") {
 		t.Errorf("kit mas install --help printed\n%s\nwant no --dry-run: mas install has none", out)
 	}
@@ -128,7 +134,7 @@ func TestAnNPMInstallLineDryRun(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("npm", "install", "-g", "--dry-run", "typescript")
 	out, errOut, code := w.run(t, "npm", "install", "-g", "--dry-run", "typescript")
-	if want := "npm ok a dry run: nothing declared or undeclared\n"; !strings.Contains(out, want) || code != 0 {
+	if want := "npm ok a dry run: nothing declared\n"; !strings.Contains(out, want) || code != 0 {
 		t.Errorf("kit npm install --dry-run printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
 	}
 }
@@ -216,7 +222,7 @@ func TestAComposerRemoveLineUndeclares(t *testing.T) {
 	w = laptopWorld(t)
 	w.fake.On("composer", "global", "remove", "--dry-run", "laravel/valet")
 	out, errOut, code = w.run(t, "composer", "global", "remove", "--dry-run", "laravel/valet")
-	if want := "composer ok a dry run: nothing declared or undeclared\n"; !strings.Contains(out, want) || code != 0 {
+	if want := "composer ok a dry run: nothing undeclared\n"; !strings.Contains(out, want) || code != 0 {
 		t.Errorf("kit composer global remove --dry-run printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
 	}
 }
@@ -348,9 +354,8 @@ func TestAMasInstallLineIsRefusedBeforeItRuns(t *testing.T) {
 }
 
 // An uninstall line runs mas through sudo, then undeclares the app, the
-// settings kit prefs saved for it kept, saying they come back with it and
-// what, in place of the line, would have removed them; a dry run runs mas
-// without sudo, and declares nothing.
+// settings kit prefs saved for it kept, saying they come back with it; a
+// dry run runs mas without sudo, and undeclares nothing.
 func TestAMasUninstallLineUndeclares(t *testing.T) {
 	w := notesWorld(t, true)
 	w.fake.On("mas", "lookup", "--json", "123456789").Prints(notesListed)
@@ -358,8 +363,7 @@ func TestAMasUninstallLineUndeclares(t *testing.T) {
 	w.fake.On("sudo", "-n", "true")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit mas uninstall notes-example@123456789 (laptop)")
 	out, errOut, code := w.run(t, "mas", "uninstall", "123456789")
-	want := "notes-example@123456789 ok uninstalled, its saved settings kept, to come back if it's installed again: " +
-		"kit mas remove --zap, in place of the line, removes them; out of laptop\n"
+	want := "notes-example@123456789 ok uninstalled, its saved settings kept, to come back if it's installed again; out of laptop\n"
 	if !strings.Contains(out, want) || code != 0 {
 		t.Errorf("kit mas uninstall printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
 	}
@@ -400,7 +404,7 @@ func TestAMasUninstallLineUndeclares(t *testing.T) {
 	w.fake.On("mas", "lookup", "--json", "123456789").Prints(notesListed)
 	w.fake.On("mas", "uninstall", "--dry-run", "123456789")
 	out, errOut, code = w.run(t, "mas", "uninstall", "--dry-run", "123456789")
-	if want := "mas ok a dry run: nothing declared or undeclared\n"; !strings.Contains(out, want) || code != 0 || slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "sudo") }) {
+	if want := "mas ok a dry run: nothing undeclared\n"; !strings.Contains(out, want) || code != 0 || slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "sudo") }) {
 		t.Errorf("kit mas uninstall --dry-run printed\n%s%s exit %d, ran %q; want it to hold %q, no sudo", out, errOut, code, w.fake.Calls(), want)
 	}
 }

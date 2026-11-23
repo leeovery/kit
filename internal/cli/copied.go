@@ -12,6 +12,7 @@ import (
 
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/redact"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -121,7 +122,7 @@ func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, sho
 				return cmd.Help()
 			}
 			if l.names, err = h.Names(l.args); err != nil {
-				return err
+				return errors.New(redact.Text(err.Error()))
 			}
 			l.names, l.verb, l.installs = once(l.names), v.Words, installs
 			l.typed = named[len(named)-len(v.Words):]

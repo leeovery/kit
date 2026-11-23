@@ -154,6 +154,19 @@ func once(names []string) []string {
 	return out
 }
 
+// onceBy is names, each thing once, as key matches them, in any case: the
+// first given of each, as npm's typescript@5 after typescript is the same
+// package.
+func onceBy(names []string, key func(string) string) []string {
+	var out []string
+	for _, name := range names {
+		if !slices.ContainsFunc(out, func(had string) bool { return strings.EqualFold(key(had), key(name)) }) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // find settles what each typed name means, for a kind that finds things
 // (an App Store app from its name), before anything's asked or installed:
 // one match is it; several are a choice at a terminal, and without one an

@@ -448,6 +448,16 @@ type Readier interface {
 	Ready(ctx context.Context, names []string) error
 }
 
+// Unreadier is a Readier whose readying can be put back, as Homebrew
+// untaps the taps it added: for a line refused once it's readied.
+type Unreadier interface {
+	Readier
+	// Readied readies what names need, as Ready does, and returns what
+	// puts back what it changed, nil when it changed nothing, even when
+	// it failed part way.
+	Readied(ctx context.Context, names []string) (undo func(context.Context) error, err error)
+}
+
 // Shortened is a kind whose things are shown by part of their names, as
 // Homebrew's from a tap by their names in the tap.
 type Shortened interface {

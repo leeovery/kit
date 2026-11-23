@@ -262,14 +262,17 @@ func TestAnInstallLinesHelpIsKits(t *testing.T) {
 	}
 }
 
-// A dry run declares nothing, and says so.
+// A dry run declares nothing, and says so; kit-config isn't touched.
 func TestAnInstallLineDryRun(t *testing.T) {
 	w := lineWorld(t)
 	w.fake.On("brew", "install", "-n", "ripgrep")
 	out, errOut, code := w.run(t, "brew", "install", "-n", "ripgrep")
-	want := "kit brew install -n ripgrep · laptop\nbrew ok a dry run: nothing declared or undeclared\nkit-config ok nothing changed\nNothing needs attention\n"
+	want := "kit brew install -n ripgrep · laptop\nbrew ok a dry run: nothing declared\nNothing needs attention\n"
 	if out != want || code != 0 {
 		t.Errorf("kit brew install -n printed\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
+	}
+	if slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "git ") }) {
+		t.Errorf("ran %q; want kit-config untouched", w.fake.Calls())
 	}
 }
 
@@ -606,7 +609,7 @@ func TestAnUninstallLineOfNothing(t *testing.T) {
 	w.fake.On("brew", "info", "--json=v2", "--cask", "iterm2", "ghostty").Prints(itermInfo)
 	w.fake.On("brew", "info", "--json=v2", "--cask", "iterm2").Prints(itermInfo)
 	out, _, _ := w.run(t, "brew", "uninstall", "--cask", "iterm2")
-	if want := "iterm2 ok wasn't installed or declared: nothing to undeclare\n"; !strings.Contains(out, want) {
+	if want := "iterm2 ok wasn't installed or declared\n"; !strings.Contains(out, want) {
 		t.Errorf("kit brew uninstall printed\n%s\nwant it to hold %q", out, want)
 	}
 }
@@ -688,5 +691,91 @@ func TestAnUninstallLineThatCantTellUndeclaresNothing(t *testing.T) {
 	}
 	if got := w.readSection(t, "laptop", "homebrew casks"); got != "example-app\n" {
 		t.Errorf("laptop's casks = %q, want example-app still declared", got)
+	}
+}
+
+// A line brew failed undeclares only what was installed before it and is
+// gone after: a name that wasn't installed stays declared, saying so, as
+// does another kind's thing of the same name that wasn't installed.
+func TestAFailedUninstallLineKeepsWhatWasntInstalled(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew formulae", "foo\ngo\n")
+	w.fake.On("brew", "info", "--json=v2", "--formula", "foo").Prints(`{"formulae": [{"name": "foo", "full_name": "foo", "aliases": [], "oldnames": []}], "casks": []}`)
+	w.notACask("foo")
+	w.fake.On("brew", "uninstall", "foo").Exits(1).PrintsToStderr("Error: No such keg: /opt/homebrew/Cellar/foo")
+	out, errOut, code := w.run(t, "brew", "uninstall", "foo")
+	if want := "foo ok wasn't installed, and brew failed: it stays declared\n"; !strings.Contains(out, want) || code != 1 {
+		t.Errorf("kit brew uninstall foo printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "foo\ngo\n" {
+		t.Errorf("laptop's formulae = %q, want foo still declared", got)
+	}
+
+	w = laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew formulae", "foo\ngo\n")
+	w.writeSection(t, "laptop", "homebrew casks", "owner/tap/foo\n")
+	w.fake.On("brew", "list", "--formula", "--full-name", "-1").Prints(listedFormulae + "foo\n").Then().Prints(listedFormulae)
+	w.fake.On("brew", "info", "--json=v2", "--formula", "foo").Prints(`{"formulae": [{"name": "foo", "full_name": "foo", "aliases": [], "oldnames": []}], "casks": []}`)
+	w.fake.On("brew", "tap").Prints("owner/tap\n")
+	w.fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/foo").Prints(`{"formulae": [], "casks": [{"token": "foo", "full_token": "owner/tap/foo", "old_tokens": []}]}`)
+	w.fake.On("brew", "uninstall", "foo").Exits(1).PrintsToStderr("Error: foo: a post-uninstall step failed")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew uninstall foo (laptop)")
+	out, errOut, code = w.run(t, "brew", "uninstall", "foo")
+	if want := "foo ok uninstalled; out of laptop; owner/tap/foo stays declared: it wasn't installed, and brew failed\n"; !strings.Contains(out, want) || code != 1 {
+		t.Errorf("kit brew uninstall foo printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+	if got := w.readSection(t, "laptop", "homebrew casks"); got != "owner/tap/foo\n" {
+		t.Errorf("laptop's casks = %q, want owner/tap/foo still declared", got)
+	}
+}
+
+// A line refused once its tap was added takes the tap out again, as kit
+// brew add does.
+func TestARefusedInstallLineUntaps(t *testing.T) {
+	w := privateWorld(t, "404")
+	w.fake.On("brew", "tap").Prints("").Then().Prints("owner/tools\n")
+	w.fake.On("brew", "tap", "owner/tools")
+	w.fake.On("brew", "untap", "owner/tools")
+	_, errOut, code := w.run(t, "brew", "install", "--shared", "--cask", privateCask)
+	calls := w.fake.Calls()
+	tapped, untapped := slices.Index(calls, "brew tap owner/tools"), slices.Index(calls, "brew untap owner/tools")
+	if !strings.HasSuffix(errOut, "; nothing was installed\n") || code == 0 || installRan(w) || tapped < 0 || untapped < tapped {
+		t.Errorf("kit brew install --shared: %q, exit %d, ran %q; want it refused, its tap taken out again", errOut, code, calls)
+	}
+}
+
+// A line's credentials, in its flags, are never printed or logged.
+func TestALinesCredentialsAreRedacted(t *testing.T) {
+	w := laptopWorld(t)
+	line := []string{"npm", "install", "-g", "--//registry.npmjs.org/:_authToken=npm-secret-value", "--registry", "https://someone:hunter2-value@registry.example.com/", "typescript"}
+	w.listsAround(line, npmLS, npmListed(""), npmListed(`"typescript": {}`))
+	w.expectSync(t, []string{"laptop/declarations"}, "kit npm install typescript (laptop)")
+	out, errOut, code := w.run(t, line...)
+	if code != 0 {
+		t.Fatalf("kit npm install printed\n%s%s exit %d", out, errOut, code)
+	}
+	logs, err := filepath.Glob(filepath.Join(w.home, "Library", "Logs", "kit", "*npm-install*"))
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("logs = %q, %v; want the run's", logs, err)
+	}
+	logged := w.read(t, strings.TrimPrefix(logs[0], w.home+"/"))
+	for _, secret := range []string{"npm-secret-value", "hunter2-value"} {
+		if strings.Contains(out+errOut+logged, secret) {
+			t.Errorf("kit printed or logged %s:\n%s%s\n%s", secret, out, errOut, logged)
+		}
+	}
+	if !strings.Contains(logged, "_authToken=[redacted]") {
+		t.Errorf("the run's log holds\n%s\nwant the token's place shown redacted", logged)
+	}
+}
+
+// One package given twice, by its name and with its version, is one step.
+func TestALinesNamesAreOnceEach(t *testing.T) {
+	w := laptopWorld(t)
+	w.listsAround([]string{"npm", "i", "-g", "typescript", "typescript@5"}, npmLS, npmListed(""), npmListed(`"typescript": {}`))
+	w.expectSync(t, []string{"laptop/declarations"}, "kit npm install typescript (laptop)")
+	out, errOut, code := w.run(t, "npm", "i", "-g", "typescript", "typescript@5")
+	if want := "npm ok installed\ntypescript ok installed; declared in laptop\nkit-config"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit npm i -g printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
 	}
 }

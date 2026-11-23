@@ -218,3 +218,26 @@ func TestALineDryRun(t *testing.T) {
 		t.Errorf("ran %q, want the line alone", got)
 	}
 }
+
+// Readied taps what isn't tapped yet, and what it returns untaps those
+// alone; tapping nothing, it returns nothing to undo.
+func TestReadiedUntapsWhatItTapped(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "tap").Prints("owner/had\n")
+	fake.On("brew", "tap", "owner/tools")
+	fake.On("brew", "untap", "owner/tools")
+	ready := withApps(fake).Casks().(kind.Unreadier)
+	undo, err := ready.Readied(t.Context(), []string{"owner/tools/app", "owner/had/other", "firefox"})
+	if err != nil || undo == nil {
+		t.Fatalf("Readied = %v, %v; want the tap added, and its undo", undo != nil, err)
+	}
+	if err := undo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := fake.Calls(), []string{"brew tap", "brew tap owner/tools", "brew untap owner/tools"}; !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+	if undo, err := ready.Readied(t.Context(), []string{"firefox"}); undo != nil || err != nil {
+		t.Errorf("Readied of Homebrew's own = %v, %v; want nothing to undo", undo != nil, err)
+	}
+}

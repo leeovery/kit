@@ -24,6 +24,11 @@ func TestText(t *testing.T) {
 		{name: "a short word after bearer stays", text: "bearer of news", want: "bearer of news"},
 		{name: "a secret handed over", text: "wrote hunter2-value to the file", secrets: []string{"hunter2-value", ""}, want: "wrote [redacted] to the file"},
 		{name: "ghp_ too short to be a token", text: "ghp_short", want: "ghp_short"},
+		{name: "npm's token in a flag", text: "npm install -g --//registry.npmjs.org/:_authToken=npm_abc123 tool", want: "npm install -g --//registry.npmjs.org/:_authToken=[redacted] tool"},
+		{name: "npm's auth and password", text: "_auth=dXNlcjpwYXNz _password='cGFzcw=='", want: "_auth=[redacted] _password='[redacted]'"},
+		{name: "an address's password", text: "npm install -g --registry https://someone:hunter2@registry.example.com/ tool", want: "npm install -g --registry https://someone:[redacted]@registry.example.com/ tool"},
+		{name: "an address's user alone stays", text: "ssh://git@github.com/owner/repo", want: "ssh://git@github.com/owner/repo"},
+		{name: "a scp-like address stays", text: "git@github.com:owner/repo.git", want: "git@github.com:owner/repo.git"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

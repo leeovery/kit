@@ -25,8 +25,8 @@ var lineHelp = &kind.LineHelp{
 	Uninstall: kind.LineVerb{Words: []string{"uninstall"}, DryRun: []string{"--dry-run"},
 		More: "An app's found by its id, whatever name it's declared by. " +
 			"mas needs an administrator's password, which kit asks for before it runs. " +
-			"The settings kit prefs saved for an app are kept, to come back if it's installed again: " +
-			"kit mas remove --zap, in place of the line, removes them."},
+			"The settings kit prefs saved for an app are kept, to come back if it's installed again. " +
+			"To remove them too, run kit mas remove --zap in place of the line."},
 	Example:  "497799835",
 	Declares: "by its name and id, as kit mas add declares it, as in xcode@497799835",
 	Usage:    "<id>...",

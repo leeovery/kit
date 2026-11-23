@@ -56,7 +56,7 @@ var composerLine = &kind.LineHelp{
 var ghLine = &kind.LineHelp{
 	Program: "gh",
 	Install: kind.LineVerb{Words: []string{"extension", "install"}, Aliases: map[string][]string{"extension": {"ext", "extensions"}},
-		More: "An extension is installed by its repository, as owner/gh-tool."},
+		More: "An extension is installed by its repository, as owner/gh-tool: a name without its owner, as gh-tool, is refused."},
 	Uninstall: kind.LineVerb{Words: []string{"extension", "remove"}, Aliases: map[string][]string{"extension": {"ext", "extensions"}, "remove": {"uninstall"}},
 		More: "An extension can be given by its repository or, as gh takes it, by its command's name, as tool for owner/gh-tool."},
 	Example:  "owner/gh-tool",
@@ -171,7 +171,7 @@ func npmNames(args []string) ([]string, error) {
 	}
 	switch {
 	case !global:
-		return nil, errors.New("the line isn't global: kit declares npm's global packages alone, so give it -g")
+		return nil, errors.New("the line isn't global: kit declares only npm's global packages, so give it -g")
 	case len(names) == 0:
 		return nil, errors.New("the line names nothing for npm: give it a package, as in kit npm install -g typescript")
 	}

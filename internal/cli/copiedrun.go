@@ -39,7 +39,7 @@ func (a *app) runLine(ctx context.Context, r *run, d kind.Descriptor, l copiedLi
 	case err != nil:
 		return fmt.Errorf("%w; nothing was %s", err, lineWords(d, l).Done)
 	}
-	l.names = once(l.names)
+	l.names = onceBy(l.names, kind.KeyOf(k))
 	switch {
 	case l.dryRun:
 		return a.dryLine(ctx, r, d, liner, ks, l)
@@ -81,7 +81,7 @@ func ranLine(ctx context.Context, liner kind.Liner, line kind.CopiedLine, words 
 
 // dryLine runs l, a dry run, of ks, its program saying what it would do,
 // with the secrets the lines declared for its names hold them for: nothing
-// is readied, declared or undeclared.
+// is readied, declared or undeclared, and kit-config isn't touched.
 func (a *app) dryLine(ctx context.Context, r *run, d kind.Descriptor, liner kind.Liner, ks []kind.Kind, l copiedLine) error {
 	names := l.names
 	l.names = nil
@@ -94,11 +94,13 @@ func (a *app) dryLine(ctx context.Context, r *run, d kind.Descriptor, liner kind
 		line := kind.CopiedLine{Verb: l.typed, Args: l.args, Installs: l.installs, DryRun: true}
 		res := ranLine(runner.WithSecretEnv(ctx, env...), liner, line, lineWords(d, l))
 		if res.State == check.OK {
-			res.Summary = "a dry run: nothing declared or undeclared"
+			res.Summary = "a dry run: nothing declared"
+			if !l.installs {
+				res.Summary = "a dry run: nothing undeclared"
+			}
 		}
 		return res
 	})
-	c.sync(ctx, "")
 	return c.finish()
 }
 
@@ -117,19 +119,19 @@ type planned struct {
 // the casks that need it, the line refused whole otherwise; then declares
 // each name it installed, or found installed already.
 func (a *app) installLine(ctx context.Context, r *run, d kind.Descriptor, liner kind.Liner, ks []kind.Kind, l copiedLine) error {
-	plans, err := planInstall(ctx, r, liner, ks, l)
+	plans, undo, err := planInstall(ctx, r, liner, ks, l)
 	if err != nil {
-		return err
+		return undone(ctx, undo, err)
 	}
 	missing := missingOf(plans, l.names)
 	ctx, held, stop := a.holdAdmin(ctx, r, missing)
 	defer stop()
 	if err := adminRefused(ctx, r, d, l, missing, held); err != nil {
-		return err
+		return undone(ctx, undo, err)
 	}
 	settings, err := a.lineSettings(r, missing)
 	if err != nil {
-		return err
+		return undone(ctx, undo, err)
 	}
 	c := startLine(r, d, l, "declaring")
 	words := lineWords(d, l)
@@ -160,10 +162,12 @@ func (a *app) installLine(ctx context.Context, r *run, d kind.Descriptor, liner 
 // <kind> add does: its tap added first, as kit's installs add it, so it's
 // known; one installed or known that can't be declared refuses the line
 // whole, as does what liner, its program's kind, refuses of it. A name no
-// kind knows is left to the line, which says so.
-func planInstall(ctx context.Context, r *run, liner kind.Liner, ks []kind.Kind, l copiedLine) (map[string]planned, error) {
-	if err := readyLine(ctx, ks, l.names); err != nil {
-		return nil, fmt.Errorf("%w; nothing was installed", err)
+// kind knows is left to the line, which says so. undo puts back what
+// readying the names changed, for a line refused.
+func planInstall(ctx context.Context, r *run, liner kind.Liner, ks []kind.Kind, l copiedLine) (_ map[string]planned, undo func(context.Context) error, _ error) {
+	undo, err := readyLine(ctx, ks, l.names)
+	if err != nil {
+		return nil, undo, fmt.Errorf("%w; nothing was installed", err)
 	}
 	before := newLookup(ks, l.names)
 	scope := r.scope(l.shared)
@@ -173,7 +177,7 @@ func planInstall(ctx context.Context, r *run, liner kind.Liner, ks []kind.Kind, 
 	for _, name := range l.names {
 		k, isIn, err := before.settle(ctx, name)
 		if err != nil {
-			return nil, err
+			return nil, undo, err
 		}
 		pl := planned{k: k, isIn: isIn}
 		if k != nil {
@@ -187,30 +191,57 @@ func planInstall(ctx context.Context, r *run, liner kind.Liner, ks []kind.Kind, 
 		refused = append(refused, err)
 	}
 	if len(refused) > 0 {
-		return nil, fmt.Errorf("%w; nothing was installed", kind.Joined(refused))
+		return nil, undo, fmt.Errorf("%w; nothing was installed", kind.Joined(refused))
 	}
-	return plans, nil
+	return plans, undo, nil
 }
 
 // readyLine readies what names, of ks, need before they're installed, as
 // the taps they're from, once for kinds sharing a program, as readying
-// one readies the others'.
-func readyLine(ctx context.Context, ks []kind.Kind, names []string) error {
+// one readies the others'; and returns what puts back what that changed,
+// as far as it got (kind.Unreadier).
+func readyLine(ctx context.Context, ks []kind.Kind, names []string) (func(context.Context) error, error) {
 	var readied []string
+	var undos []func(context.Context) error
+	undo := func(ctx context.Context) error {
+		var errs []error
+		for _, u := range slices.Backward(undos) {
+			errs = append(errs, u(ctx))
+		}
+		return errors.Join(errs...)
+	}
 	for _, k := range ks {
 		rd, ok := k.(kind.Readier)
 		if !ok || slices.Contains(readied, k.Name()) {
 			continue
 		}
-		if err := rd.Ready(ctx, names); err != nil {
-			return err
+		var err error
+		if ur, ok := rd.(kind.Unreadier); ok {
+			var u func(context.Context) error
+			if u, err = ur.Readied(ctx, names); u != nil {
+				undos = append(undos, u)
+			}
+		} else {
+			err = rd.Ready(ctx, names)
+		}
+		if err != nil {
+			return undo, err
 		}
 		readied = append(readied, k.Name())
 		if s, ok := k.(kind.Sharing); ok {
 			readied = append(readied, s.Shares()...)
 		}
 	}
-	return nil
+	return undo, nil
+}
+
+// undone is refused, a line's refusal, once undo has put back what
+// readying it changed, saying so if it couldn't.
+func undone(ctx context.Context, undo func(context.Context) error, refused error) error {
+	if err := undo(ctx); err != nil {
+		return fmt.Errorf("%w; %s", refused, engine.Reason(err))
+	}
+	return refused
 }
 
 // judgedAdding is what adding name, of k, declares, judged as kit <kind>
@@ -364,21 +395,21 @@ type removing struct {
 
 // zapping is what an uninstall line does with what its apps leave: on, it
 // removes it, as flag, the program's flag for it, says (LineHelp.Zap);
-// else it's kept. noun is the line's kind.
+// else it's kept.
 type zapping struct {
-	on         bool
-	flag, noun string
+	on   bool
+	flag string
 }
 
 // kept says lo, what an app left, is kept, and what removes it: the
-// program's flag, in a line; else, for a program without one, kit's own
-// remove --zap in place of the line, as, the app gone, nothing kit has
-// removes it after: its saved settings come back if it's installed again.
+// program's flag, in a line; else, for a program without one, that its
+// saved settings come back if it's installed again, as, the line having
+// undeclared it, nothing kit has removes them now.
 func (z zapping) kept(lo leftover) string {
 	if z.flag != "" {
 		return lo.kept(z.flag)
 	}
-	return "its saved settings kept, to come back if it's installed again: kit " + z.noun + " remove --zap, in place of the line, removes them"
+	return "its saved settings kept, to come back if it's installed again"
 }
 
 // uninstallLine runs l, an uninstall line, once each name in it is found
@@ -387,11 +418,11 @@ func (z zapping) kept(lo leftover) string {
 // kit's own clean-up done for the apps among them, as kit cask remove does
 // it, l's --zap removing what they leave.
 func (a *app) uninstallLine(ctx context.Context, r *run, d kind.Descriptor, liner kind.Liner, ks []kind.Kind, l copiedLine) error {
-	plans, err := planUninstall(ctx, r, ks, l)
+	plans, before, err := planUninstall(ctx, r, ks, l)
 	if err != nil {
 		return err
 	}
-	zap := zapping{on: d.Help.Line.Zap != "" && slices.Contains(l.args, d.Help.Line.Zap), flag: d.Help.Line.Zap, noun: d.Name}
+	zap := zapping{on: d.Help.Line.Zap != "" && slices.Contains(l.args, d.Help.Line.Zap), flag: d.Help.Line.Zap}
 	p, err := a.lineLeftovers(ctx, r, l, plans, zap.on)
 	if err != nil {
 		return err
@@ -406,7 +437,7 @@ func (a *app) uninstallLine(ctx context.Context, r *run, d kind.Descriptor, line
 	defer stop()
 	c := startLine(r, d, l, "undeclaring")
 	words := lineWords(d, l)
-	c.step(ctx, d.Help.Line.Program, func(ctx context.Context) check.Result {
+	ran := c.step(ctx, d.Help.Line.Program, func(ctx context.Context) check.Result {
 		for _, name := range l.names {
 			// Deleted while the app's there, as kit cask remove --zap does.
 			if rm := plans[name]; zap.on && rm.lo != nil {
@@ -415,10 +446,13 @@ func (a *app) uninstallLine(ctx context.Context, r *run, d kind.Descriptor, line
 		}
 		return ranLine(ctx, liner, kind.CopiedLine{Verb: l.typed, Args: l.args}, words)
 	})
-	after := newLookup(ks, l.names)
+	u := unlined{before: before, after: newLookup(ks, l.names)}
+	if ran.State == check.Failed {
+		u.failed = d.Help.Line.Program
+	}
 	for _, name := range l.names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
-			return undeclareUninstalled(ctx, c, after, name, plans[name], l, words, p, zap)
+			return undeclareUninstalled(ctx, c, u, name, plans[name], l, words, p, zap)
 		})
 	}
 	c.sync(ctx, commitMessage(strings.Join(l.verb, " "), d.Name, c.whoWrote(l.names), r.machine, ""))
@@ -427,14 +461,15 @@ func (a *app) uninstallLine(ctx context.Context, r *run, d kind.Descriptor, line
 
 // planUninstall finds each name in l, of ks, before the line runs: what
 // it's installed as, and the names it's declared by (declaredAs). One
-// declared for every Mac refuses the line whole without --shared.
-func planUninstall(ctx context.Context, r *run, ks []kind.Kind, l copiedLine) (map[string]*removing, error) {
-	before := newLookup(ks, l.names)
+// declared for every Mac refuses the line whole without --shared. before
+// is how it found them.
+func planUninstall(ctx context.Context, r *run, ks []kind.Kind, l copiedLine) (_ map[string]*removing, before *lookup, _ error) {
+	before = newLookup(ks, l.names)
 	plans := make(map[string]*removing, len(l.names))
 	for _, name := range l.names {
 		k, err := before.as(ctx, name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		plans[name] = &removing{was: k, forms: map[string][]string{}}
 	}
@@ -450,7 +485,7 @@ func planUninstall(ctx context.Context, r *run, ks []kind.Kind, l copiedLine) (m
 		for _, k := range ks {
 			as, err := declaredAs(ctx, r, k, names, resolve)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for name, forms := range as {
 				if len(forms) > 0 {
@@ -460,22 +495,22 @@ func planUninstall(ctx context.Context, r *run, ks []kind.Kind, l copiedLine) (m
 		}
 	}
 	if l.shared {
-		return plans, nil
+		return plans, before, nil
 	}
 	for _, name := range l.names {
 		for _, k := range ks {
 			for _, form := range plans[name].forms[k.Name()] {
 				inShared, err := declaredShared(r, k.Name(), form)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				if inShared {
-					return nil, fmt.Errorf("%s is %s; nothing was uninstalled", form, everyMac)
+					return nil, nil, fmt.Errorf("%s is %s; nothing was uninstalled", form, everyMac)
 				}
 			}
 		}
 	}
-	return plans, nil
+	return plans, before, nil
 }
 
 // lineLeftovers finds what each app plans has installed leaves, as kit
@@ -513,17 +548,25 @@ func (a *app) lineLeftovers(ctx context.Context, r *run, l copiedLine, plans map
 // errStillInstalled is why a name still installed isn't undeclared.
 var errStillInstalled = errors.New("it's still installed")
 
+// unlined is how an uninstall line's names stand: before, as found before
+// it ran; after, once it had; and failed, its program, when the line
+// failed, "" when it didn't.
+type unlined struct {
+	before, after *lookup
+	failed        string
+}
+
 // undeclareUninstalled takes name, a name in l, out of this Mac's
 // declarations, and the shared ones with --shared, by each name it's
-// declared by whose own kind after finds no longer has it, as a formula
-// uninstalled leaves a cask of the same name declared: one still installed
-// as it was stays declared, the saved settings deleted for it put back,
-// even when what's installed can't be told. words are what l does.
-func undeclareUninstalled(ctx context.Context, c *changes, after *lookup, name string, rm *removing, l copiedLine, words kind.Words, p *prefs.Prefs, zap zapping) check.Result {
+// declared by that's gone (gone): one still installed as it was stays
+// declared, the saved settings deleted for it put back, even when what's
+// installed can't be told; and, the line failed, one that wasn't installed
+// before it stays declared. words are what l does.
+func undeclareUninstalled(ctx context.Context, c *changes, u unlined, name string, rm *removing, l copiedLine, words kind.Words, p *prefs.Prefs, zap zapping) check.Result {
 	still := false
 	var err error
 	if rm.was != nil {
-		still, err = after.lists(ctx, rm.was, name, true)
+		still, err = u.after.lists(ctx, rm.was, name, true)
 	}
 	if err != nil || still {
 		why := cmp.Or(err, errStillInstalled)
@@ -535,7 +578,14 @@ func undeclareUninstalled(ctx context.Context, c *changes, after *lookup, name s
 		}
 		return check.Result{State: check.Failed, Reason: "couldn't undeclare: " + why.Error()}
 	}
-	from, kept, err := undeclareGone(ctx, c, after, rm, l.shared)
+	declared := slices.ContainsFunc(u.after.kinds, func(k kind.Kind) bool { return len(rm.forms[k.Name()]) > 0 })
+	switch {
+	case !declared && rm.was == nil:
+		return check.Result{State: check.OK, Summary: "wasn't installed or declared"}
+	case u.failed != "" && rm.was == nil:
+		return check.Result{State: check.OK, Summary: "wasn't installed, and " + u.failed + " failed: it stays declared"}
+	}
+	from, kept, err := u.undeclare(ctx, c, rm, l.shared)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: words.Done + ", but couldn't undeclare: " + err.Error()}
 	}
@@ -543,33 +593,28 @@ func undeclareUninstalled(ctx context.Context, c *changes, after *lookup, name s
 	switch {
 	case len(from) > 0:
 		said = append(said, "out of "+strings.Join(once(from), " and "))
-	case rm.was != nil && len(kept) == 0:
-		said = append(said, "it wasn't declared")
 	case len(kept) == 0:
-		return check.Result{State: check.OK, Summary: "wasn't installed or declared: nothing to undeclare"}
+		said = append(said, "it wasn't declared")
 	}
-	if len(kept) > 0 {
-		said = append(said, strings.Join(kept, " and ")+" stays declared, still installed")
+	for _, why := range slices.Sorted(maps.Keys(kept)) {
+		said = append(said, strings.Join(kept[why], " and ")+" stays declared"+why)
 	}
 	return check.Result{State: check.OK}.Saying(said...)
 }
 
-// undeclareGone undeclares each name rm's declared by, from this Mac's
-// declarations, and the shared ones with shared, once after finds it gone
-// from its own kind: the files it's out of; and those still installed,
-// kept. Those of the kind rm's name was installed as name it, found gone
-// already.
-func undeclareGone(ctx context.Context, c *changes, after *lookup, rm *removing, shared bool) (from, kept []string, err error) {
-	for _, k := range after.kinds {
+// undeclare undeclares each name rm's declared by that's gone (gone), from
+// this Mac's declarations, and the shared ones with shared: the files it's
+// out of; and those kept, by why they're kept.
+func (u unlined) undeclare(ctx context.Context, c *changes, rm *removing, shared bool) (from []string, kept map[string][]string, err error) {
+	kept = map[string][]string{}
+	for _, k := range u.after.kinds {
 		for _, form := range rm.forms[k.Name()] {
-			in := false
-			if rm.was == nil || rm.was.Name() != k.Name() {
-				if in, err = after.lists(ctx, k, form, true); err != nil {
-					return nil, nil, fmt.Errorf("couldn't tell whether %s is installed: %w", form, err)
-				}
+			why, err := u.gone(ctx, rm, k, form)
+			if err != nil {
+				return nil, nil, err
 			}
-			if in {
-				kept = append(kept, form)
+			if why != "" {
+				kept[why] = append(kept[why], form)
 				continue
 			}
 			out, err := c.undeclareHere(k.Name(), form, shared)
@@ -580,6 +625,35 @@ func undeclareGone(ctx context.Context, c *changes, after *lookup, rm *removing,
 		}
 	}
 	return from, kept, nil
+}
+
+// gone says why form, a name rm's declared by, of k, stays declared, as
+// what follows "stays declared": "" when it's gone, so it's undeclared. A
+// form of the kind rm's name was installed as names it, found gone
+// already; one of another kind is gone once k has it no more, and, the
+// line failed, only when it was installed before the line, as the line
+// may never have reached it.
+func (u unlined) gone(ctx context.Context, rm *removing, k kind.Kind, form string) (string, error) {
+	if rm.was != nil && rm.was.Name() == k.Name() {
+		return "", nil
+	}
+	in, err := u.after.lists(ctx, k, form, true)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("couldn't tell whether %s is installed: %w", form, err)
+	case in:
+		return ", still installed", nil
+	case u.failed == "":
+		return "", nil
+	}
+	was, err := u.before.lists(ctx, k, form, true)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("couldn't tell whether %s was installed: %w", form, err)
+	case !was:
+		return ": it wasn't installed, and " + u.failed + " failed", nil
+	}
+	return "", nil
 }
 
 // said is what became of rm's name, taken off, in parts, as words say it:
