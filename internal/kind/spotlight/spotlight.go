@@ -11,6 +11,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -93,10 +95,15 @@ func (s *Spotlight) Expand(list config.List) (config.List, error) {
 // indexed reports whether Spotlight has anything in folder in its index,
 // by its name, which it gives every file whatever its kind (a query of
 // kMDItemFSName matches nothing): nothing found means it's kept out, or
-// holds nothing yet, with nothing to keep out till it does. A count that
-// runs out of time is of a folder indexed, as one not yet kept out is,
-// whole, till a restart.
+// holds nothing yet, with nothing to keep out till it does. A folder not
+// there yet, as on a new Mac before a restore makes it, holds nothing and
+// isn't asked about: mdfind prints no count at all for it, not 0. A count
+// that runs out of time is of a folder indexed, as one not yet kept out
+// is, whole, till a restart.
 func (s *Spotlight) indexed(ctx context.Context, folder string) (bool, error) {
+	if _, err := os.Stat(folder); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
 	res, err := s.run.Run(ctx, runner.Command{Name: "mdfind", Args: []string{"-onlyin", folder, "-count", `kMDItemDisplayName == "*"`}, Timeout: probeTimeout})
 	switch {
 	case errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil:
