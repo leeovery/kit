@@ -43,19 +43,30 @@ and what needs it; `kit list` lists everything declared for this Mac.
 
 A cask of Homebrew's own that kit can vet, its apps alone, installs with
 `brew install --cask --adopt`, in `kit cask add`, `kit apply` and
-`kit reconcile` alike: an app already in /Applications that's the cask's
-is taken over in place, at any version if the cask updates itself. If
-Homebrew says it differs from the cask's download, kit installs the cask
-again, alone, with `brew install --cask --force`, which replaces the app,
-but only the same version (another build) or an older copy of the same
-major version: the app's `CFBundleShortVersionString` and the cask's
-version, before any comma, both dotted numbers. A cask that installs
-through a package is checked so before its installer runs over the app,
-whether it updates itself or not. An app of any other version (an earlier
-major version, a newer copy, a prerelease, or beside a cask of `latest`),
-an app there whose bundle id the cask doesn't name (a fork of the same
+`kit reconcile` alike. An app's version is its `CFBundleShortVersionString`,
+or its `CFBundleVersion` when the short one doesn't start with a number
+(Build 4215 is 4215). What an app already in /Applications that's the
+cask's becomes, by the cask:
+
+- One that updates itself takes the app over in place at the cask's major
+  version or later, a newer copy too. An earlier major fails the cask,
+  naming the `@` line that's the app's, if one is: `BBEdit.app is 14.6.2
+  and the cask's is 16.1: kit takes over only a copy of the cask's major
+  version or later, and bbedit@14 is this one's line`. Declare that line
+  in its place, or leave the app by hand.
+- Any other takes the app over in place at the cask's version. If
+  Homebrew says it differs, kit installs the cask again, alone, with
+  `brew install --cask --force`, which replaces the app, but only the same
+  version (another build) or an older copy of the same major version, both
+  dotted numbers (the cask's before any comma). Any other version (an
+  earlier major, a newer copy, a prerelease, beside a cask of `latest`)
+  fails the cask, saying why.
+- One that installs through a package, whether it updates itself or not,
+  is checked as a replace is, before its installer runs over the app.
+
+An app there whose bundle id the cask doesn't name (a fork of the same
 name), or the App Store's copy, even when the cask names its id, is left
-alone, and the cask fails, saying so: ask the person which to keep.
+alone too, and the cask fails, saying so. Ask the person which to keep.
 
 Other casks (a tap's, one the catalogue lacks, any that puts more than
 apps in place, every cask when the catalogue can't be read) install plain,
@@ -87,14 +98,18 @@ for this Mac: state `by-hand`, its `detail` saying what it's installed as,
 
 There's no `--remove`: kit deletes no app it didn't install. Adopting may
 replace the app, so ask the person before you adopt. Of the casks
-installing an app, when the one without `@` updates itself: that one if
-the app's major version is the cask's or later (Chrome, Dropbox); for an
-earlier major, the `@` line of that major (`bbedit@14`, `firefox@esr`),
-never a channel's (beta, nightly and the like), or none. Otherwise the one
-whose version is nearest the app's, by the numbers it starts with
-(`blender@lts` for Blender's LTS), a tie going to the one without `@`.
-None is offered that kit's own checks would refuse, as a cask of `latest`
-that doesn't update itself, but Homebrew can still refuse the install.
+installing an app: a prerelease app's is the channel at its exact version
+(`thaw@beta` for Thaw 3.0.0-beta.7). Else, when the one without `@`
+updates itself: that one if the app's major version is the cask's or
+later (Chrome, Dropbox); for an earlier major, the `@` line of that major
+(`bbedit@14`, `firefox@esr`), never a channel's (beta, nightly and the
+like), or none. A `latest` one that updates itself is offered only with no
+`@` line at its place. Otherwise the one whose version is nearest the
+app's, by the numbers it starts with (`blender@lts` for Blender's LTS), a
+tie going to the one without `@`. An app whose version can't be read gets
+no offer. None is offered that kit's own checks would refuse, as a cask of
+`latest` that doesn't update itself, but Homebrew can still refuse the
+install.
 Casks from taps, and apps whose cask can't be told, as Homebrew's catalogue
 can't be read, are never offered.
 

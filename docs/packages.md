@@ -73,9 +73,8 @@ A package you install with brew or npm yourself is drift. After its first day, `
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
 
 Apps you dragged into Applications show up too, if kit can match them to a cask. Adopting one
-has Homebrew take the app over, replacing an older copy. A newer copy, another
-major version or a fork fails the cask: see [Troubleshooting](troubleshooting.md). `--leave`
-keeps the app by hand.
+has Homebrew take the app over, if its cask takes that version: see
+[Troubleshooting](troubleshooting.md). `--leave` keeps the app by hand.
 
 ## Good to know
 

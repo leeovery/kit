@@ -1280,20 +1280,28 @@ format): each cask of Homebrew's own, its apps' places in /Applications (or the 
 cask deletes, or the one it alone quits) and the bundle ids it states (what its uninstall quits,
 signals or unloads, and the `~/Library` paths it zaps). An app installed by hand has a cask
 only when it's at that cask's place and the cask states its bundle id: a fork under the app's
-name, or a cask stating no id, has none, erring towards no offer. Of several stating it, when
-the one without `@` updates itself (`lineOf`): that one for an app of its major version or
+name, or a cask stating no id, has none, erring towards no offer. An app's version is its
+`CFBundleShortVersionString`, or its `CFBundleVersion` when the short one doesn't start with a
+number (Build 4215 is 4215; `apps.Version`); one that still can't be read gets no offer. Of
+several stating it, a prerelease app's is the channel at its exact version (`channelAt`:
+`thaw@beta` for Thaw 3.0.0-beta.7). Else, when the one without `@` updates itself (`lineOf`): that one for an app of its major version or
 later (such an app runs ahead of the catalogue, as Dropbox of dropbox); for an earlier major,
 the `@` line of that major (`bbedit@14`, `firefox@esr`), never a channel's (`channels`: beta,
 nightly and the like), or none, as the plain cask would declare a major version the person may
-have no licence for. Else the one whose version shares the most leading numbers with the app's
-`CFBundleShortVersionString` (`blender@lts` for Blender's LTS), a tie to the one without `@`,
+have no licence for; a `latest` one only with no `@` line at its place. Else the one whose
+version shares the most leading numbers with the app's (`blender@lts` for Blender's LTS), a tie to the one without `@`,
 two without `@` none. Never one whose install
 would refuse the app (below), so a cask of `latest` that doesn't update itself is never
 offered. A cask that moves anything besides apps into place (a suite, a font, a Quick Look
 plugin) is never matched, nor vetted when installed. Every vetted cask installs with `brew
-install --cask --adopt`, Homebrew taking its app there over in place (unchecked for a cask that
-auto-updates; else the versions must match). A cask that installs through a package is checked
-as a replace is before its installer runs over the app, whether it updates itself or not. One Homebrew didn't adopt, as the app differs from
+install --cask --adopt`, Homebrew taking its app there over in place: for a cask that
+auto-updates, unchecked, so kit checks it first (`versioned`, `adoptable`), as the offer does,
+in `kit apply` of a declared cask too: only an app of the cask's major version or later, a
+newer copy included; an earlier major fails the cask, naming its line if one is ("BBEdit.app
+is 14.6.2 and the cask's is 16.1: kit takes over only a copy of the cask's major version or
+later, and bbedit@14 is this one's line", `notAdopting`); for any other, Homebrew's own check,
+the versions must match. A cask that installs through a package is checked as a replace is
+before its installer runs over the app, whether it updates itself or not. One Homebrew didn't adopt, as the app differs from
 the download, is installed again alone with `--force`, which deletes the app and moves the
 cask's in (`--adopt --force` raises before force is read), but only for the same version (of
 another build) or an older copy of the same major version: both versions dotted numbers (the

@@ -121,7 +121,14 @@ in, kit asks again on the next run.
 ## A cask fails because its app is already there
 
 kit has Homebrew take over an app already in Applications only if it's the cask's own, at a
-version kit can update. If it isn't, the cask fails, and the app stays as it is.
+version the cask takes over. If it isn't, the cask fails, and the app stays as it is. The
+version depends on the cask:
+
+| If the cask | It takes over |
+|---|---|
+| Updates itself | Its major version or later, in place |
+| Doesn't | The same version, or an older copy of its major |
+| Installs through a package | The same as one that doesn't |
 
 The reason comes after the start of the message:
 
@@ -159,16 +166,36 @@ even if the cask names its bundle id.
 Charles.app is 4.6.8 and the cask's is 5.2.3: kit replaces only an older copy of the same major version
 ```
 
-**Cause:** the app isn't one kit can update to the cask's version. kit replaces the app only if
-it's the same version or an older copy of the same major version. These stay as they are:
+**Cause:** the cask doesn't update itself, or installs through a package. kit replaces the
+app only if it's the same version or an older copy of the same major version. These stay as
+they are:
 
 - a newer copy, and the message adds `this one is newer`;
 - an earlier major version, such as Charles 4 beside the cask's 5;
 - a prerelease, or an app that says no version.
 
-A cask that installs through a package is checked the same way, before its installer runs.
 If you want to keep an earlier major version, Homebrew may have a cask for it, such as
-`bbedit@14`. Declare that one instead.
+`charles@4`. Declare that one instead.
+
+### An earlier major version is there
+
+```text
+BBEdit.app is 14.6.2 and the cask's is 16.1: kit takes over only a copy of the cask's major version or later, and bbedit@14 is this one's line
+```
+
+**Cause:** the cask updates itself, so it takes over a copy of its major version or later,
+a newer one too. An earlier major version may be one you have no licence past, so kit leaves
+it. The message names the cask for your version, if Homebrew has one. If it ends `can't tell
+whether this one is`, kit couldn't read a version.
+
+**Fix:** to keep your version, declare its line in place of the cask:
+
+```bash
+kit reconcile cask:bbedit --undeclare
+kit cask add bbedit@14
+```
+
+Or undeclare the cask, and keep the app by hand.
 
 ### kit can't look at the app
 

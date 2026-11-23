@@ -98,7 +98,7 @@ kit reconcile cask:google-chrome --leave
 
 An app you dragged into Applications is drift if kit can match it to a cask.
 `kit status` reads `installed by hand as Google Chrome.app, not declared`. Adopting it declares
-the cask, and Homebrew takes the app over, replacing an older copy.
+the cask, and Homebrew takes the app over, if the cask takes that version.
 
 `kit status` counts a left app on its Packages row. Adopt it later with
 `kit reconcile cask:<name> --adopt` or `kit cask add <name>`.
@@ -125,8 +125,9 @@ The package stays quiet for 7 days, then `kit reconcile` asks whether to keep it
   other to the Bin.
 - **Some apps never match a cask:**
   - a fork, or an app outside /Applications;
-  - a newer copy, or an older major version without its own cask;
-  - an app whose cask is a tap's, a `latest` one, or puts more than apps in place.
+  - a version its cask won't take over, as
+    [Troubleshooting](troubleshooting.md) lists;
+  - an app whose cask is a tap's, or puts more than apps in place.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 

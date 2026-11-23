@@ -40,8 +40,8 @@ Every question has its flag; without a terminal kit setup asks nothing.
   setup's failing step names each cask and its apps, all suggested. A
   cask kit-config declares already isn't offered, but counted: `kit apply`
   takes its app over too. Each given is declared in this Mac's file, and
-  the `kit apply` after setup takes its app over, replacing an older copy
-  (see `kit agent packages`). The rest are left by hand for good:
+  the `kit apply` after setup takes its app over, at the versions its cask
+  takes over (see `kit agent packages`). The rest are left by hand for good:
   `kit reconcile` won't ask about them, and `kit cask add <cask>` takes one
   over later.
 - `--no-apply` stops once setup has committed, for the person to look
