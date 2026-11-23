@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/status"
 )
@@ -106,7 +105,7 @@ func TestARunHealsAConfigItCantRead(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "config-sync ok pushed; 1 commit brought in\n") {
 		t.Errorf("kit status, the fix pushed, printed\n%s%s\nexit %d; want it healed", out, errOut, code)
 	}
-	if want := config.SearchPathOf([]string{filepath.Join(w.home, "homebrew", "bin")}); !slices.Equal(pathOfPull, want) {
+	if want := []string{"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}; !slices.Equal(pathOfPull, want) {
 		t.Errorf("brought in on %q; want kit's base PATH %q", pathOfPull, want)
 	}
 

@@ -21,7 +21,7 @@ func TestAddPathDeclaresItLastOfTheMacsAndWritesTheShellsPath(t *testing.T) {
 	if got := w.readSection(t, "laptop", "paths"); got != "~/go/bin\n~/tools/bin   # the tools\n" {
 		t.Errorf("[paths] = %q", got)
 	}
-	want := filepath.Join(w.home, "go/bin") + ":" + filepath.Join(w.home, "tools/bin") + ":" + filepath.Join(w.home, ".local/bin") + ":/opt/homebrew/bin\n"
+	want := filepath.Join(w.home, "go/bin") + ":" + filepath.Join(w.home, "tools/bin") + ":" + filepath.Join(w.home, ".local/bin") + ":/opt/homebrew/bin:/opt/homebrew/sbin\n"
 	if got := w.read(t, ".local/state/kit/path"); got != want {
 		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
@@ -42,7 +42,7 @@ func TestAddPathRaisesOneEveryMacHas(t *testing.T) {
 	if got := w.readSection(t, "laptop", "paths"); got != "~/go/bin\n/opt/homebrew/bin\n" {
 		t.Errorf("laptop's [paths] = %q", got)
 	}
-	if got, want := w.read(t, ".local/state/kit/path"), gobin+":/opt/homebrew/bin:"+local+"\n"; got != want {
+	if got, want := w.read(t, ".local/state/kit/path"), gobin+":/opt/homebrew/bin:"+local+":/opt/homebrew/sbin\n"; got != want {
 		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
 
@@ -53,7 +53,7 @@ func TestAddPathRaisesOneEveryMacHas(t *testing.T) {
 	if got := w.readSection(t, "shared", "paths"); got != "~/.local/bin\n/opt/homebrew/bin\n" {
 		t.Errorf("shared's [paths] = %q, want /opt/homebrew/bin kept", got)
 	}
-	if got, want := w.read(t, ".local/state/kit/path"), gobin+":"+local+":/opt/homebrew/bin\n"; got != want {
+	if got, want := w.read(t, ".local/state/kit/path"), gobin+":"+local+":/opt/homebrew/bin:/opt/homebrew/sbin\n"; got != want {
 		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
 }
@@ -63,19 +63,19 @@ func TestAddPathRaisesOneEveryMacHas(t *testing.T) {
 // says so.
 func TestRemovePathSharedOfARaisedFolder(t *testing.T) {
 	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "paths", "/opt/homebrew/bin\n")
-	w.writeSection(t, "studio", "paths", "/opt/homebrew/bin\n")
-	w.expectSync(t, []string{"laptop/declarations", "shared/declarations"}, "kit path remove /opt/homebrew/bin (laptop)")
-	if out, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin", "--shared"); code != 0 || !strings.Contains(out, "/opt/homebrew/bin ok out of shared and laptop; still on the PATH of studio, from studio/declarations:5\n") {
+	w.writeSection(t, "laptop", "paths", "~/.local/bin\n")
+	w.writeSection(t, "studio", "paths", "~/.local/bin\n")
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations"}, "kit path remove ~/.local/bin (laptop)")
+	if out, _, code := w.run(t, "path", "remove", "~/.local/bin", "--shared"); code != 0 || !strings.Contains(out, "~/.local/bin ok out of shared and laptop; still on the PATH of studio, from studio/declarations:5\n") {
 		t.Errorf("kit path remove --shared of a raised folder printed\n%s exit %d", out, code)
 	}
-	if got := w.readSection(t, "laptop", "paths") + w.readSection(t, "shared", "paths"); got != "~/.local/bin\n" {
-		t.Errorf("laptop's and shared's [paths] = %q, want /opt/homebrew/bin out of both", got)
+	if got := w.readSection(t, "laptop", "paths") + w.readSection(t, "shared", "paths"); got != "/opt/homebrew/bin\n" {
+		t.Errorf("laptop's and shared's [paths] = %q, want ~/.local/bin out of both", got)
 	}
-	if got := w.readSection(t, "studio", "paths"); got != "/opt/homebrew/bin\n" {
+	if got := w.readSection(t, "studio", "paths"); got != "~/.local/bin\n" {
 		t.Errorf("studio's [paths] = %q, want it kept", got)
 	}
-	if got, want := w.read(t, ".local/state/kit/path"), filepath.Join(w.home, ".local/bin")+"\n"; got != want {
+	if got, want := w.read(t, ".local/state/kit/path"), "/opt/homebrew/bin:/opt/homebrew/sbin\n"; got != want {
 		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
 }
@@ -100,7 +100,7 @@ func TestAddPathSharedOfAMacsFolder(t *testing.T) {
 	if got := w.readSection(t, "laptop", "paths"); got != "/opt/homebrew/bin\n~/tools/bin\n" {
 		t.Errorf("laptop's [paths] = %q, want ~/go/bin out of it", got)
 	}
-	want := "/opt/homebrew/bin:" + filepath.Join(w.home, "tools/bin") + ":" + filepath.Join(w.home, ".local/bin") + ":" + filepath.Join(w.home, "go/bin") + "\n"
+	want := "/opt/homebrew/bin:" + filepath.Join(w.home, "tools/bin") + ":" + filepath.Join(w.home, ".local/bin") + ":" + filepath.Join(w.home, "go/bin") + ":/opt/homebrew/sbin\n"
 	if got := w.read(t, ".local/state/kit/path"); got != want {
 		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
@@ -118,11 +118,14 @@ func TestTheShellsPathDriftsWithARaise(t *testing.T) {
 	if out, _, code := w.run(t, "apply", "path"); code != 0 || !strings.Contains(out, "path wrote the shell's PATH\n") {
 		t.Errorf("kit apply path printed\n%s exit %d", out, code)
 	}
-	if got, want := w.read(t, ".local/state/kit/path"), "/opt/homebrew/bin:"+filepath.Join(w.home, ".local/bin")+"\n"; got != want {
+	if got, want := w.read(t, ".local/state/kit/path"), "/opt/homebrew/bin:"+filepath.Join(w.home, ".local/bin")+":/opt/homebrew/sbin\n"; got != want {
 		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
 }
 
+// A folder declared for every Mac comes out of the shared file only with
+// --shared. One of Homebrew's stays on every Mac's PATH, after the folders
+// declared, as kit puts it there, and kit says so.
 func TestRemovePathOnEveryMacNeedsShared(t *testing.T) {
 	w := laptopWorld(t)
 	out, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin")
@@ -130,11 +133,11 @@ func TestRemovePathOnEveryMacNeedsShared(t *testing.T) {
 		t.Errorf("kit path remove printed\n%s exit %d", out, code)
 	}
 	w.expectSync(t, []string{"shared/declarations"}, "kit path remove /opt/homebrew/bin (laptop)")
-	if _, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin", "--shared"); code != 0 {
-		t.Errorf("kit path remove --shared exit %d", code)
+	if out, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin", "--shared"); code != 0 || !strings.Contains(out, "/opt/homebrew/bin ok out of shared; still on every Mac's PATH: kit puts Homebrew's folders there\n") {
+		t.Errorf("kit path remove --shared printed\n%s exit %d", out, code)
 	}
-	if got := w.read(t, ".local/state/kit/path"); got != filepath.Join(w.home, ".local/bin")+"\n" {
-		t.Errorf("the shell's PATH = %q", got)
+	if got, want := w.read(t, ".local/state/kit/path"), filepath.Join(w.home, ".local/bin")+":/opt/homebrew/bin:/opt/homebrew/sbin\n"; got != want {
+		t.Errorf("the shell's PATH = %q, want %q", got, want)
 	}
 }
 

@@ -7,16 +7,23 @@ import (
 	"strings"
 )
 
+// HomebrewPaths are Homebrew's folders, which kit puts on the PATH, its own
+// and the shell's, after the folders the paths sections list, unless they
+// list them: Homebrew's installer puts only its bin on the PATH, after the
+// system's, and only on a terminal's.
+var HomebrewPaths = []string{"/opt/homebrew/bin", "/opt/homebrew/sbin"}
+
 // systemPath are the system's own directories, which kit's PATH ends with
 // whatever the config lists.
 var systemPath = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
 
 // SearchPath is kit's own PATH on the Mac named mac: the directories the
-// Mac's own paths section lists, then the shared declarations', then the
-// system's, each once; a relative one (node_modules/.bin), which only a
-// shell in a project folder finds anything in, is left out. home is what ~
-// expands to. kit ignores the PATH it inherited, so it finds the same
-// programs from a terminal, launchd or an agent.
+// Mac's own paths section lists, then the shared declarations', then
+// Homebrew's, then the system's, each once; a relative one
+// (node_modules/.bin), which only a shell in a project folder finds
+// anything in, is left out. home is what ~ expands to. kit ignores the PATH
+// it inherited, so it finds the same programs from a terminal, launchd or
+// an agent.
 func (c *Config) SearchPath(home, mac string) ([]string, error) {
 	dirs, err := c.ShellPath(home, mac)
 	if err != nil {
@@ -26,10 +33,10 @@ func (c *Config) SearchPath(home, mac string) ([]string, error) {
 }
 
 // SearchPathOf is kit's own PATH from shellPath, as ShellPath gives it:
-// its absolute directories, then the system's, each once.
+// its absolute directories, then Homebrew's and the system's, each once.
 func SearchPathOf(shellPath []string) []string {
 	var out []string
-	for _, dir := range slices.Concat(shellPath, systemPath) {
+	for _, dir := range slices.Concat(shellPath, HomebrewPaths, systemPath) {
 		if filepath.IsAbs(dir) && !slices.Contains(out, dir) {
 			out = append(out, dir)
 		}
@@ -39,9 +46,9 @@ func SearchPathOf(shellPath []string) []string {
 
 // ShellPath is the PATH the shell puts ahead of the one it inherits, on the
 // Mac named mac: every directory the paths sections list, the Mac's then
-// the shared declarations', in order, each once, in the place it first
-// appears, ~ expanded and relative ones kept. A Mac's line repeating a
-// shared one raises it on that Mac.
+// the shared declarations', then Homebrew's, in order, each once, in the
+// place it first appears, ~ expanded and relative ones kept. A Mac's line
+// repeating a shared one raises it on that Mac.
 func (c *Config) ShellPath(home, mac string) ([]string, error) {
 	p, err := c.PathLists(home, mac)
 	if err != nil {
@@ -70,10 +77,11 @@ func (c *Config) PathLists(home, mac string) (PathLists, error) {
 }
 
 // Shell is the shell's PATH p makes (ShellPath): the Mac's directories,
-// then the shared ones, each once, in the place it first appears.
+// then the shared ones, then Homebrew's, each once, in the place it first
+// appears.
 func (p PathLists) Shell() []string {
 	var out []string
-	for _, dir := range slices.Concat(p.Own, p.Shared) {
+	for _, dir := range slices.Concat(p.Own, p.Shared, HomebrewPaths) {
 		if !slices.Contains(out, dir) {
 			out = append(out, dir)
 		}

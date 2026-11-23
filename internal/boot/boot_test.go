@@ -276,7 +276,7 @@ func newBoot(t *testing.T, run runner.Runner, gh GitHub, ask Asker) (*Boot, *sin
 		Run: run, Sink: s, Ask: ask, GitHub: gh, Now: time.Now,
 		State: filepath.Join(home, "state"), Data: filepath.Join(home, "data"), Config: filepath.Join(home, "config"),
 		Getenv: func(string) string { return "" },
-		Home:   filepath.Join(home, "home"), Applications: filepath.Join(home, "Applications"), SudoLocal: filepath.Join(home, "sudo_local"), Homebrew: config.HomebrewPaths,
+		Home:   filepath.Join(home, "home"), Applications: filepath.Join(home, "Applications"), SudoLocal: filepath.Join(home, "sudo_local"),
 		Self: "/Users/someone/.local/bin/kit",
 	}, s
 }

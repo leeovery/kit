@@ -111,7 +111,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 		b := &boot.Boot{
 			GitHub: a.GitHub(), Now: a.Now, Ask: &plainAsker{},
 			State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
-			Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Version: a.Version, Homebrew: a.Homebrew, HandedOver: true,
+			Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Version: a.Version, HandedOver: true,
 		}
 		// Handed over, kit says so at once: the boot in Terminal is waiting.
 		if err := b.Arrive(); err != nil {
@@ -169,7 +169,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 	b := &boot.Boot{
 		Run: observed, Sink: sink, Ask: asker, GitHub: a.GitHub(), Now: a.Now,
 		State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
-		Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Self: self, Version: a.Version, Homebrew: a.Homebrew,
+		Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Self: self, Version: a.Version,
 	}
 	if asks != nil {
 		b.Keep = asks.Keep

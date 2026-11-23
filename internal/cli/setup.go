@@ -53,7 +53,7 @@ one of kit-config's Macs, or a new one, a copy of another with --from.
 Then it declares everything on this Mac as it is, in its own file: every
 kind whose program is here, the macOS settings set now, git's settings, the
 features on and the backups set up. A program kit's PATH doesn't find, but
-your shell's PATH or Homebrew's folders do, has its folder declared in this
+your shell's PATH or /usr/local/bin does, has its folder declared in this
 Mac's [paths], as kit path add does. It asks:
   which folders a new Mac brings back from your backups (--restore,
   --no-restore), declared as kit restore add does;
@@ -166,7 +166,7 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 	run := a.commands(bootPath, childEnv(a.Getenv, home, bootPath), sink, noAsks)
 	s = &setup.Setup{
 		Run: run, Sink: sink, GitHub: a.GitHub(), Now: a.Now,
-		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Homebrew: a.Homebrew, Given: given,
+		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Given: given,
 		Snapshot: func(ctx context.Context, cfg *config.Config, mac string) (snapshot.Snapshot, snapshot.Mac, error) {
 			paths, err := cfg.PathLists(home, mac)
 			if err != nil {
@@ -262,7 +262,8 @@ func (a *app) applyAfterSetup(ctx context.Context, doc *built) error {
 // offPath are the folders off kit's PATH setup's snapshot looks along for
 // a kind's program kit's PATH doesn't find, in order: the PATH setup was
 // run with, the person's shell's, as it finds the program they use; then
-// Homebrew's and the system's, for a shell without them.
+// the boot's, for a shell without /usr/local/bin, Homebrew's and the
+// system's being on kit's PATH already.
 func offPath(getenv func(string) string) []string {
 	return slices.Concat(filepath.SplitList(getenv("PATH")), bootPath)
 }
@@ -312,9 +313,6 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 	repo := r.repo
 	repo.BranchMayBeMissing = d.Empty
 	files, what := []string{config.File, r.machine}, config.File+" and "+r.machine+"/"
-	if d.Empty {
-		files, what = []string{config.File, config.Shared, r.machine}, config.File+", "+config.Shared+"/ and "+r.machine+"/"
-	}
 	res := syncing{repo: repo, files: files, what: what}.commit(ctx, fmt.Sprintf("kit setup (%s): this Mac as it is", r.machine))
 	if says := slices.Clone(res.Says()); res.State != check.Failed && len(says) > 0 {
 		says[0] = fmt.Sprintf("%d declared · %s", total, says[0])

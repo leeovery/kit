@@ -94,9 +94,6 @@ type Deps struct {
 	// SudoLocal is sudo's file of local settings, which the touch-id-sudo
 	// feature checks: /etc/pam.d/sudo_local.
 	SudoLocal string
-	// Homebrew are Homebrew's folders, which a config starting on this Mac
-	// puts on every Mac's PATH: config.HomebrewPaths.
-	Homebrew []string
 	// SSHDir is where the Mac keeps its SSH host keys, which the host-key
 	// step reads, and SSHAddress where its Remote Login answers, which the
 	// step wakes to make them: /etc/ssh and 127.0.0.1:22 when "".
@@ -425,7 +422,6 @@ func Real(version string) Deps {
 		Self:         os.Executable,
 		WatchDialogs: true,
 		SudoLocal:    steps.SudoLocal,
-		Homebrew:     config.HomebrewPaths,
 		TCC:          "/Library/Application Support/com.apple.TCC/TCC.db",
 		AppDirs:      []string{"/Applications"},
 	}
