@@ -34,9 +34,8 @@ type toAdopt struct {
 // adoption is how batch, casks of one tap or Homebrew's own, goes in. A
 // tap's never are in the catalogue, which holds Homebrew's own alone.
 // With no Applications folder, or no catalogue, every one goes in as ever.
-// A package's installer runs over its app there, whether it updates itself
-// or not, so the package goes in only as kit would replace the app
-// (replaceable).
+// One whose app there its install wouldn't take over, by its version,
+// doesn't go in (versioned).
 func (c casks) adoption(ctx context.Context, batch []string) adoption {
 	all := adoption{plain: batch}
 	if _, tapped := tapOf(batch[0]); tapped || len(c.AppDirs) == 0 {
@@ -55,8 +54,8 @@ func (c casks) adoption(ctx context.Context, batch []string) adoption {
 			continue
 		}
 		there, err := k.there(a.dir, c.Home)
-		if err == nil && there && k.pkg {
-			err = k.replaceable(a.dir)
+		if err == nil && there {
+			err = cat.versioned(k, a.dir)
 		}
 		if err != nil {
 			a.refused = append(a.refused, err)

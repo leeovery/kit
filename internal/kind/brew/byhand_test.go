@@ -28,12 +28,21 @@ func installApp(t *testing.T, dir, name, id string) string {
 // people are shown it: none, given "".
 func installVersion(t *testing.T, dir, name, id, version string) string {
 	t.Helper()
+	return installBuild(t, dir, name, id, version, "")
+}
+
+// installBuild is installVersion, the app's build given as build: none,
+// given "".
+func installBuild(t *testing.T, dir, name, id, version, build string) string {
+	t.Helper()
 	app := filepath.Join(dir, name)
-	short := ""
-	if version != "" {
-		short = `<key>CFBundleShortVersionString</key><string>` + version + `</string>`
+	said := ""
+	for key, value := range map[string]string{"CFBundleShortVersionString": version, "CFBundleVersion": build} {
+		if value != "" {
+			said += `<key>` + key + `</key><string>` + value + `</string>`
+		}
 	}
-	writeFile(t, filepath.Join(app, "Contents", "Info.plist"), `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>`+id+`</string>`+short+`</dict></plist>`)
+	writeFile(t, filepath.Join(app, "Contents", "Info.plist"), `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>`+id+`</string>`+said+`</dict></plist>`)
 	return app
 }
 
@@ -139,18 +148,18 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 	for _, tt := range []struct {
 		name, in, app, id, version, want string
 	}{
-		{"by its name", "", "Google Chrome.app", "com.google.Chrome", "", "google-chrome"},
-		{"its id in another case", "", "Google Chrome.app", "COM.GOOGLE.CHROME", "", "google-chrome"},
-		{"in another folder apps are in", "other", "Google Chrome.app", "com.google.Chrome", "", ""},
-		{"in a folder in the casks' folder", "Utilities", "Google Chrome.app", "com.google.Chrome", "", ""},
-		{"a fork, under its name", "", "Spaceman.app", "dev.fork.Spaceman", "", ""},
-		{"the cask's own, under its name", "", "Spaceman.app", "dev.original.Spaceman", "", "spaceman"},
+		{"by its name", "", "Google Chrome.app", "com.google.Chrome", "158.0.8127.37", "google-chrome"},
+		{"its id in another case", "", "Google Chrome.app", "COM.GOOGLE.CHROME", "158.0.8127.37", "google-chrome"},
+		{"in another folder apps are in", "other", "Google Chrome.app", "com.google.Chrome", "158.0.8127.37", ""},
+		{"in a folder in the casks' folder", "Utilities", "Google Chrome.app", "com.google.Chrome", "158.0.8127.37", ""},
+		{"a fork, under its name", "", "Spaceman.app", "dev.fork.Spaceman", "1.0", ""},
+		{"the cask's own, under its name", "", "Spaceman.app", "dev.original.Spaceman", "1.0", "spaceman"},
 		{"its package's, as its uninstall deletes it, by the id it signals", "", "zoom.us.app", "us.zoom.xos", "7.2.5", "zoom"},
 		{"a package's that says nowhere, by the id it quits", "", "Monitor.app", "com.example.monitor", "2.7.0", "monitor"},
 		{"a package's that says nowhere, in a folder in the casks' folder", "Utilities", "Monitor.app", "com.example.monitor", "2.7.0", ""},
 		{"a package's that says nowhere, in another folder apps are in", "other", "Monitor.app", "com.example.monitor", "2.7.0", ""},
 		{"by an id two packages that say nowhere quit", "", "Relay.app", "com.example.relay", "4.1", ""},
-		{"the plain token over one with @", "", "1Password.app", "com.1password.1password", "", "1password"},
+		{"the plain token over one with @", "", "1Password.app", "com.1password.1password", "8.12.46", "1password"},
 		{"a cask stating no id", "", "Quiet Tool.app", "com.example.quiet", "2.1", ""},
 		{"by its target, the id its saved state is named for", "", "Browser.app", "com.example.browser", "140.0", "browser"},
 		{"under the name its target renames, by the id it quits", "", "Chromium.app", "com.example.browser", "140.0", ""},
@@ -159,7 +168,7 @@ func TestTheCaskThatInstallsAnAppByHand(t *testing.T) {
 		{"a cask moving a suite too", "", "Office.app", "com.example.office", "", ""},
 		{"a cask putting its app elsewhere, by the id it quits", "", "Sidekick.app", "com.example.sidekick", "5.0", ""},
 		{"a disabled cask", "", "Old Tool.app", "com.example.oldtool", "0.9", ""},
-		{"no bundle id", "", "Google Chrome.app", "", "", ""},
+		{"no bundle id", "", "Google Chrome.app", "", "158.0.8127.37", ""},
 		{"no cask", "", "Kubius.app", "com.example.kubius", "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -217,8 +226,11 @@ func TestTheCaskOfTheAppsVersion(t *testing.T) {
 		{"a cask that updates itself, a newer copy", "Spaceman.app", "dev.original.Spaceman", "1.1", "spaceman"},
 		{"a cask that updates itself, a later major version", "Google Chrome.app", "com.google.Chrome", "159.0.8200.12", "google-chrome"},
 		{"a cask that updates itself, at the beta's version", "Dropbox.app", "com.getdropbox.dropbox", "281.3.5397", "dropbox"},
-		{"a cask that updates itself, a beta build", "1Password.app", "com.1password.1password", "8.12.48-24.BETA", "1password"},
-		{"a cask that updates itself, a version that doesn't start with numbers", "Spaceman.app", "dev.original.Spaceman", "Build 7", "spaceman"},
+		{"a prerelease, the channel at its version", "1Password.app", "com.1password.1password", "8.12.48-24.BETA", "1password@beta"},
+		{"a prerelease, the channel at its version, though the cask without @ updates itself", "Thaw.app", "com.example.thaw", "3.0.0-beta.7", "thaw@beta"},
+		{"a prerelease, no channel at its version", "Thaw.app", "com.example.thaw", "3.0.0-beta.8", "thaw"},
+		{"its own version, beside a channel", "Thaw.app", "com.example.thaw", "2.1.0", "thaw"},
+		{"a cask that updates itself, a version kit can't read, though a line of no version shares its place", "Spaceman.app", "dev.original.Spaceman", "Build 7", ""},
 		{"a cask that updates itself, an earlier major version, its line's", "BBEdit.app", "com.barebones.bbedit", "14.6.2", "bbedit@14"},
 		{"a cask that updates itself, an earlier major version of no line", "BBEdit.app", "com.barebones.bbedit", "15.0.3", ""},
 		{"a cask that updates itself, an ESR", "Firefox.app", "org.mozilla.firefox", "153.7.0", "firefox@esr"},
@@ -232,11 +244,45 @@ func TestTheCaskOfTheAppsVersion(t *testing.T) {
 		{"a package that updates itself, its version", "Monitor.app", "com.example.monitor", "2.8.1.316", "monitor"},
 		{"a package that updates itself, a newer copy", "Monitor.app", "com.example.monitor", "2.9", ""},
 		{"a package that updates itself, an earlier major version", "Monitor.app", "com.example.monitor", "1.9", ""},
+		{"a package beside its own app, updating itself, a newer copy", "Wireshark.app", "org.wireshark.Wireshark", "4.7.0", ""},
+		{"a package beside its own app, updating itself, an older copy", "Wireshark.app", "org.wireshark.Wireshark", "4.6.2", "wireshark-app"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			apps := t.TempDir()
 			path := installVersion(t, apps, tt.app, tt.id, tt.version)
+			noCasks(t, fake)
+			catalogued(t, fake)
+			found, err := withApps(fake, apps).AppsByHand(t.Context())
+			want := []brew.ByHand{{Path: path, Name: strings.TrimSuffix(tt.app, ".app"), ID: tt.id, Cask: tt.want}}
+			if err != nil || found.Unmatched != nil || !slices.Equal(found.Apps, want) {
+				t.Errorf("AppsByHand() = %+v, %v; want %+v", found, err, want)
+			}
+		})
+	}
+}
+
+// An app's version is the one it shows, or its build's when only that
+// starts with a number, as Sublime Text shows Build 4215. One that still
+// can't be told gets no cask that updates itself, as which major version
+// it is can't be told. A cask that updates itself whose own version can't
+// be told (latest) is the app's only when no line shares its place.
+func TestTheCaskOfAnAppWhoseVersionIsHardToTell(t *testing.T) {
+	for _, tt := range []struct {
+		name, app, id, version, build, want string
+	}{
+		{"shown as a build, its build the cask's", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "4215", "sublime-text"},
+		{"shown as a build, of an earlier major version", "Sublime Text.app", "com.sublimetext.3", "Build 3211", "3211", ""},
+		{"shown as a build, with none", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "", ""},
+		{"no version", "BBEdit.app", "com.barebones.bbedit", "", "", ""},
+		{"a cask of the latest, with no line", "Stream.app", "com.example.stream", "1.0", "", "stream"},
+		{"a cask of the latest, no version either, with no line", "Stream.app", "com.example.stream", "", "", "stream"},
+		{"a cask of the latest, with a line", "Board.app", "com.example.board", "2.4", "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			apps := t.TempDir()
+			path := installBuild(t, apps, tt.app, tt.id, tt.version, tt.build)
 			noCasks(t, fake)
 			catalogued(t, fake)
 			found, err := withApps(fake, apps).AppsByHand(t.Context())
@@ -265,7 +311,7 @@ func TestAppsByHandWithoutACatalogue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			apps := t.TempDir()
-			path := installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+			path := installVersion(t, apps, "Google Chrome.app", "com.google.Chrome", "158.0.8127.37")
 			noCasks(t, fake)
 			cache := t.TempDir()
 			if tt.payload != "" {
@@ -291,7 +337,7 @@ func TestAppsByHandWithoutACatalogue(t *testing.T) {
 func TestTheCatalogueIsTheNewestAsItChanges(t *testing.T) {
 	fake := runnertest.New(t)
 	apps := t.TempDir()
-	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+	installVersion(t, apps, "Google Chrome.app", "com.google.Chrome", "158.0.8127.37")
 	noCasks(t, fake)
 	cache := t.TempDir()
 	fake.On("brew", "--cache").Prints(cache + "\n")
@@ -349,9 +395,9 @@ func TestAppsByHandWithoutHomebrewsCache(t *testing.T) {
 func TestTheCasksAppsInstalledByHandAreDrift(t *testing.T) {
 	fake := runnertest.New(t)
 	apps := t.TempDir()
-	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
-	installApp(t, apps, "Spaceman.app", "dev.original.Spaceman")
-	installApp(t, apps, "1Password.app", "com.1password.1password")
+	installVersion(t, apps, "Google Chrome.app", "com.google.Chrome", "158.0.8127.37")
+	installVersion(t, apps, "Spaceman.app", "dev.original.Spaceman", "1.0")
+	installVersion(t, apps, "1Password.app", "com.1password.1password", "8.12.46")
 	installApp(t, apps, "Kubius.app", "com.example.kubius")
 	noCasks(t, fake)
 	catalogued(t, fake)
@@ -401,7 +447,7 @@ func TestTheCasksAppsByHandThatCantBeTold(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			apps := t.TempDir()
-			installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+			installVersion(t, apps, "Google Chrome.app", "com.google.Chrome", "158.0.8127.37")
 			fake.On("brew", "list", "--cask", "--full-name", "-1")
 			tt.setup(t, fake)
 			var logged []string
@@ -422,7 +468,7 @@ func TestTheCasksAppsByHandThatCantBeTold(t *testing.T) {
 // hand can't be told: that's no look that found none.
 func TestTheCasksAppsByHandWithoutBrew(t *testing.T) {
 	apps := t.TempDir()
-	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+	installVersion(t, apps, "Google Chrome.app", "com.google.Chrome", "158.0.8127.37")
 	found, err := withApps(runnertest.New(t), apps).Casks().(kind.Adoptable).InstalledByHand(t.Context())
 	if !errors.Is(err, runner.ErrNotFound) || found.Things != nil || found.Apps != nil {
 		t.Errorf("InstalledByHand() = %v, %v; want brew not found", found, err)

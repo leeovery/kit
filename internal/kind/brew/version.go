@@ -28,15 +28,34 @@ func notReplacing(at, have, version string) error {
 	if replaces(have, version) {
 		return nil
 	}
-	app := at + " is " + have
-	if have == "" {
-		app = at + " says no version"
-	}
-	said := fmt.Sprintf("%s and the cask's is %s: kit replaces only an older copy of the same major version", app, version)
+	said := fmt.Sprintf("%s and the cask's is %s: kit replaces only an older copy of the same major version", versionOf(at, have), version)
 	if why := whyNot(have, version); why != "" {
 		said += ", and " + why
 	}
 	return errors.New(said)
+}
+
+// notAdopting is why the app at at, of version have, isn't adopted by its
+// cask, of version, which updates itself: it's a copy of an earlier major
+// version, or one either version can't tell; line, unless "", is the cask
+// whose app it is.
+func notAdopting(at, have, version, line string) error {
+	said := fmt.Sprintf("%s and the cask's is %s: kit takes over only a copy of the cask's major version or later", versionOf(at, have), version)
+	switch {
+	case line != "":
+		said += ", and " + line + " is this one's line"
+	case major(have) < 0 || major(version) < 0:
+		said += ", and can't tell whether this one is"
+	}
+	return errors.New(said)
+}
+
+// versionOf says the app at at is of version have.
+func versionOf(at, have string) string {
+	if have == "" {
+		return at + " says no version"
+	}
+	return at + " is " + have
 }
 
 // whyNot is what kit can say of an app of version have, beside its cask's,

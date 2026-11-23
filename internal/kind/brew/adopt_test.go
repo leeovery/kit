@@ -55,18 +55,18 @@ func TestAnAppAlreadyThere(t *testing.T) {
 		store                        bool
 		refused                      string
 	}{
-		{"the cask's own", "google-chrome", "Google Chrome.app", "com.google.Chrome", "", false, ""},
-		{"its id in another case", "google-chrome", "Google Chrome.app", "COM.GOOGLE.CHROME", "", false, ""},
-		{"by a token the cask had", "chrome", "Google Chrome.app", "com.google.Chrome", "", false, ""},
-		{"in Homebrew's own tap", "homebrew/cask/google-chrome", "Google Chrome.app", "com.google.Chrome", "", false, ""},
+		{"the cask's own", "google-chrome", "Google Chrome.app", "com.google.Chrome", "158.0.8127.37", false, ""},
+		{"its id in another case", "google-chrome", "Google Chrome.app", "COM.GOOGLE.CHROME", "158.0.8127.37", false, ""},
+		{"by a token the cask had", "chrome", "Google Chrome.app", "com.google.Chrome", "158.0.8127.37", false, ""},
+		{"in Homebrew's own tap", "homebrew/cask/google-chrome", "Google Chrome.app", "com.google.Chrome", "158.0.8127.37", false, ""},
 		{"its package's", "zoom", "zoom.us.app", "us.zoom.xos", "7.2.5", false, ""},
 		{"by its target", "browser", "Browser.app", "com.example.browser", "", false, ""},
-		{"a fork under its name", "spaceman", "Spaceman.app", "dev.fork.Spaceman", "", false, "Spaceman.app is already in %s and isn't the cask's (dev.fork.Spaceman)"},
+		{"a fork under its name", "spaceman", "Spaceman.app", "dev.fork.Spaceman", "1.0", false, "Spaceman.app is already in %s and isn't the cask's (dev.fork.Spaceman)"},
 		{"another app by a token the cask had", "chrome", "Google Chrome.app", "com.example.fork", "", false, "Google Chrome.app is already in %s and isn't the cask's (com.example.fork)"},
 		{"not its package's", "zoom", "zoom.us.app", "com.example.other", "", false, "zoom.us.app is already in %s and isn't the cask's (com.example.other)"},
 		{"a cask stating no id", "quiet-tool", "Quiet Tool.app", "com.example.quiet", "", false, "Quiet Tool.app is already in %s and isn't the cask's (com.example.quiet)"},
-		{"an app with no bundle id", "google-chrome", "Google Chrome.app", "", "", false, "Google Chrome.app is already in %s and isn't the cask's (no bundle id)"},
-		{"the App Store's, its id the cask's", "google-chrome", "Google Chrome.app", "com.google.Chrome", "", true, "Google Chrome.app is already in %s and is the App Store's"},
+		{"an app with no bundle id", "google-chrome", "Google Chrome.app", "", "158.0.8127.37", false, "Google Chrome.app is already in %s and isn't the cask's (no bundle id)"},
+		{"the App Store's, its id the cask's", "google-chrome", "Google Chrome.app", "com.google.Chrome", "158.0.8127.37", true, "Google Chrome.app is already in %s and is the App Store's"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake, apps, casks := adopting(t)
@@ -288,7 +288,8 @@ func TestAnAppIsReplacedOnlyAsAnOlderCopyOfItsMajorVersion(t *testing.T) {
 // or not, so a package goes in only as kit would replace the app: its
 // version, or an older copy of the same major version, the app found where
 // the package says it puts it, or, saying nowhere, at the folder's top by
-// the bundle id it quits. Otherwise it isn't installed, saying why.
+// the bundle id it quits; a cask with an app of its own as well, alike.
+// Otherwise it isn't installed, saying why.
 func TestAPackageInstallsOverItsAppOnlyAsKitWouldReplaceIt(t *testing.T) {
 	const why = ": kit replaces only an older copy of the same major version"
 	for _, tt := range []struct {
@@ -302,29 +303,73 @@ func TestAPackageInstallsOverItsAppOnlyAsKitWouldReplaceIt(t *testing.T) {
 		{"another app under its name", "monitor", "Monitor.app", "com.example.other", "3.0", ""},
 		{"where it says it puts it, a newer copy", "zoom", "zoom.us.app", "us.zoom.xos", "8.0.1", "zoom.us.app is 8.0.1 and the cask's is 7.2.5.90525" + why + ", and this one is newer"},
 		{"where it says it puts it, an older copy", "zoom", "zoom.us.app", "us.zoom.xos", "7.1.0", ""},
+		{"an app of its own beside it, a newer copy", "wireshark-app", "Wireshark.app", "org.wireshark.Wireshark", "4.7.0", "Wireshark.app is 4.7.0 and the cask's is 4.6.10" + why + ", and this one is newer"},
+		{"an app of its own beside it, an older copy", "wireshark-app", "Wireshark.app", "org.wireshark.Wireshark", "4.6.2", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fake, apps, casks := adopting(t)
-			if tt.app != "" {
-				installVersion(t, apps, tt.app, tt.id, tt.version)
-			}
-			fake.On("brew", "install", "--cask", "--adopt", tt.cask)
-			err := casks.Install(t.Context(), []string{tt.cask})
-			var want []string
-			if tt.refused == "" {
-				want = []string{"brew install --cask --adopt " + tt.cask}
-			}
-			if got := installs(fake); !slices.Equal(got, want) {
-				t.Errorf("ran %q, want %q", got, want)
-			}
-			got := ""
-			if err != nil {
-				got = err.Error()
-			}
-			if got != tt.refused {
-				t.Errorf("Install() = %q, want %q", got, tt.refused)
-			}
+			installsOrRefuses(t, tt.cask, tt.refused, func(apps string) {
+				if tt.app != "" {
+					installVersion(t, apps, tt.app, tt.id, tt.version)
+				}
+			})
 		})
+	}
+}
+
+// Homebrew adopts an app there unchecked for a cask that updates itself,
+// recording it as the cask's version, so such a cask goes in only as kit
+// would offer it the app: a copy of its major version or later, by the
+// version the app shows, or its build. An app of an earlier major version,
+// or whose version can't be told, isn't adopted, saying so, and naming its
+// line when there's one. A cask of the latest takes over any version only
+// when no line shares its place.
+func TestACaskThatUpdatesItselfAdoptsOnlyItsMajorVersionOrLater(t *testing.T) {
+	const why = ": kit takes over only a copy of the cask's major version or later"
+	for _, tt := range []struct {
+		name, cask, app, id, version, build, refused string
+	}{
+		{"its major version", "bbedit", "BBEdit.app", "com.barebones.bbedit", "16.0.2", "", ""},
+		{"a later major version", "bbedit", "BBEdit.app", "com.barebones.bbedit", "17.0", "", ""},
+		{"an earlier major version, of a line", "bbedit", "BBEdit.app", "com.barebones.bbedit", "14.6.2", "", "BBEdit.app is 14.6.2 and the cask's is 16.1" + why + ", and bbedit@14 is this one's line"},
+		{"an earlier major version, of no line", "bbedit", "BBEdit.app", "com.barebones.bbedit", "15.0.3", "", "BBEdit.app is 15.0.3 and the cask's is 16.1" + why},
+		{"an ESR", "firefox", "Firefox.app", "org.mozilla.firefox", "153.7.0", "", "Firefox.app is 153.7.0 and the cask's is 160.0.1" + why + ", and firefox@esr is this one's line"},
+		{"the line's own", "bbedit@14", "BBEdit.app", "com.barebones.bbedit", "14.6.2", "", ""},
+		{"no version", "bbedit", "BBEdit.app", "com.barebones.bbedit", "", "", "BBEdit.app says no version and the cask's is 16.1" + why + ", and can't tell whether this one is"},
+		{"shown as a build, by its build", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "4215", ""},
+		{"shown as a build, with none", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "", "Sublime Text.app is Build 4215 and the cask's is 4215" + why + ", and can't tell whether this one is"},
+		{"a cask of the latest, with no line", "stream", "Stream.app", "com.example.stream", "1.0", "", ""},
+		{"a cask of the latest, with a line", "board", "Board.app", "com.example.board", "2.4", "", "Board.app is 2.4 and the cask's is latest" + why + ", and can't tell whether this one is"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			installsOrRefuses(t, tt.cask, tt.refused, func(apps string) {
+				installBuild(t, apps, tt.app, tt.id, tt.version, tt.build)
+			})
+		})
+	}
+}
+
+// installsOrRefuses has Homebrew install cask alone, place having put what's
+// in the Applications folder first: with --adopt, or, refusing, not at all,
+// failing as refused says.
+func installsOrRefuses(t *testing.T, cask, refused string, place func(apps string)) {
+	t.Helper()
+	fake, apps, casks := adopting(t)
+	place(apps)
+	fake.On("brew", "install", "--cask", "--adopt", cask)
+	err := casks.Install(t.Context(), []string{cask})
+	var want []string
+	if refused == "" {
+		want = []string{"brew install --cask --adopt " + cask}
+	}
+	if got := installs(fake); !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+	got := ""
+	if err != nil {
+		got = err.Error()
+	}
+	if got != refused {
+		t.Errorf("Install() = %q, want %q", got, refused)
 	}
 }
 
@@ -391,7 +436,7 @@ const adoptingChrome = `==> Fetching downloads for: google-chrome
 // told of it downloaded, then installed.
 func TestAnAppAdoptedIsInstalled(t *testing.T) {
 	fake, apps, casks := adopting(t)
-	installApp(t, apps, "Google Chrome.app", "com.google.Chrome")
+	installVersion(t, apps, "Google Chrome.app", "com.google.Chrome", "158.0.8127.37")
 	fake.On("brew", "list", "--cask", "--full-name", "-1")
 	noCasks(t, fake)
 	fake.On("brew", "info", "--json=v2", "--cask", "google-chrome").Prints(`{"formulae": [], "casks": [{"token": "google-chrome", "full_token": "google-chrome"}]}`)

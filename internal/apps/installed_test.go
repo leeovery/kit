@@ -119,22 +119,42 @@ func TestInstalledInOrder(t *testing.T) {
 	}
 }
 
-// An app's short version is the one its Info.plist gives people: none when
-// it gives none, or there's no app.
-func TestShortVersion(t *testing.T) {
+// An app's version is the one its Info.plist shows people; its build's,
+// when only that starts with a number; else the one shown, as it is: none
+// when it says neither, or there's no app.
+func TestVersion(t *testing.T) {
 	dir := t.TempDir()
-	versioned := filepath.Join(dir, "Versioned.app")
-	if err := os.MkdirAll(filepath.Join(versioned, "Contents"), 0o700); err != nil {
-		t.Fatal(err)
+	for _, tt := range []struct {
+		name, shown, build, want string
+	}{
+		{"shown", "4.6.8", "468", "4.6.8"},
+		{"shown as a build", "Build 4215", "4215", "4215"},
+		{"shown alone", "Build 4215", "", "Build 4215"},
+		{"neither starting with a number", "Build 4215", "r4215", "Build 4215"},
+		{"a build alone", "", "4215", "4215"},
+		{"neither", "", "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app := filepath.Join(dir, tt.name+".app")
+			info := `<?xml version="1.0"?><plist version="1.0"><dict>`
+			if tt.shown != "" {
+				info += `<key>CFBundleShortVersionString</key><string>` + tt.shown + `</string>`
+			}
+			if tt.build != "" {
+				info += `<key>CFBundleVersion</key><string>` + tt.build + `</string>`
+			}
+			if err := os.MkdirAll(filepath.Join(app, "Contents"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(info+`</dict></plist>`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := apps.Version(app); got != tt.want {
+				t.Errorf("Version() = %q, want %q", got, tt.want)
+			}
+		})
 	}
-	info := `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>4.6.8</string><key>CFBundleVersion</key><string>468</string></dict></plist>`
-	if err := os.WriteFile(filepath.Join(versioned, "Contents", "Info.plist"), []byte(info), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	writeApp(t, filepath.Join(dir, "Plain.app"), "com.example.plain")
-	for app, want := range map[string]string{"Versioned.app": "4.6.8", "Plain.app": "", "Missing.app": ""} {
-		if got := apps.ShortVersion(filepath.Join(dir, app)); got != want {
-			t.Errorf("ShortVersion() of %s = %q, want %q", app, got, want)
-		}
+	if got := apps.Version(filepath.Join(dir, "Missing.app")); got != "" {
+		t.Errorf("Version() of no app = %q", got)
 	}
 }

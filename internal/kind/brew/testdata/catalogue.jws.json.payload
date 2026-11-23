@@ -266,6 +266,72 @@
         [":app", ["Little Snitch.app"]]
       ]
     },
+    "sublime-text": {
+      "auto_updates": true, "names": ["Sublime Text"], "tap_string": "homebrew/cask", "version": "4215",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.sublimetext.4"}],
+        [":app", ["Sublime Text.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.sublimetext.3.plist", "~/Library/Saved Application State/com.sublimetext.4.savedState"]}]
+      ]
+    },
+    "sublime-text@dev": {
+      "auto_updates": true, "names": ["Sublime Text"], "tap_string": "homebrew/cask", "version": "4214",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.sublimetext.4"}],
+        [":app", ["Sublime Text.app"]],
+        [":zap", {":trash": ["~/Library/Preferences/com.sublimetext.3.plist"]}]
+      ]
+    },
+    "thaw": {
+      "auto_updates": true, "names": ["Thaw"], "tap_string": "homebrew/cask", "version": "2.1.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.thaw"}],
+        [":app", ["Thaw.app"]]
+      ]
+    },
+    "thaw@beta": {
+      "auto_updates": true, "names": ["Thaw"], "tap_string": "homebrew/cask", "version": "3.0.0-beta.7",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.thaw"}],
+        [":app", ["Thaw.app"]]
+      ]
+    },
+    "stream": {
+      "auto_updates": true, "names": ["Stream"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.stream"}],
+        [":app", ["Stream.app"]]
+      ]
+    },
+    "board": {
+      "auto_updates": true, "names": ["Board"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.board"}],
+        [":app", ["Board.app"]]
+      ]
+    },
+    "board@2": {
+      "auto_updates": true, "names": ["Board"], "tap_string": "homebrew/cask", "version": "2.4",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.board"}],
+        [":app", ["Board.app"]]
+      ]
+    },
+    "spaceman@classic": {
+      "auto_updates": true, "names": ["Spaceman Classic"], "tap_string": "homebrew/cask", "version": "latest",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "dev.original.Spaceman"}],
+        [":app", ["Spaceman.app"]]
+      ]
+    },
+    "wireshark-app": {
+      "auto_updates": true, "names": ["Wireshark"], "tap_string": "homebrew/cask", "version": "4.6.10",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "org.wireshark.Wireshark", ":pkgutil": "org.wireshark.ChmodBPF.pkg"}],
+        [":app", ["Wireshark.app"]],
+        [":pkg", ["Install ChmodBPF.pkg"]]
+      ]
+    },
     "nightly": {
       "names": ["Nightly"], "tap_string": "homebrew/cask", "version": "latest",
       "raw_artifacts": [
