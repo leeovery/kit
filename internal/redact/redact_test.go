@@ -27,7 +27,10 @@ func TestText(t *testing.T) {
 		{name: "npm's token in a flag", text: "npm install -g --//registry.npmjs.org/:_authToken=npm_abc123 tool", want: "npm install -g --//registry.npmjs.org/:_authToken=[redacted] tool"},
 		{name: "npm's auth and password", text: "_auth=dXNlcjpwYXNz _password='cGFzcw=='", want: "_auth=[redacted] _password='[redacted]'"},
 		{name: "an address's password", text: "npm install -g --registry https://someone:hunter2@registry.example.com/ tool", want: "npm install -g --registry https://someone:[redacted]@registry.example.com/ tool"},
-		{name: "an address's user alone stays", text: "ssh://git@github.com/owner/repo", want: "ssh://git@github.com/owner/repo"},
+		{name: "a token as an address's user", text: "npm install -g https://tok3n-value@registry.example.com/tool.tgz", want: "npm install -g https://[redacted]@registry.example.com/tool.tgz"},
+		{name: "a token as a plain address's user", text: "http://tok3n-value@192.0.2.1/", want: "http://[redacted]@192.0.2.1/"},
+		{name: "a token as any scheme's user", text: "git+https://tok3n-value@example.com/tool.git", want: "git+https://[redacted]@example.com/tool.git"},
+		{name: "git as an address's user stays", text: "ssh://git@github.com/owner/repo", want: "ssh://git@github.com/owner/repo"},
 		{name: "a scp-like address stays", text: "git@github.com:owner/repo.git", want: "git@github.com:owner/repo.git"},
 	}
 	for _, tt := range tests {
