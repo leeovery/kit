@@ -296,8 +296,9 @@ const unbreakingHyphen = "\u2011"
 
 // wrap is s, styled, wrapped to w cells, what follows its first hang
 // cells under them on each line after the first: at spaces, or after a /
-// in a path, a word wider than that broken, after a / or a hyphen where it
-// has one, its style carried on to the lines it goes on to.
+// in a path, a word wider than that on lines of its own, broken after a /
+// or a hyphen where it has one, its style carried on to the lines it goes
+// on to.
 func wrap(s string, w int, hang string) []string {
 	if ansi.StringWidth(s) <= w {
 		return []string{s}
@@ -317,15 +318,27 @@ func wrap(s string, w int, hang string) []string {
 	return lines
 }
 
-// wholeWords is s with the hyphens of each word no wider than w unbreaking.
+// wholeWords is s with the hyphens of each word no wider than w unbreaking;
+// a wider word starts a line of its own, the hyphens leading it unbreaking,
+// so a flag's dashes never end a line.
 func wholeWords(s string, w int) string {
-	words := strings.Split(s, " ")
-	for i, word := range words {
-		if ansi.StringWidth(word) <= w {
-			words[i] = strings.ReplaceAll(word, "-", unbreakingHyphen)
+	var b strings.Builder
+	for i, word := range strings.Split(s, " ") {
+		wide := ansi.StringWidth(word) > w
+		switch {
+		case i > 0 && wide:
+			b.WriteByte('\n')
+		case i > 0:
+			b.WriteByte(' ')
 		}
+		if !wide {
+			b.WriteString(strings.ReplaceAll(word, "-", unbreakingHyphen))
+			continue
+		}
+		rest := strings.TrimLeft(word, "-")
+		b.WriteString(strings.Repeat(unbreakingHyphen, len(word)-len(rest)) + rest)
 	}
-	return strings.Join(words, " ")
+	return b.String()
 }
 
 // Output is a tool's lines, as it printed them.

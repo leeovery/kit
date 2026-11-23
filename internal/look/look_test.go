@@ -137,8 +137,8 @@ func TestStacked(t *testing.T) {
 
 // A line wraps at its spaces, or after a / in a path, never at a hyphen in
 // a word that fits a line of its own, as a flag's; a word wider than the
-// line is broken, after a / or a hyphen where it has one, or else where it
-// fills the line.
+// line starts a line of its own and is broken, after a / or a hyphen where
+// it has one, never the dashes leading it, or else where it fills the line.
 func TestFoldKeepsWordsThatFitWhole(t *testing.T) {
 	for _, c := range []struct {
 		name, line string
@@ -151,7 +151,11 @@ func TestFoldKeepsWordsThatFitWhole(t *testing.T) {
 		{"a path, after a /", "copied from ~/Library/Application Support/Some App/Data",
 			[]string{"copied from ~/Library/Application", "Support/Some App/Data"}},
 		{"a hyphenated word wider than the line", "then a-hyphenated-word-far-wider-than-the-line-is",
-			[]string{"then a-hyphenated-word-far-wider-than-", "the-line-is"}},
+			[]string{"then", "a-hyphenated-word-far-wider-than-the-", "line-is"}},
+		{"a flag wider than the line", "gh repo edit owner/repo --visibility private --accept-a-change-far-wider-than-the-line",
+			[]string{"gh repo edit owner/repo --visibility", "private", "--accept-a-change-far-wider-than-the-", "line"}},
+		{"a flag wider than the line, nothing after its dashes", "gh --abcdefghijklmnopqrstuvwxyzabcdefghijklmnop",
+			[]string{"gh", "--abcdefghijklmnopqrstuvwxyzabcdefghijkl", "mnop"}},
 		{"a word wider than the line, nothing to break it after", "x abcdefghijklmnopqrstuvwxyzabcdefghijklmnop y",
 			[]string{"x", "abcdefghijklmnopqrstuvwxyzabcdefghijklmn", "op y"}},
 	} {
