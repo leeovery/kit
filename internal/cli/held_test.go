@@ -288,3 +288,19 @@ func TestReconcileInstallsAHeldLineWithItsSecret(t *testing.T) {
 	}
 	noSecretKept(t, w, out+errOut)
 }
+
+// An install kit reconcile makes that fails says why once.
+func TestReconcileSaysAFailedInstallOnce(t *testing.T) {
+	w := heldWorld(t)
+	w.write(t, ".secrets.zsh", "export TOKEN='plain-token-value'\n")
+	w.write(t, driftFile, `{"first_seen": {"brew:owner/private/fetcher": "2025-12-31T00:00:00Z"}}`)
+	f := w.fake
+	f.On("brew", "list", "--formula", "--full-name", "-1").Prints(heldListed)
+	f.On("brew", "leaves").Prints(heldLeaves)
+	f.On("brew", "leaves", "--installed-on-request").Prints(heldOnRequest)
+	f.On("brew", "install", "--formula", "owner/private/fetcher").Exits(1).PrintsToStderr("Error: it broke\n")
+	out, errOut, code := w.run(t, "reconcile", "brew:owner/private/fetcher", "--install")
+	if want := "brew:owner/private/fetcher failed couldn't install owner/private/fetcher: Error: it broke\n"; !strings.Contains(out, want) || code == 0 {
+		t.Errorf("kit reconcile printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+}

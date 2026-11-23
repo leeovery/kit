@@ -46,7 +46,7 @@ func (a *app) pullConfig(ctx context.Context, dir string, at basis, command stri
 // quietPull is pulled with, when nothing was brought in, how long that's
 // been so, as the drift record has it, and whether it's quiet yet, as
 // drift is for its first day.
-func quietPull(pulled steps.Pulled, record drift.Record, now time.Time) steps.Pulled {
+func quietPull(pulled steps.Pulled, record drift.Records, now time.Time) steps.Pulled {
 	if pulled.Missed == nil {
 		return pulled
 	}

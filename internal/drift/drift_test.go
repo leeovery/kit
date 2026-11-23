@@ -45,7 +45,7 @@ func TestQuieten(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := drift.Quieten(check.Result{State: check.Attention, Items: []check.Item{extra(tt.name)}}, r, now, nil)
+			res := drift.Quieten(check.Result{State: check.Attention, Items: []check.Item{extra(tt.name)}}, drift.Records{Drift: r}, now, nil)
 			it := res.Items[0]
 			if it.Quiet != tt.quiet || !it.Since.Equal(tt.since) {
 				t.Errorf("item = %+v, want quiet %q since %v", it, tt.quiet, tt.since)
@@ -67,8 +67,8 @@ func TestQuieten(t *testing.T) {
 // app, not as the record remembers its id. A leave holds for
 // nothing but a thing installed by hand, as the cask installed since.
 func TestQuietenWhatsLeftByHand(t *testing.T) {
-	r := drift.Record{
-		FirstSeen: map[string]time.Time{"cask:renamed-since": ago(30 * 24 * time.Hour), "cask:renamed-snoozed": ago(time.Hour)},
+	r := drift.Records{
+		Drift: drift.Record{FirstSeen: map[string]time.Time{"cask:renamed-since": ago(30 * 24 * time.Hour), "cask:renamed-snoozed": ago(time.Hour)}},
 		Hand: drift.Hand{
 			FirstSeen: map[string]time.Time{"cask:com.example.left": ago(30 * 24 * time.Hour), "cask:com.example.woke": ago(30 * 24 * time.Hour), "cask:com.example.snoozed": ago(30 * 24 * time.Hour), "cask:com.example.old": ago(30 * 24 * time.Hour)},
 			Snoozed:   map[string]time.Time{"cask:com.example.woke": ago(time.Minute), "cask:com.example.snoozed": now.Add(time.Hour)},
@@ -100,13 +100,13 @@ func TestQuietenLeavesOtherResultsAlone(t *testing.T) {
 		{State: check.OK, Summary: "2 declared, all installed"},
 		{State: check.Failed, Reason: "brew leaves exited 1", Items: []check.Item{extra("x")}},
 	} {
-		got := drift.Quieten(res, drift.Record{}, now, nil)
+		got := drift.Quieten(res, drift.Records{}, now, nil)
 		if got.State != res.State || got.Summary != res.Summary || got.Reason != res.Reason {
 			t.Errorf("Quieten(%+v) = %+v, want its state kept", res, got)
 		}
 	}
 	in := check.Result{State: check.Attention, Items: []check.Item{extra("x")}}
-	_ = drift.Quieten(in, drift.Record{}, now, nil)
+	_ = drift.Quieten(in, drift.Records{}, now, nil)
 	if in.Items[0].Quiet != "" {
 		t.Error("Quieten changed the result it was given, want a copy changed")
 	}
@@ -207,7 +207,7 @@ var refused = check.Result{State: check.Attention, Items: []check.Item{{ID: "log
 // A check that couldn't look isn't drift: what it says needs the person at
 // the Mac now, never quiet as new.
 func TestQuietenLeavesWhatsNotAllowedLoud(t *testing.T) {
-	got := drift.Quieten(refused, drift.Record{}, now, nil)
+	got := drift.Quieten(refused, drift.Records{}, now, nil)
 	if got.State != check.Attention || got.Items[0].Quiet != "" {
 		t.Errorf("Quieten() = %+v, want it needing attention, loud", got)
 	}
@@ -237,7 +237,7 @@ func TestQuietenLeavesWhatApplyingLeftLoud(t *testing.T) {
 		{"not given to act on", check.Result{State: check.Attention, Items: []check.Item{missing("other", "install")}}, drift.New, check.OK},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := drift.Quieten(tt.res, r, now, tried)
+			got := drift.Quieten(tt.res, drift.Records{Drift: r}, now, tried)
 			if got.Items[0].Quiet != tt.quiet || got.State != tt.want {
 				t.Errorf("Quieten() = %+v, want it %s, its item quiet %q", got, tt.want, tt.quiet)
 			}
@@ -297,7 +297,7 @@ func TestLeave(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := drift.Load(dir)
-	if err != nil || len(r.Hand.Left) != 2 || !r.Hand.Left["com.example.editor"].Equal(now) || !r.Hand.Left["dev.example.spaceman"].Equal(now) || r.Snoozed["cask:zoom"].IsZero() {
+	if err != nil || len(r.Hand.Left) != 2 || !r.Hand.Left["com.example.editor"].Equal(now) || !r.Hand.Left["dev.example.spaceman"].Equal(now) || r.Drift.Snoozed["cask:zoom"].IsZero() {
 		t.Errorf("Load() after Leave() and an older kit's write = %+v, %v; want both left now, the snooze kept", r, err)
 	}
 	if err := drift.Unleave(dir, "COM.example.editor"); err != nil {
@@ -319,14 +319,14 @@ func TestSnooze(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := drift.Load(state)
-	if err != nil || !r.Hand.Snoozed["cask:com.example.editor"].Equal(now.Add(drift.SnoozeFor)) || !r.Snoozed["brew:ffmpeg"].Equal(now.Add(drift.SnoozeFor)) || len(r.Snoozed) != 1 {
+	if err != nil || !r.Hand.Snoozed["cask:com.example.editor"].Equal(now.Add(drift.SnoozeFor)) || !r.Drift.Snoozed["brew:ffmpeg"].Equal(now.Add(drift.SnoozeFor)) || len(r.Drift.Snoozed) != 1 {
 		t.Errorf("Load() = %+v, %v; want the editor snoozed in the Hand, ffmpeg in the record", r, err)
 	}
 }
 
 func TestUpdateAndLoad(t *testing.T) {
 	state := t.TempDir() + "/state/kit"
-	if r, err := drift.Load(state); err != nil || r.FirstSeen != nil {
+	if r, err := drift.Load(state); err != nil || r.Drift.FirstSeen != nil || r.Hand.Left != nil {
 		t.Fatalf("Load() before any = %+v, %v; want an empty record", r, err)
 	}
 	var wg sync.WaitGroup
@@ -339,7 +339,7 @@ func TestUpdateAndLoad(t *testing.T) {
 	}
 	wg.Wait()
 	r, err := drift.Load(state)
-	if err != nil || len(r.Snoozed) != 20 {
-		t.Errorf("after 20 updates at once, Load() = %d snoozes, %v; want every one", len(r.Snoozed), err)
+	if err != nil || len(r.Drift.Snoozed) != 20 {
+		t.Errorf("after 20 updates at once, Load() = %d snoozes, %v; want every one", len(r.Drift.Snoozed), err)
 	}
 }

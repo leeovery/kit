@@ -217,7 +217,7 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared, nil)
 	case install:
 		if err := kind.InstallDeclared(event.WithChanging(ctx), d.k, d.list, d.held(), []string{dec.item.Name}); err != nil {
-			return check.Result{State: check.Failed, Reason: couldnt(d.installing) + engine.Reason(err)}
+			return check.Result{State: check.Failed, Reason: engine.Reason(err)}
 		}
 		return check.Result{State: check.OK, Summary: d.installing.Done}
 	}

@@ -150,7 +150,7 @@ type run struct {
 	// once the run's steps are known.
 	placing map[string]kind.Placing
 	repo    gitrepo.Repo
-	record  drift.Record
+	record  drift.Records
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
@@ -901,7 +901,7 @@ func (a *app) configHome() string {
 // the drift record says: new for a day, snoozed, or a temporary install;
 // but never what applying it was given to act on in the run and left still
 // to act on.
-func quietened(step engine.Step, record drift.Record, now time.Time) engine.Step {
+func quietened(step engine.Step, record drift.Records, now time.Time) engine.Step {
 	checks, applies := step.Check, step.Apply
 	acted := &tried{}
 	step.Check = func(ctx context.Context) check.Result {

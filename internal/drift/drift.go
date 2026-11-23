@@ -43,20 +43,24 @@ type Record struct {
 	Snoozed map[string]time.Time `json:"snoozed_until,omitempty"`
 	// Temporary is when each temporary install was made.
 	Temporary map[string]time.Time `json:"temporary,omitempty"`
-	// Hand is what's remembered of the things installed by hand, kept in
-	// a file of its own, as Load reads it: Update leaves it be.
-	Hand Hand `json:"-"`
 }
 
-// Load reads the record in the state directory, with what's remembered of
-// the things installed by hand: an empty one when there's none.
-func Load(stateDir string) (Record, error) {
+// Records are both records kit keeps of drift: the drift record, and what
+// it remembers of the things installed by hand, each in a file of its own.
+type Records struct {
+	Drift Record
+	Hand  Hand
+}
+
+// Load reads the records in the state directory: empty ones when there
+// are none.
+func Load(stateDir string) (Records, error) {
 	r, err := state.Load[Record](stateDir, file)
 	if err != nil {
-		return Record{}, err
+		return Records{}, err
 	}
-	r.Hand, err = state.Load[Hand](stateDir, handFile)
-	return r, err
+	h, err := state.Load[Hand](stateDir, handFile)
+	return Records{Drift: r, Hand: h}, err
 }
 
 // Update reads the record, changes it, and writes it back whole, holding a
@@ -75,14 +79,14 @@ func Update(stateDir string, change func(*Record)) error {
 // quiet. Nor is an item applying the step was given to act on, by id in
 // tried, that's still to act on, whatever its age: applying left it, so the
 // step needs attention.
-func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) check.Result {
+func Quieten(res check.Result, r Records, now time.Time, tried map[string]bool) check.Result {
 	if _, refused := res.Refused(); refused || len(res.Items) == 0 {
 		return res
 	}
 	items := slices.Clone(res.Items)
 	loud, left := false, false
 	for i, it := range items {
-		firstSeen, snoozed, key := r.FirstSeen, r.Snoozed, it.ID
+		firstSeen, snoozed, key := r.Drift.FirstSeen, r.Drift.Snoozed, it.ID
 		if it.State == kind.ByHand {
 			firstSeen, snoozed, key = r.Hand.FirstSeen, r.Hand.Snoozed, handKey(it)
 		}
@@ -97,7 +101,7 @@ func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) c
 			items[i].Quiet = Left
 		case snoozed[key].After(now):
 			items[i].Quiet = Snoozed
-		case !r.Temporary[it.ID].IsZero() && now.Sub(r.Temporary[it.ID]) < TemporaryFor:
+		case !r.Drift.Temporary[it.ID].IsZero() && now.Sub(r.Drift.Temporary[it.ID]) < TemporaryFor:
 			items[i].Quiet = Temporary
 		case !seen || now.Sub(since) < Grace:
 			items[i].Quiet = New
@@ -237,8 +241,8 @@ const handFile = "by-hand.json"
 // snooze ends, by its kind and app (handKey); and when each app was left
 // installed by hand, for good, by its bundle id, lower case. Going by the
 // app, each outlasts the cask it's matched with being renamed, or matching
-// it no more for a while, as the app updates itself past the cask; a leave
-// outlasts its kind not being looked after too.
+// it no more for a while, as on the app's version; a leave outlasts its
+// kind not being looked after too.
 type Hand struct {
 	FirstSeen map[string]time.Time `json:"first_seen,omitempty"`
 	Snoozed   map[string]time.Time `json:"snoozed_until,omitempty"`

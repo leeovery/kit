@@ -65,7 +65,8 @@ func appCount(n int) string { return fmt.Sprintf("%d %s", n, look.Plural(n, "app
 
 // takenOver is how many apps installed by hand casks take over, but those
 // the Mac declares already, as the snapshot found them: as many as there
-// are casks, when it found none of theirs.
+// are casks, when it found none of theirs, as when --adopt names casks
+// while which casks install the apps couldn't be told.
 func (s *Setup) takenOver(hand *handApps, casks []string) int {
 	found, _ := s.snapshot()
 	n, matched := 0, false
