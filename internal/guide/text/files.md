@@ -51,7 +51,11 @@ here because something else is already here can break a new Mac's shell.
 `kit path add <dir>` puts a directory on the PATH, kit's and the shell's,
 for this Mac or every Mac (`--shared`): kit-config's `[paths]`. This
 Mac's directories come first, in the order declared, then every Mac's,
-then the system's, each once. Adding a directory every Mac has for this
+then Homebrew's (/opt/homebrew/bin and /opt/homebrew/sbin, which kit adds
+itself, so there's no need to declare them), then the system's, each
+once. A Homebrew folder declared keeps its declared place: that's how a
+Mac puts Homebrew's ahead of other folders, so leave such lines where they
+are. Adding a directory every Mac has for this
 Mac too moves it ahead of every Mac's on this Mac, in its place among
 this Mac's own: ahead of Homebrew's, for example. Removing it without
 `--shared` takes it out of this Mac's file alone, back to its place

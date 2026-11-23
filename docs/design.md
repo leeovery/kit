@@ -708,17 +708,16 @@ empty, one created new and private. This Mac: `--mac`, suggested from its model,
 it (`MacBook Pro`, `macbook-pro`), named as `kit machine add` names one, recorded before it's
 written anywhere; a config starting on this Mac has first files kit.toml (`format`,
 `minimum_kit` this kit when it's a release, `primary` this Mac, `terminal` Ghostty only when
-setup runs in it, the Mac's table, its model the `description`), the Mac's folder, its
-declarations file empty, and the shared declarations, Homebrew's folders in `[paths]` (each
-`# Homebrew`, as `kit path add --shared` writes them), as kit's own PATH is `[paths]` then the
-system's and kit's runs would find no brew without them; joining, one of kit.toml's Macs or a new one, added as `kit machine
+setup runs in it, the Mac's table, its model the `description`), and the Mac's folder, its
+declarations file empty, no shared folder (made once something's declared for every Mac; kit
+puts Homebrew's folders on its PATH itself, so they need no line); joining, one of kit.toml's Macs or a new one, added as `kit machine
 add` adds it, `--from` a copy of another. Then the snapshot (`snapshot.Find`, on kit-config's
 PATH: a kind's program that isn't there is looked for along the PATH setup was run with, then
-Homebrew's and the system's folders, and the first folder holding it, never kit's own, a
+the boot's folders (`/usr/local/bin`, Homebrew's and the system's being on kit's PATH already), and the first folder holding it, never kit's own, a
 temporary or a relative one, nor one named for a version, as 22.11.0 (refused, saying so, when
 it alone holds the program), is declared last in the Mac's `[paths]` as `kit path add` declares
 it, its own part; the snapshot reads with kit's PATH as its later runs will have it, those folders
-after the Mac's own and before the shared file's and the system's), a row its counts by part, and its questions, each with its answer
+after the Mac's own and before the shared file's, Homebrew's and the system's), a row its counts by part, and its questions, each with its answer
 suggested, its flag, and its answer kept in the record: the folders a new Mac brings back
 (`--restore`, as `kit restore add` declares them), apps' settings saved nightly (`--prefs`:
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
@@ -1149,17 +1148,22 @@ the file out. Both commit and push.
 
 ### kit's PATH, and the shell's
 
-At start-up kit builds its own PATH from the config's `paths` and the system's directories,
-ignoring what it inherited, so it behaves the same from a terminal, launchd or an agent, and
-finds tools installed partway through a run. The order is the Mac's own `paths`, then the
-shared file's, then the system's, each folder once, in the place it first appears
-(`config.PathLists`): a folder only one Mac needs, declared in that Mac's file, wins over
-Homebrew's, which shared declares, as a version manager's shims must. The one exception to a
+At start-up kit builds its own PATH from the config's `paths`, Homebrew's folders and the
+system's directories, ignoring what it inherited, so it behaves the same from a terminal,
+launchd or an agent, and finds tools installed partway through a run. The order is the Mac's
+own `paths`, then the shared file's, then Homebrew's (`config.HomebrewPaths`,
+`/opt/homebrew/bin` and `/opt/homebrew/sbin`, which kit supplies as it does the system's:
+Homebrew's installer puts only its bin on the PATH, after `/usr/bin`, and only a terminal's),
+then the system's, each folder once, in the place it first appears (`config.PathLists`): a
+Homebrew folder a file declares keeps its declared place, so a config declaring them reads as
+it did before kit supplied them, and nothing migrates; a folder only one Mac needs, declared in
+that Mac's file, wins over Homebrew's, as a version manager's shims must. The one exception to a
 thing declared in the shared file or a Mac's, never both: a Mac may declare a folder shared
 does, raising it on that Mac (`raises`, on the `paths` section alone); `kit path remove`
 without `--shared` then takes it out of the Mac's file alone, lowering it again.
 
-The shell uses the same list, the code review's "one PATH list": the `path` step writes it
+The shell uses the same list, Homebrew's folders included (the system's come from the PATH
+the shell inherits), the code review's "one PATH list": the `path` step, on every Mac, writes it
 (`~` expanded, colon-separated) to `path` in kit's state directory, and the shell's startup
 puts the file's contents ahead of the PATH it inherits, reading it without running anything,
 so a config that doesn't read never leaves a shell without its PATH. Relative entries
@@ -1485,9 +1489,8 @@ there yet, starts kit-config on this Mac: the boot asks the terminal the Mac use
 it, kit-config's row then naming `kit terminal <name>`), plans the boot order from it, and names
 the Mac without a list; the kit-config step creates the repository through GitHub's CLI unless it's there,
 clones it, sets it on main as setup does (`boot.OnMain`), writes `config.Start`'s first files
-(this Mac the primary, that terminal, the Mac's folder with an empty declarations file, the shared
-declarations with Homebrew's folders in `[paths]`),
-commits them, as the GitHub account (its name, its private address) when git has no author
+(this Mac the primary, that terminal, the Mac's folder with an empty declarations file, no
+shared folder), commits them, as the GitHub account (its name, its private address) when git has no author
 yet, and pushes once every push URL is proven private (`boot.ProvenPrivate`, shared with
 setup), its branch made by the push (`BranchMayBeMissing`). The record (`fresh`) keeps the
 choice, so a boot run again asks nothing again; once pushed, it's a config as any other.

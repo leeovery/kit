@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -766,8 +767,8 @@ func pushesFirst(t *testing.T, run *runnertest.Fake, b *Boot, repo, mac string, 
 	} else {
 		run.On("git", git("config", "--get", "user.name")...).Exits(1)
 	}
-	files := []string{"kit.toml", mac + "/declarations", "shared/declarations"}
-	run.On("git", on("status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "kit.toml", "shared", mac)...).Prints("?? kit.toml\x00?? " + mac + "/declarations\x00?? shared/declarations\x00")
+	files := []string{"kit.toml", mac + "/declarations"}
+	run.On("git", on("status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "kit.toml", mac)...).Prints("?? kit.toml\x00?? " + mac + "/declarations\x00")
 	run.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
 	run.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Exits(1)
 	run.On("git", on(slices.Concat([]string{"add", "--intent-to-add", "--"}, files)...)...)
@@ -786,8 +787,8 @@ func pushesFirst(t *testing.T, run *runnertest.Fake, b *Boot, repo, mac string, 
 // it's there, empty; cloned as any is, then set on main; its first files,
 // this Mac the primary and the terminal it uses, its folder with an empty
 // declarations file, committed, as the account signed in to when git has
-// no author yet, and pushed, once proven private. Then it's kit-config as
-// any other.
+// no author yet, and pushed, once proven private: no shared folder, as
+// nothing's declared for every Mac yet. Then it's kit-config as any other.
 func TestKitConfigStartsOnThisMac(t *testing.T) {
 	for _, tt := range []struct {
 		name            string
@@ -852,9 +853,8 @@ func TestKitConfigStartsOnThisMac(t *testing.T) {
 			if got, err := os.ReadFile(filepath.Join(b.Config, "laptop", "declarations")); err != nil || len(got) > 0 {
 				t.Errorf("laptop/declarations = %q, %v; want it empty", got, err)
 			}
-			const homebrew = "[paths]\n/opt/homebrew/bin   # Homebrew\n/opt/homebrew/sbin   # Homebrew\n"
-			if got, err := os.ReadFile(filepath.Join(b.Config, "shared", "declarations")); err != nil || string(got) != homebrew {
-				t.Errorf("shared/declarations = %q, %v; want %q: Homebrew's folders on every Mac's PATH, as kit apply after the boot finds brew", got, err, homebrew)
+			if _, err := os.Lstat(filepath.Join(b.Config, config.Shared)); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("the shared folder: %v; want none till something's declared for every Mac", err)
 			}
 			for _, c := range run.Commands() {
 				if !slices.Contains(c.Args, "commit") {

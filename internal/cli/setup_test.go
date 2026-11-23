@@ -3,6 +3,8 @@ package cli_test
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -206,13 +208,13 @@ func TestSetupWithoutATerminal(t *testing.T) {
 	if got := w.read(t, filepath.Join(".config", "kit", "kit.toml")); got != "format = 1\nminimum_kit = \"0.1.0\"\nprimary = \"laptop\"\n\n[macs.laptop]\ndescription = \"MacBook Pro\"\n" {
 		t.Errorf("kit.toml =\n%s", got)
 	}
-	if got, want := w.read(t, filepath.Join(".config", "kit", "shared", "declarations")), "[paths]\n"+filepath.Join(w.home, "homebrew", "bin")+"   # Homebrew\n"; got != want {
-		t.Errorf("shared/declarations = %q, want %q: Homebrew's folders on every Mac's PATH", got, want)
+	if _, err := os.Lstat(filepath.Join(w.home, ".config", "kit", "shared")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the shared folder: %v; want none till something's declared for every Mac", err)
 	}
 
 	w.expectCommit(t, commit{
-		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "shared", "laptop"},
-		files: []string{"kit.toml", "laptop/declarations", "shared/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00?? shared/declarations\x00",
+		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+		files: []string{"kit.toml", "laptop/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00",
 	})
 	out, errOut, code = w.run(t, "setup", "--json", "--restore", "~/Code", "--prefs", "--no-apply")
 	stood = readSetup(t, out).stood()
@@ -220,7 +222,7 @@ func TestSetupWithoutATerminal(t *testing.T) {
 		"kit-config ok someone/kit-config · new, private",
 		"restore ok 1 folder",
 		"prefs ok every night",
-		"commit ok 1 declared · committed and pushed kit.toml, shared/ and laptop/",
+		"commit ok 1 declared · committed and pushed kit.toml and laptop/",
 		"by-hand ok none",
 		"secrets ok kit keeps secrets in a store, never in kit-config: kit secret add",
 	} {
@@ -264,8 +266,8 @@ func withHandApps(t *testing.T) *world {
 	w.installApp(t, "Tally", "com.example.tally")
 	w.installApp(t, "Kubius", "com.example.kubius")
 	w.expectCommit(t, commit{
-		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "shared", "laptop"},
-		files: []string{"kit.toml", "laptop/declarations", "shared/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00?? shared/declarations\x00",
+		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+		files: []string{"kit.toml", "laptop/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00",
 	})
 	return w
 }
@@ -308,11 +310,11 @@ func TestSetupThenApplies(t *testing.T) {
 	healthyMac(w)
 	w.private()
 	w.expectCommit(t, commit{
-		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "shared", "laptop"},
-		files: []string{"kit.toml", "laptop/declarations", "shared/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00?? shared/declarations\x00",
+		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+		files: []string{"kit.toml", "laptop/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00",
 	})
 	out, errOut, code := w.run(t, "setup", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs")
-	for _, want := range []string{"kit setup · MacBook Pro\n", "commit ok 1 declared · committed and pushed kit.toml, shared/ and laptop/\n", "kit apply · laptop\n", "git-config ok 1 declared, all set\n"} {
+	for _, want := range []string{"kit setup · MacBook Pro\n", "commit ok 1 declared · committed and pushed kit.toml and laptop/\n", "kit apply · laptop\n", "git-config ok 1 declared, all set\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("kit setup printed\n%s%s\nwant it to hold %q", out, errOut, want)
 		}
@@ -332,10 +334,10 @@ func TestSetupCarriesOnFromAPushThatFailed(t *testing.T) {
 	w.creates(t)
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-	paths := []string{"kit.toml", "shared", "laptop"}
+	paths := []string{"kit.toml", "laptop"}
 	w.expectCommit(t, commit{
 		message: "kit setup (laptop): this Mac as it is", paths: paths,
-		files: []string{"kit.toml", "laptop/declarations", "shared/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00?? shared/declarations\x00",
+		files: []string{"kit.toml", "laptop/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00",
 	})
 	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Exits(1)
 	w.fake.On("git", git("fetch", "--prune", "--quiet", "origin")...).Exits(128).PrintsToStderr("fatal: couldn't find remote ref refs/heads/main\n")
@@ -400,9 +402,9 @@ func TestSetupCarriesOnFromAPushThatFailed(t *testing.T) {
 func TestSetupCarriesOnFromACommitThatFailed(t *testing.T) {
 	flags := []string{"setup", "--json", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--link", "~/.zshrc", "--no-apply"}
 	made := commit{
-		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "shared", "laptop"},
-		files:  []string{"kit.toml", "laptop/declarations", "laptop/home/.zshrc", "shared/declarations"},
-		status: "?? kit.toml\x00?? laptop/declarations\x00?? laptop/home/.zshrc\x00?? shared/declarations\x00",
+		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+		files:  []string{"kit.toml", "laptop/declarations", "laptop/home/.zshrc"},
+		status: "?? kit.toml\x00?? laptop/declarations\x00?? laptop/home/.zshrc\x00",
 	}
 	mac := func(t *testing.T) *world {
 		w := inUse(t, map[string]bool{})
@@ -424,7 +426,7 @@ func TestSetupCarriesOnFromACommitThatFailed(t *testing.T) {
 	w.expectCommit(t, failing)
 	out, _, code := w.run(t, flags...)
 	stood := readSetup(t, out).stood()
-	if want := "commit failed couldn't commit kit.toml, shared/ and laptop/: "; !slices.ContainsFunc(stood, func(s string) bool { return strings.HasPrefix(s, want) }) || code != 1 {
+	if want := "commit failed couldn't commit kit.toml and laptop/: "; !slices.ContainsFunc(stood, func(s string) bool { return strings.HasPrefix(s, want) }) || code != 1 {
 		t.Fatalf("the commit failing, kit setup stood\n%s\nexit %d; want it to hold %q", strings.Join(stood, "\n"), code, want)
 	}
 	w.keeps("laptop/home/.zshrc")
@@ -455,8 +457,8 @@ func TestSetupCarriesOnFromACommitThatFailed(t *testing.T) {
 
 // Joining as a Mac with [paths] of its own, setup's snapshot reads with
 // kit's PATH as later runs have it: the Mac's folders, then the shared
-// file's, then the system's; a folder looked along for a program goes
-// last of the Mac's, ahead of the shared file's.
+// file's, then Homebrew's and the system's; a folder looked along for a
+// program goes last of the Mac's, ahead of the shared file's.
 func TestSetupSnapshotReadsWithTheMacsPathFirst(t *testing.T) {
 	w := inUse(t, map[string]bool{"someone/kit-config": true})
 	w.clones(t, "someone/kit-config", map[string]string{
@@ -473,7 +475,7 @@ func TestSetupSnapshotReadsWithTheMacsPathFirst(t *testing.T) {
 		t.Fatalf("kit setup printed\n%s%s\nexit %d", out, errOut, code)
 	}
 	bin, homebrew := filepath.Join(w.home, "bin"), filepath.Join(w.home, "homebrew", "bin")
-	system := []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+	system := []string{"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
 	for _, want := range [][]string{
 		slices.Concat([]string{bin, homebrew}, system),
 		slices.Concat([]string{bin, "/usr/local/bin", homebrew}, system),

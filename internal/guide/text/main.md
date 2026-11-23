@@ -134,10 +134,10 @@ use `sudo -n`, to make one pass.
 ### What a step can rely on
 
 kit's environment, not your shell's: HOME, the PATH kit-config's `[paths]`
-makes, USER, LOGNAME, SHELL, TMPDIR, LANG, LC_ALL and SSH_AUTH_SOCK, the
-secrets store's own variables, and the secrets it names. No token, alias or
-function from a shell is there. It runs in its folder, with nothing on its
-input.
+makes (then Homebrew's and the system's), USER, LOGNAME, SHELL, TMPDIR,
+LANG, LC_ALL and SSH_AUTH_SOCK, the secrets store's own variables, and the
+secrets it names. No token, alias or function from a shell is there. It
+runs in its folder, with nothing on its input.
 
 What it names: `--after` for each thing kit installs that it uses (a step,
 or a step's thing, as in cask:firefox), and `--secret` for each secret. A

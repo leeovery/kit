@@ -238,7 +238,9 @@ func newPathCommand(a *app) *cobra.Command {
 		Long: `Put directories on the PATH, kit's and the shell's: last of this Mac's own,
 which come first, or, with --shared, last of every Mac's, after this Mac's. A
 directory every Mac has, added for this Mac, moves ahead of every Mac's on
-this Mac, in its place among this Mac's own.` + declaredWhere,
+this Mac, in its place among this Mac's own. kit puts Homebrew's folders after
+the directories declared, unless they're declared, and its own PATH ends with
+the system's.` + declaredWhere,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, pathsKind+" add", func(ctx context.Context, r *run) error {

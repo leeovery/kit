@@ -20,10 +20,11 @@ as owner/name, or a new one created, private, kit-config suggested. One
 without a kit.toml is refused and the question asked again. A new or
 empty one starts kit-config on this Mac: the boot asks which terminal the
 Mac uses, then, once it's cloned, writes kit.toml (this Mac the primary,
-that terminal) and the Mac's folder with an empty declarations file,
-commits them and pushes, only to a repository proven private. Without a
-terminal, the question of which is the config stops it, naming `--config`:
-a new config is made at a terminal, or with `kit setup` on a Mac in use.
+that terminal) and the Mac's folder with an empty declarations file (no
+shared folder: kit makes it with the first `--shared`), commits them and
+pushes, only to a repository proven private. Without a terminal, the
+question of which is the config stops it, naming `--config`: a new config
+is made at a terminal, or with `kit setup` on a Mac in use.
 An empty one named with `kit bootstrap --config` starts with no terminal,
 the boot staying in Terminal; `kit terminal <name>` names one after.
 

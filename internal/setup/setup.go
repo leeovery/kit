@@ -130,9 +130,6 @@ type Setup struct {
 	// Getenv reads the environment kit runs in, and Version is kit's.
 	Getenv  func(string) string
 	Version string
-	// Homebrew are Homebrew's folders, put on every Mac's PATH by a config
-	// starting on this Mac (config.HomebrewPaths).
-	Homebrew []string
 	// Model is what this Mac is, as in MacBook Pro (Model).
 	Model string
 	// Given are the questions answered by flags.

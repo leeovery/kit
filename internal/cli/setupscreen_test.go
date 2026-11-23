@@ -184,9 +184,9 @@ func settingUp(t *testing.T) *world {
 
 // laptopCommit is setup's commit of the Mac named laptop, ~/.zshrc linked.
 var laptopCommit = commit{
-	message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "shared", "laptop"},
-	files:  []string{"kit.toml", "laptop/declarations", "laptop/home/.zshrc", "shared/declarations"},
-	status: "?? kit.toml\x00?? laptop/declarations\x00?? laptop/home/.zshrc\x00?? shared/declarations\x00",
+	message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+	files:  []string{"kit.toml", "laptop/declarations", "laptop/home/.zshrc"},
+	status: "?? kit.toml\x00?? laptop/declarations\x00?? laptop/home/.zshrc\x00",
 }
 
 // readingSlowly has the snapshot's read of macOS's settings wait till read,
