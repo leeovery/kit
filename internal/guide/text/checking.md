@@ -17,7 +17,10 @@
   `kit nightly`, the jobs due, then every check. It tells no one what it
   finds: read it in `kit status` (`kit status nightly` says when it last
   ran) and `kit log`. `kit apply` installs it, and asks the person to give
-  kit.app Full Disk Access.
+  kit.app Full Disk Access. Once a day it records kit's newest release, from
+  GitHub: `kit status kit-version` says when one is newer than the kit
+  running. Nothing upgrades kit by itself: the person runs
+  `brew upgrade leeovery/tools/kit`.
 - `kit reconcile`: settles what differs from the config, and commits or
   undoes edits made by hand in kit-config.
 

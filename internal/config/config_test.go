@@ -102,6 +102,14 @@ func TestOlder(t *testing.T) {
 	}
 }
 
+func TestIsRelease(t *testing.T) {
+	for v, want := range map[string]bool{"0.5.1": true, "v0.10.0": true, "dev": false, "0.5": false, "0.5.1-rc.1": false, "": false} {
+		if got := config.IsRelease(v); got != want {
+			t.Errorf("IsRelease(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
 func TestSupports(t *testing.T) {
 	tests := []struct {
 		minimum string

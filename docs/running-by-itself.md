@@ -106,6 +106,8 @@ flags the runs themselves:
 
 ## Good to know
 
+- **You upgrade kit yourself.** If a newer kit is out, `kit status` says so, with the
+  command to run: `brew upgrade leeovery/tools/kit`.
 - **It runs the kit you run.** The launch runs the kit on kit's PATH, so a Homebrew upgrade
   carries on.
 - **A Mac without the launch says so.** `kit status` flags a Mac that has never run on a

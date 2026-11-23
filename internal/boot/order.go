@@ -239,9 +239,9 @@ func (b *Boot) homebrewStep() engine.Step {
 	}
 }
 
-// kitFormula is kit's own formula, named in full, so brew taps its tap
+// KitFormula is kit's own formula, named in full, so brew taps its tap
 // itself.
-const kitFormula = "leeovery/tools/kit"
+const KitFormula = "leeovery/tools/kit"
 
 // OwnBuild reports whether the boot runs a build of kit's own, as the
 // install script given one (KIT_FROM) starts it: it then hands over to that
@@ -297,10 +297,11 @@ func sameFile(a, b string) bool {
 	return err == nil && os.SameFile(ai, bi)
 }
 
-// kitStep installs kit itself through Homebrew, which keeps it up to date,
-// for the boot to hand over to: done when Homebrew's kit is there, and no
-// older than the boot's own, as it may be on a boot run again, or with the
-// tap a release behind; a boot that isn't a release's compares none.
+// kitStep installs kit itself through Homebrew, for the boot to hand over
+// to: done when Homebrew's kit is there, and no older than the boot's own,
+// as it may be on a boot run again, or with the tap a release behind; a
+// boot that isn't a release's compares none. Homebrew upgrades it only when
+// the person does, as kit status says once a newer release is out.
 func (b *Boot) kitStep() engine.Step {
 	return engine.Step{
 		Name: KitStep, Title: "kit",
@@ -328,7 +329,7 @@ func (b *Boot) kitStep() engine.Step {
 				verb, doing = "upgrade", "upgrading"
 			}
 			b.doing(KitStep, doing)
-			if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{verb, "--formula", kitFormula}, Timeout: 15 * time.Minute, SudoAsks: true}); err != nil {
+			if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{verb, "--formula", KitFormula}, Timeout: 15 * time.Minute, SudoAsks: true}); err != nil {
 				return fmt.Errorf("%s kit through Homebrew: %w", verb, err)
 			}
 			return nil

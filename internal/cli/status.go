@@ -36,6 +36,7 @@ import (
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/notice"
 	"github.com/leeovery/kit/internal/redact"
+	"github.com/leeovery/kit/internal/release"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
@@ -539,7 +540,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}
 	checks = append(checks,
 		r.hostKeyStep(a.SSHDir, a.SSHAddress, dirs.State, features.on(steps.FeatureRemoteLogin)), quietened(edits, record, now),
-		steps.Disk(observed), steps.Memory(observed), steps.Load(observed, a.Now),
+		steps.Disk(observed), steps.Memory(observed), steps.Load(observed, a.Now), release.Check(a.Version, boot.KitFormula, dirs.State),
 		steps.ConfigSync(r.repo, a.Now, quietPull(pulled, record, now)), steps.ConfigPrivate(r.repo),
 	)
 	newMac, err := boot.NewMac(dirs.State)
