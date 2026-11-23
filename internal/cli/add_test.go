@@ -273,7 +273,7 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 		t.Errorf("ran %q, want sudo -v asked before the install", calls)
 	}
 	// While it runs, its row says what it's doing: the command's verb.
-	if !strings.Contains(ansi.Strip(out), "◐ zoom  adding") {
+	if !strings.Contains(turned(ansi.Strip(out)), "◐ zoom  adding") {
 		t.Errorf("kit cask add zoom printed\n%s\nwant zoom's row adding as it runs", ansi.Strip(out))
 	}
 }
