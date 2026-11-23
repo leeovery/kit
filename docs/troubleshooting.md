@@ -120,25 +120,30 @@ in, kit asks again on the next run.
 
 ## A cask fails because its app is already there
 
-kit has Homebrew take over an app already in Applications only if it's the cask's own, at a
-version the cask takes over. If it isn't, the cask fails, and the app stays as it is. The
-version depends on the cask:
+kit has Homebrew take over or replace an app already in Applications only if it's the cask's
+own, at a version the cask accepts. If it isn't, the cask fails, and the app stays as it is.
+The version depends on the cask:
 
-| If the cask | It takes over |
+| If the cask | It accepts |
 |---|---|
-| Updates itself, no package | Its major version or later, as it is |
-| Doesn't, or has a package | The same version, or an older copy of its major |
-| Is a channel, as `@beta` | A prerelease of its major |
+| Updates itself, no package | Its major or later, kept as it is |
+| Doesn't, or has a package | Its version, or an older copy of its major |
+| Is a line, as `@14` or `@esr` | A copy of its own line only |
+| Is a channel, as `@beta` | A prerelease, as below |
 
-A prerelease app, such as a beta, goes only to a channel's cask if one is there.
+kit replaces an older copy: it deletes the app, and the cask's copy goes in its place. A
+prerelease app, such as a beta, goes only to a channel's cask if one is there. A channel that
+updates itself, with no package, takes a prerelease of its major. Any other channel takes only
+its exact version.
 
 The reason comes after the start of the message:
 
 | Command | Message starts |
 |---|---|
 | `kit apply` | `couldn't install <cask>:` |
+| `kit reconcile --install` | `couldn't install <cask>:` |
 | `kit cask add` | `couldn't install:` |
-| `kit reconcile` | `couldn't install:` |
+| `kit reconcile --adopt` | `couldn't install:` |
 
 With four casks or more failing, `kit apply` starts `couldn't install 4 of 6:` instead. Two
 reasons or more are joined with `;`. The fix for each is the same: choose which copy you
@@ -169,12 +174,16 @@ Charles.app is 4.6.8 and the cask's is 5.2.3: kit replaces only an older copy of
 ```
 
 **Cause:** the cask doesn't update itself, or installs through a package. kit replaces the
-app only if it's the same version or an older copy of the same major version. These stay as
-they are:
+app only if it's the same version or an older copy of the same major version. An earlier
+major version stays, such as Charles 4 beside the cask's 5. The message may add why:
 
-- a newer copy, and the message adds `this one is newer`;
-- an earlier major version, such as Charles 4 beside the cask's 5;
-- a prerelease, or an app that says no version.
+| The message ends | Because |
+|---|---|
+| `this one is newer` | The app is newer than the cask |
+| `this one is a prerelease` | The app is a beta or the like |
+| `the cask's is a prerelease` | The cask is a beta or the like |
+| `latest says no version` | The cask's version is `latest` |
+| `can't tell whether this one is` | kit can't compare the versions |
 
 If you want to keep an earlier major version, Homebrew may have a cask for it, such as
 `charles@4`. Declare that one instead.
@@ -189,17 +198,6 @@ BBEdit.app is 14.6.2 and the cask's is 16.1: kit takes over only a copy of the c
 a newer one too. An earlier major version may be one you have no licence past, so kit leaves
 it. The message names the cask for your version, if Homebrew has one.
 
-If it ends `can't tell whether this one is`, kit can't compare the two versions. That happens
-in these cases:
-
-- the app says no version kit can read;
-- the cask's version is `latest`, and a line of the cask is there too;
-- the app's version is a build number below the cask's, such as Sublime Text's 4200 beside
-  4215.
-
-A build number below the cask's fails `kit apply` for a declared cask until the app updates
-itself past it. Run `kit apply cask` again then.
-
 **Fix:** to keep your version, declare its line in place of the cask:
 
 ```bash
@@ -209,6 +207,31 @@ kit cask add bbedit@14
 
 Or undeclare the cask, and keep the app by hand.
 
+### A later version is there, beside a line
+
+```text
+BBEdit.app is 16.1 and the cask's is 14.6.9: kit takes over by a line only a copy of that line, and bbedit is this one's
+```
+
+**Cause:** you declared a line, such as `bbedit@14`, and the app is a copy of another line or
+the main cask. A line takes over only its own copies. If the message ends `no cask here is
+this one's`, no cask matches the app.
+
+**Fix:** declare the cask the message names in place of the line, as above. Or undeclare the
+line, and keep the app by hand.
+
+### kit can't compare the versions
+
+The message ends `can't tell whether this one is`. That happens in these cases:
+
+- the app says no version kit can read;
+- the cask's version is `latest`, and a line of the cask is there too;
+- one version is a build number, such as Sublime Text's 4215, and the other has dots;
+- the app's build number is below the cask's, such as 4200 beside 4215.
+
+A build number below the cask's fails `kit apply` for a declared cask until the app updates
+itself past it. Run `kit apply cask` again then.
+
 ### A prerelease is there
 
 ```text
@@ -216,11 +239,19 @@ Thaw.app is 3.0.0-beta.7 and the cask's is 2.1.0: kit takes over a prerelease on
 ```
 
 **Cause:** the app is a prerelease, and Homebrew has a channel's cask for it, such as a beta.
-kit hands a prerelease only to that cask. If the message ends `none here is at its major
-version`, no channel matches the app's major version.
+kit hands a prerelease only to that cask. The message may end otherwise:
+
+| The message ends | Because |
+|---|---|
+| `none here is at its major version` | No channel matches the app's major version |
+| `lamp@beta and lamp@nightly are as near it` | Two channels match it equally |
+
+A prerelease beside a channel whose version has no major version, such as `ghostty@tip`, gets
+no offer.
 
 **Fix:** declare the channel's cask in place of this one, as for a line above:
-`kit cask add thaw@beta`. Or undeclare the cask, and keep the app by hand.
+`kit cask add thaw@beta`. If two match, pick one. Or undeclare the cask, and keep the app by
+hand.
 
 ### kit can't look at the app
 
@@ -235,11 +266,12 @@ then run `kit apply cask`.
 
 The message holds Homebrew's own words, `It seems there is already an App at`.
 
-**Cause:** kit couldn't check the cask, so Homebrew installed it without taking the app over.
-That happens for these casks:
+**Cause:** kit couldn't check the cask, so Homebrew tried to install it without taking the app
+over. That happens for these casks:
 
 - a cask from a tap;
 - a cask that puts more than apps in place, such as a font;
+- a cask whose app goes outside Applications;
 - a cask missing from Homebrew's catalogue;
 - every cask, if the catalogue can't be read.
 

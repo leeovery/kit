@@ -48,30 +48,40 @@ or its `CFBundleVersion` when the short one doesn't start with a number
 (Build 4215 is 4215). What an app already in /Applications that's the
 cask's becomes, by the cask:
 
-- One that updates itself, with no package, takes the app over as it is
-  at the cask's major version or later, a newer copy too. A version of
-  numbers without a dot (a build's, as Sublime Text's 4215) has no major:
-  at or above the cask's, it's taken; below, the cask fails ("..., and
-  can't tell whether this one is") till the app updates past it. A
-  prerelease goes only to a channel's cask (`@beta` and the like) when one
-  is at its place: another fails, naming the channel (`Thaw.app is
-  3.0.0-beta.7 and the cask's is 2.1.0: kit takes over a prerelease only by
-  its channel's cask, and thaw@beta is this one's`), or ending "none here
-  is at its major version". An earlier major fails the cask,
-  naming the `@` line that's the app's, if one is: `BBEdit.app is 14.6.2
-  and the cask's is 16.1: kit takes over only a copy of the cask's major
-  version or later, and bbedit@14 is this one's line`. Declare that line
-  in its place, or leave the app by hand.
+- One that updates itself, with no package, takes the app over as it is at
+  the cask's major version or later, a newer copy too. A build number
+  (numbers without a dot, as Sublime Text's 4215) is never told against a
+  dotted version ("..., and can't tell whether this one is"); against a
+  build number, at or above the cask's it's taken, below it the cask fails
+  till the app updates past it. An earlier major fails the cask, naming the
+  `@` line that's the app's, if one is: `BBEdit.app is 14.6.2 and the cask's
+  is 16.1: kit takes over only a copy of the cask's major version or later,
+  and bbedit@14 is this one's line`. Declare that line in its place, or
+  leave the app by hand.
+- A line (`bbedit@14`, `firefox@esr`: an `@` cask that isn't a channel's)
+  takes over only a copy of its own line, as the offer would pick it:
+  `BBEdit.app is 16.1 and the cask's is 14.6.9: kit takes over by a line
+  only a copy of that line, and bbedit is this one's`, or ending "no cask
+  here is this one's".
+- A prerelease goes only to a channel's cask when one is at its place, the
+  channel nearest its version at its major. Another cask fails, naming the
+  channel (`Thaw.app is 3.0.0-beta.7 and the cask's is 2.1.0: kit takes over
+  a prerelease only by its channel's cask, and thaw@beta is this one's`), or
+  ending "none here is at its major version", or, with two as near,
+  "lamp@beta and lamp@nightly are as near it". A version is a prerelease's
+  when a channel's word marks it as a word of its own (alpha, beta, rc, dev,
+  nightly, canary, preview, tip, snapshot, eap, daily and the rest, pre,
+  insider), or as 3.0b2.
 - Any other, with no package, takes the app over as it is at the cask's
-  version. If
-  Homebrew says it differs, kit installs the cask again, alone, with
-  `brew install --cask --force`, which replaces the app, but only the same
-  version (another build) or an older copy of the same major version, both
-  dotted numbers (the cask's before any comma). Any other version (an
-  earlier major, a newer copy, a prerelease, beside a cask of `latest`)
-  fails the cask, saying why.
-- One that installs through a package, whether it updates itself or not,
-  is checked as a replace is, before its installer runs over the app.
+  version. If Homebrew says it differs, kit installs the cask again, alone,
+  with `brew install --cask --force`, which replaces the app, but only the
+  same version (another build) or an older copy of the same major version,
+  both dotted numbers (the cask's before any comma). Any other version fails
+  the cask, saying why: "this one is newer", "this one is a prerelease",
+  "the cask's is a prerelease", "latest says no version", "can't tell
+  whether this one is", or nothing more for an earlier major.
+- One that installs through a package, whether it updates itself or not, is
+  checked as a replace is, before its installer runs over the app.
 
 An app there whose bundle id the cask doesn't name (a fork of the same
 name), or the App Store's copy, even when the cask names its id, is left
@@ -110,20 +120,22 @@ replace the app, so ask the person before you adopt. Of the casks
 installing an app: a prerelease app's, with a channel at its place, is the
 channel nearest its version at its major (`1password@beta`,
 `firefox@beta`, `thaw@beta`), never the cask of releases; with no channel
-at its major, none. Else, when the one without `@` updates itself: that
-one if the app's major version is the cask's or later (Chrome, Dropbox);
-for an earlier major, the `@` line of that major (`bbedit@14`,
-`firefox@esr`), never a channel's (beta, nightly and the like), or none. A
-`latest` one that updates itself is offered, at any app version, only with
-no numbered or LTS `@` line at its place (a channel doesn't count).
-Otherwise the one whose version is nearest the app's, by the numbers it
-starts with (`blender@lts` for Blender's LTS), a tie going to the one
-without `@`. An app whose version can't be read gets no offer, but from
-such a `latest` cask. The offer runs the install's own checks, so nothing
-is offered that kit's install refuses, as a cask of `latest` that doesn't
-update itself; Homebrew can still refuse it.
-Casks from taps, and apps whose cask can't be told, as Homebrew's catalogue
-can't be read, are never offered.
+at its major, or two as near, none. A channel whose version has no major
+(`ghostty@tip`, `sublime-text@dev`) is at no app's major, so a prerelease
+beside it gets no offer, a known limit. Else, when the one without `@`
+updates itself: that one if the app's major version is the cask's or later
+(Chrome, Dropbox); for an earlier major, the `@` line of that major
+(`bbedit@14`, `firefox@esr`), never a channel's (beta, nightly and the
+like), or none. A `latest` one that updates itself is offered, at any app
+version, only with no numbered or LTS `@` line at its place (a channel
+doesn't count). Otherwise the one whose version is nearest the app's, by
+the numbers it starts with (`blender@lts` for Blender's LTS), a tie going
+to the one without `@`. An app whose version can't be read gets no offer,
+but from such a `latest` cask. The offer runs the install's own checks, so
+nothing is offered that kit's install refuses, as a cask of `latest` that
+doesn't update itself; Homebrew can still refuse it.
+Casks from taps, disabled casks, and apps whose cask can't be told, as
+Homebrew's catalogue can't be read, are never offered.
 
 ## Private downloads
 

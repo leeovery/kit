@@ -98,9 +98,9 @@ kit reconcile cask:google-chrome --leave
 
 An app you dragged into Applications is drift if kit can match it to a cask.
 `kit status` reads `installed by hand as Google Chrome.app, not declared`. Adopting it declares
-the cask, and Homebrew takes the app over, if the cask takes that version.
+the cask, and Homebrew takes the app over or replaces an older copy.
 
-`kit status` counts a left app on its Packages row. Adopt it later with
+`kit status` counts a left app under Packages. Adopt it later with
 `kit reconcile cask:<name> --adopt` or `kit cask add <name>`.
 
 ## Trying something out
@@ -118,17 +118,16 @@ The package stays quiet for 7 days, then `kit reconcile` asks whether to keep it
 
 - **kit watches only the kinds you declare.** A kind is checked only if kit-config has its
   section for this Mac, even an empty one. `--temp` adds an empty section if there's none.
-- **A setting removed from the Mac can be accepted.** `--adopt` on a removed setting leaves
-  it removed, and kit stops showing it. See [macOS settings](settings.md).
+- **A removed setting can be accepted** with `--adopt`, and kit stops showing it: see
+  [macOS settings](settings.md).
 - **A replaced linked file is never lost.** `--adopt` moves the copy on the Mac into
   kit-config, and links it back. `--revert` links the copy in kit-config instead, and moves the
   other to the Bin.
 - **Some apps never match a cask:**
   - a fork, or an app outside /Applications;
-  - a version its cask won't take over, as
-    [Troubleshooting](troubleshooting.md) lists;
-  - an app whose cask is a tap's, places more than apps, or is `latest` and doesn't update
-    itself.
+  - a version its cask won't take, as [Troubleshooting](troubleshooting.md) lists;
+  - an app whose cask is a tap's, disabled, or places more than apps;
+  - an app whose cask is `latest`, unless it updates itself and has no `@` line there.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 

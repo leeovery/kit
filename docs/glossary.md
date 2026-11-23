@@ -96,7 +96,7 @@ Without one, you name each item and what to do with it. The main answers:
 | `--leave` | Leaves it installed by hand, for good |
 
 kit then commits and pushes kit-config. Adopting an app installed by hand also installs its
-cask, and Homebrew takes the app over. `--install`, `--undeclare` and `--snooze` settle the
+cask, and Homebrew takes the app over or replaces an older copy. `--install`, `--undeclare` and `--snooze` settle the
 rest.
 
 **Feature.** A piece of kit with nothing to list, switched on with `kit feature on`. The features
