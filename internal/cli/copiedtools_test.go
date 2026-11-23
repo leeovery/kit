@@ -75,18 +75,51 @@ func TestAnNPMLineIsRefusedBeforeItRuns(t *testing.T) {
 	}
 }
 
-// --shared declares for every Mac; --location global is as global as -g.
+// --shared declares for every Mac; --location global, or
+// --location=global, is as global as -g.
 func TestAnNPMInstallLineShared(t *testing.T) {
-	w := laptopWorld(t)
-	w.listsAround([]string{"npm", "install", "--location", "global", "typescript"}, npmLS, npmListed(""), npmListed(`"typescript": {}`))
-	w.expectSync(t, []string{"shared/declarations"}, "kit npm install typescript (laptop): for scripts")
+	for _, location := range [][]string{{"--location", "global"}, {"--location=global"}} {
+		w := laptopWorld(t)
+		w.listsAround(slices.Concat([]string{"npm", "install"}, location, []string{"typescript"}), npmLS, npmListed(""), npmListed(`"typescript": {}`))
+		w.expectSync(t, []string{"shared/declarations"}, "kit npm install typescript (laptop): for scripts")
 
-	out, errOut, code := w.run(t, "npm", "install", "--shared", "--location", "global", "typescript", "--note", "for scripts")
-	if want := "typescript ok installed; declared in shared\n"; !strings.Contains(out, want) || code != 0 {
-		t.Errorf("kit npm install --shared printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+		out, errOut, code := w.run(t, slices.Concat([]string{"npm", "install", "--shared"}, location, []string{"typescript", "--note", "for scripts"})...)
+		if want := "typescript ok installed; declared in shared\n"; !strings.Contains(out, want) || code != 0 {
+			t.Errorf("kit npm install --shared %q printed\n%s%s exit %d; want it to hold %q", location, out, errOut, code, want)
+		}
+		if got := w.readSection(t, "shared", "npm packages"); got != "typescript   # for scripts\n" {
+			t.Errorf("%q: shared's npm packages = %q", location, got)
+		}
 	}
-	if got := w.readSection(t, "shared", "npm packages"); got != "typescript   # for scripts\n" {
-		t.Errorf("shared's npm packages = %q", got)
+}
+
+// Each command's help is its program's: its usage, what its verb has for
+// a dry run, and no other program's words.
+func TestALinesHelpIsItsPrograms(t *testing.T) {
+	w := laptopWorld(t)
+	help := func(args ...string) string {
+		out, _, code := w.run(t, append(args, "--help")...)
+		if code != 0 {
+			t.Fatalf("kit %q --help: exit %d", args, code)
+		}
+		return strings.Join(strings.Fields(out), " ")
+	}
+	if out := help("npm", "install"); !strings.Contains(out, "kit npm install -g <name>...") {
+		t.Errorf("kit npm install --help printed\n%s\nwant its usage to show -g", out)
+	}
+	if out := help("mas", "install"); strings.Contains(out, "--dry-run") {
+		t.Errorf("kit mas install --help printed\n%s\nwant no --dry-run: mas install has none", out)
+	}
+	if out := help("mas", "uninstall"); !strings.Contains(out, "With --dry-run, nothing is undeclared.") {
+		t.Errorf("kit mas uninstall --help printed\n%s\nwant its --dry-run", out)
+	}
+	for _, args := range [][]string{{"npm", "install"}, {"npm", "uninstall"}, {"composer", "global", "require"}, {"composer", "global", "remove"}, {"gh", "extension", "install"}, {"gh", "extension", "remove"}} {
+		out := help(args...)
+		for _, brews := range []string{"short name or its full one", "administrator's password"} {
+			if strings.Contains(out, brews) {
+				t.Errorf("kit %q --help printed\n%s\nwant none of Homebrew's words %q", args, out, brews)
+			}
+		}
 	}
 }
 
@@ -284,19 +317,23 @@ func TestAMasInstallLineDeclaresTheApp(t *testing.T) {
 }
 
 // Without a terminal to ask at, and no password held, the line's refused
-// before it runs; an id the App Store hasn't, or what isn't an id, is too.
+// before it runs, in the words it was typed in, a --dry-run, which mas
+// install hasn't, not making it a dry run; an id the App Store hasn't, or
+// what isn't an id, is refused too.
 func TestAMasInstallLineIsRefusedBeforeItRuns(t *testing.T) {
-	w := masWorld(t, "sudo", "-n", "mas", "install", "497799835")
-	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
-	_, errOut, code := w.run(t, "mas", "install", "497799835")
-	want := "kit: xcode@497799835 needs an administrator's password: run kit mas install at a terminal; nothing was installed\n"
-	if errOut != want || code == 0 || ran(w, "sudo -n mas install 497799835") {
-		t.Errorf("kit mas install: %q, exit %d, running %q; want\n%s", errOut, code, w.fake.Calls(), want)
+	for _, line := range [][]string{{"install", "497799835"}, {"get", "497799835"}, {"install", "--dry-run", "497799835"}} {
+		w := masWorld(t, append([]string{"sudo", "-n", "mas"}, line...)...)
+		w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
+		_, errOut, code := w.run(t, append([]string{"mas"}, line...)...)
+		want := "kit: xcode@497799835 needs an administrator's password: run kit mas " + line[0] + " at a terminal; nothing was installed\n"
+		if errOut != want || code == 0 || slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.Contains(c, "mas "+line[0]) }) {
+			t.Errorf("kit mas %q: %q, exit %d, running %q; want\n%s", line, errOut, code, w.fake.Calls(), want)
+		}
 	}
 
-	w = laptopWorld(t)
+	w := laptopWorld(t)
 	w.fake.On("mas", "lookup", "--json", "1").Exits(1).PrintsToStderr("Error: No apps found in the App Store for ADAM ID 1")
-	_, errOut, code = w.run(t, "mas", "install", "1")
+	_, errOut, code := w.run(t, "mas", "install", "1")
 	if want := "kit: no App Store app has the id 1; nothing was installed\n"; errOut != want || code == 0 {
 		t.Errorf("kit mas install 1: %q, exit %d; want\n%s", errOut, code, want)
 	}
@@ -311,8 +348,9 @@ func TestAMasInstallLineIsRefusedBeforeItRuns(t *testing.T) {
 }
 
 // An uninstall line runs mas through sudo, then undeclares the app, the
-// settings kit prefs saved for it kept, saying what removes them; a dry
-// run runs mas without sudo, and declares nothing.
+// settings kit prefs saved for it kept, saying they come back with it and
+// what, in place of the line, would have removed them; a dry run runs mas
+// without sudo, and declares nothing.
 func TestAMasUninstallLineUndeclares(t *testing.T) {
 	w := notesWorld(t, true)
 	w.fake.On("mas", "lookup", "--json", "123456789").Prints(notesListed)
@@ -320,12 +358,28 @@ func TestAMasUninstallLineUndeclares(t *testing.T) {
 	w.fake.On("sudo", "-n", "true")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit mas uninstall notes-example@123456789 (laptop)")
 	out, errOut, code := w.run(t, "mas", "uninstall", "123456789")
-	want := "notes-example@123456789 ok uninstalled, its saved settings kept: kit mas remove --zap removes them; out of laptop\n"
+	want := "notes-example@123456789 ok uninstalled, its saved settings kept, to come back if it's installed again: " +
+		"kit mas remove --zap, in place of the line, removes them; out of laptop\n"
 	if !strings.Contains(out, want) || code != 0 {
 		t.Errorf("kit mas uninstall printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
 	}
 	if got := w.readSection(t, "laptop", "app store apps"); got != "" {
 		t.Errorf("laptop's apps = %q, want it undeclared", got)
+	}
+
+	// Declared by the name the app had, it's found by its id.
+	w = notesWorld(t, false)
+	w.writeSection(t, "laptop", "app store apps", "old-notes@123456789\n")
+	w.fake.On("mas", "lookup", "--json", "123456789").Prints(notesListed)
+	w.listsAround([]string{"sudo", "-n", "mas", "uninstall", "123456789"}, masList, notesListed, "")
+	w.fake.On("sudo", "-n", "true")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit mas uninstall notes-example@123456789 (laptop)")
+	out, errOut, code = w.run(t, "mas", "uninstall", "123456789")
+	if want := "notes-example@123456789 ok uninstalled; out of laptop\n"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit mas uninstall of an app declared by its old name printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+	if got := w.readSection(t, "laptop", "app store apps"); got != "" {
+		t.Errorf("laptop's apps = %q, want old-notes@123456789 undeclared", got)
 	}
 
 	w = notesWorld(t, false)

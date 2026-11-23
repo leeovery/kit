@@ -14,37 +14,41 @@ import (
 
 // npmLine is how kit npm takes a line copied for npm: kit npm install -g
 // typescript. npm's add, remove and rm go to kit's own commands of those
-// names, so aren't among its verbs' aliases.
+// names, so aren't among its verbs' aliases. npm's --dry-run is a setting
+// of every command that changes what's installed, uninstall's too.
 var npmLine = &kind.LineHelp{
 	Program: "npm",
 	Install: kind.LineVerb{Words: []string{"install"},
 		Aliases: map[string][]string{"install": {"i", "in", "ins", "inst", "insta", "instal", "isnt", "isnta", "isntal", "isntall"}},
+		DryRun:  dryRun,
 		More:    globalOnly + " It runs from the home folder, as kit's own npm installs do, so under the default Node."},
 	Uninstall: kind.LineVerb{Words: []string{"uninstall"},
 		Aliases: map[string][]string{"uninstall": {"un", "r", "unlink"}},
-		More:    globalOnly},
+		DryRun:  dryRun,
+		More:    globalOnly + " A package's found with its version or without, as typescript for typescript@5."},
 	Example:  "-g typescript@5",
 	Declares: "as kit npm add declares it, with the version it's given, if any, kept for installing",
-	DryRun:   []string{"--dry-run"},
+	Usage:    "-g <name>...",
 	Names:    npmNames,
-	Kinds:    func([]string) []string { return []string{"npm"} },
 }
 
 // globalOnly is why a line for npm needs -g.
-const globalOnly = "The line needs -g or --global: kit declares npm's global packages alone."
+const globalOnly = "The line needs -g or --global: kit declares npm's global packages only."
+
+// dryRun is npm's and Composer's flag for a dry run.
+var dryRun = []string{"--dry-run"}
 
 // composerLine is how kit composer takes a line copied for composer: kit
 // composer global require vendor/package.
 var composerLine = &kind.LineHelp{
-	Program:   "composer",
-	Install:   kind.LineVerb{Words: []string{"global", "require"}, Aliases: map[string][]string{"global": {"g"}, "require": {"r"}}},
-	Uninstall: kind.LineVerb{Words: []string{"global", "remove"}, Aliases: map[string][]string{"global": {"g"}, "remove": {"rm", "uninstall"}}},
-	Example:   "vendor/package:^2.0",
+	Program: "composer",
+	Install: kind.LineVerb{Words: []string{"global", "require"}, Aliases: map[string][]string{"global": {"g"}, "require": {"r"}}, DryRun: dryRun},
+	Uninstall: kind.LineVerb{Words: []string{"global", "remove"}, Aliases: map[string][]string{"global": {"g"}, "remove": {"rm", "uninstall"}}, DryRun: dryRun,
+		More: "A package's found with its constraint or without, as vendor/package for vendor/package:^2.0."},
+	Example: "vendor/package:^2.0",
 	Declares: "as kit composer add declares it, with the constraint it's given, if any, kept for installing, " +
 		"as in vendor/package:^2.0, however the line gives it",
-	DryRun: []string{"--dry-run"},
-	Names:  composerNames,
-	Kinds:  func([]string) []string { return []string{"composer"} },
+	Names: composerNames,
 }
 
 // ghLine is how kit gh takes a line copied for gh: kit gh extension
@@ -58,8 +62,14 @@ var ghLine = &kind.LineHelp{
 	Example:  "owner/gh-tool",
 	Declares: "by its repository, as kit gh add declares it",
 	Names:    ghNames,
-	Kinds:    func([]string) []string { return []string{"gh"} },
 }
+
+var _ interface {
+	kind.Kind
+	kind.Keyed
+	kind.Liner
+	kind.Resolver
+} = (*tool)(nil)
 
 // Line runs l, a line copied for the program, as given, from where its own
 // commands run, given the time its own install or uninstall of the names
@@ -98,14 +108,15 @@ func (t *tool) Refuses(_ context.Context, l kind.CopiedLine) error {
 
 // Resolve finds each of names' full names: its own, but for a short name,
 // for a program that takes one (short), which is the full name of the one
-// installed that has it, as gh's extension's command is its repository's.
+// installed that has it, as gh's extension's command is its repository's;
+// a short name none installed has is left out, as the kind doesn't know it.
 func (t *tool) Resolve(ctx context.Context, names []string) (map[string]string, error) {
 	resolved := make(map[string]string, len(names))
 	var installed []string
 	listed := false
 	for _, name := range names {
-		resolved[name] = name
 		if t.short == nil || strings.Contains(name, "/") {
+			resolved[name] = name
 			continue
 		}
 		if !listed {

@@ -58,13 +58,13 @@ func TestLineNames(t *testing.T) {
 
 // gh takes an extension by its command's name, with gh- or without, which
 // resolves to the repository of the one installed that has it; a
-// repository, or a command no extension installed has, is its own. npm's
-// and Composer's resolve to themselves, asking nothing.
+// repository is its own; a command no extension installed has is left
+// out, unknown. npm's and Composer's resolve to themselves, asking nothing.
 func TestResolveAnExtensionsCommand(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("gh", "extension", "list").Prints("gh dash\tdlvhdr/gh-dash\tv4.0.0\n")
 	got, err := gh(fake).(kind.Resolver).Resolve(t.Context(), []string{"dash", "gh-dash", "owner/gh-tool", "nosuch"})
-	want := map[string]string{"dash": "dlvhdr/gh-dash", "gh-dash": "dlvhdr/gh-dash", "owner/gh-tool": "owner/gh-tool", "nosuch": "nosuch"}
+	want := map[string]string{"dash": "dlvhdr/gh-dash", "gh-dash": "dlvhdr/gh-dash", "owner/gh-tool": "owner/gh-tool"}
 	if err != nil || !maps.Equal(got, want) {
 		t.Errorf("Resolve = %v, %v; want %v", got, err, want)
 	}

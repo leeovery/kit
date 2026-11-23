@@ -60,7 +60,7 @@ func TestEveryKindIsComplete(t *testing.T) {
 		if _, lines := made.(kind.Liner); lines != lined {
 			t.Errorf("%s: it runs a line copied for its program %v, its help has a line's %v: want both or neither", k.Name, lines, lined)
 		}
-		if l := k.Help; lined && (l.Line.Program == "" || len(l.Line.Install.Words) == 0 || len(l.Line.Uninstall.Words) == 0 || l.Line.Example == "" || l.Line.Declares == "" || l.Line.Names == nil || l.Line.Kinds == nil) {
+		if l := k.Help; lined && (l.Line.Program == "" || len(l.Line.Install.Words) == 0 || len(l.Line.Uninstall.Words) == 0 || l.Line.Example == "" || l.Line.Declares == "" || l.Line.Names == nil) {
 			t.Errorf("%s's line's help = %+v: want its program, its verbs, an example, what it declares, and how it reads a line", k.Name, *l.Line)
 		}
 		if helped && (k.Help.Switch.On == "" || k.Help.Switch.Off == "" || k.Help.Switch.Holder == "") {

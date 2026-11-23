@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -33,9 +34,8 @@ func addLineCommands(a *app, cmd *cobra.Command, d kind.Descriptor) {
 			fmt.Sprintf("Then each name it installed is declared for this Mac, or every Mac with --shared, %s. "+
 				"The line's flags are this install's alone: kit-config records the names. "+
 				"A name installed already is declared too, and one that didn't install isn't. "+
-				"%sThe change is committed and pushed to the config repository.", l.Declares, dryRunSaid(l.DryRun)),
-			fmt.Sprintf("Before anything runs, each name is checked as kit %[1]s add checks it, and the whole line is refused if one can't be declared, "+
-				"or needs an administrator's password with no terminal to ask at. %[2]s", noun, l.Install.More),
+				"%sThe change is committed and pushed to the config repository.", l.Declares, dryRunSaid(l.Install.DryRun, "declared")),
+			fmt.Sprintf("Before anything runs, each name is checked as kit %[1]s add checks it, and the whole line is refused if one can't be declared. %[2]s", noun, l.Install.More),
 			fmt.Sprintf("kit's own flags in the line are --shared, and --note, which records why after each name: %[1]s has neither. "+
 				"kit's other flags, such as --plain, go before %[2]s, never in the line. "+
 				"A file's path or an address, in place of a name, is refused before anything runs.", program, noun),
@@ -46,9 +46,8 @@ func addLineCommands(a *app, cmd *cobra.Command, d kind.Descriptor) {
 		fmt.Sprintf("Run a copied %s %s line, then undeclare what it uninstalled", program, uninstall),
 		paragraphs(
 			fmt.Sprintf("Run a line copied for %[1]s %[2]s, with kit in front, as kit %[3]s %[4]s does, "+
-				"then take each name no longer installed out of this Mac's declarations file, by whichever name it's declared: "+
-				"the one given, its short name or its full one. "+
-				"A name still installed stays declared. The change is committed and pushed to the config repository.", program, uninstall, noun, install),
+				"then take each name no longer installed out of this Mac's declarations file, by whichever name it's declared. "+
+				"A name still installed stays declared. %[5]sThe change is committed and pushed to the config repository.", program, uninstall, noun, install, dryRunSaid(l.Uninstall.DryRun, "undeclared")),
 			fmt.Sprintf("One declared for every Mac needs --shared, which takes it out of the shared file, every Mac's list: "+
 				"without it, the whole line is refused before anything runs. %s", l.Uninstall.More),
 			fmt.Sprintf("kit's own flag in the line is --shared; kit's other flags go before %s.", noun),
@@ -58,13 +57,13 @@ func addLineCommands(a *app, cmd *cobra.Command, d kind.Descriptor) {
 	parentOf(cmd, l.Uninstall, program).AddCommand(uninstalls)
 }
 
-// dryRunSaid says a line with one of dryRun, a program's flags for a dry
-// run, declares nothing: "" for a program without one.
-func dryRunSaid(dryRun []string) string {
+// dryRunSaid says a line with one of dryRun, a verb's flags for a dry run,
+// has nothing done, as done says: "" for a verb without one.
+func dryRunSaid(dryRun []string, done string) string {
 	if len(dryRun) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("With %s, nothing is declared. ", strings.Join(dryRun, " or "))
+	return fmt.Sprintf("With %s, nothing is %s. ", strings.Join(dryRun, " or "), done)
 }
 
 // parentOf is the command under cmd that holds the command of v's last
@@ -104,7 +103,7 @@ func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, sho
 	var named, given []string
 	h := d.Help.Line
 	return &cobra.Command{
-		Use:                v.Words[len(v.Words)-1] + " <name>...",
+		Use:                v.Words[len(v.Words)-1] + " " + cmp.Or(h.Usage, "<name>..."),
 		Aliases:            v.Aliases[v.Words[len(v.Words)-1]],
 		Short:              short,
 		Long:               long,
@@ -126,7 +125,7 @@ func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, sho
 			}
 			l.names, l.verb, l.installs = once(l.names), v.Words, installs
 			l.typed = named[len(named)-len(v.Words):]
-			l.dryRun = slices.ContainsFunc(l.args, func(arg string) bool { return slices.Contains(h.DryRun, arg) })
+			l.dryRun = slices.ContainsFunc(l.args, func(arg string) bool { return slices.Contains(v.DryRun, arg) })
 			command := strings.Join(slices.Concat([]string{d.Name}, v.Words, l.args), " ")
 			return a.preparedAs(cmd.Context(), command, d.Name+"-"+strings.Join(v.Words, "-"), func(ctx context.Context, r *run) error {
 				return a.runLine(ctx, r, d, l)
@@ -206,27 +205,32 @@ func readLine(args []string, installs bool) (copiedLine, error) {
 	return l, nil
 }
 
-// copiedKinds are the run's kind d describes, which runs a line, and the
-// kinds the things args, its line, names can be, in the order its program
-// takes a name more than one has.
-func copiedKinds(r *run, d kind.Descriptor, args []string) (kind.Liner, []kind.Kind, error) {
+// copiedKinds are the run's kind d describes, which runs a line, as a kind
+// and as what runs it; and the kinds the things args, its line, names can
+// be, in the order its program takes a name more than one has: its own
+// alone, unless its help says otherwise.
+func copiedKinds(r *run, d kind.Descriptor, args []string) (kind.Kind, kind.Liner, []kind.Kind, error) {
 	k, err := r.kindNamed(d.Name)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	liner, ok := k.(kind.Liner)
 	if !ok {
-		return nil, nil, fmt.Errorf("kit %s runs no line of %s's", d.Name, d.Help.Line.Program)
+		return nil, nil, nil, fmt.Errorf("kit %s runs no line of %s's", d.Name, d.Help.Line.Program)
+	}
+	names := []string{d.Name}
+	if d.Help.Line.Kinds != nil {
+		names = d.Help.Line.Kinds(args)
 	}
 	var ks []kind.Kind
-	for _, name := range d.Help.Line.Kinds(args) {
+	for _, name := range names {
 		k, err := r.kindNamed(name)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		ks = append(ks, k)
 	}
-	return liner, ks, nil
+	return k, liner, ks, nil
 }
 
 // lookup finds what a line's names are installed as, of kinds, the kinds

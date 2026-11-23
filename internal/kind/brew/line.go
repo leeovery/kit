@@ -16,17 +16,22 @@ import (
 // --cask firefox.
 var lineHelp = &kind.LineHelp{
 	Program: "brew",
-	Install: kind.LineVerb{Words: []string{"install"}, More: "kit adds --adopt to a line of casks it can vet, as its own cask installs do, " +
-		"so the app already there is taken over, or replaced when it's an older copy of the same major version: " +
-		"only to a line whose flags change neither where nor how a cask installs, such as --cask or --verbose; any other line runs as given."},
-	Uninstall: kind.LineVerb{Words: []string{"uninstall"}, More: "With --zap, an app's settings kit prefs saved go too, as with kit cask remove --zap; " +
-		"without it, they're kept."},
+	Install: kind.LineVerb{Words: []string{"install"}, DryRun: dryRun,
+		More: "A line with a cask that needs an administrator's password is refused, too, with no terminal to ask for it at. " +
+			"kit adds --adopt to a line of casks it can vet, as its own cask installs do, " +
+			"so the app already there is taken over, or replaced when it's an older copy of the same major version: " +
+			"only to a line whose flags change neither where nor how a cask installs, such as --cask or --verbose; any other line runs as given."},
+	Uninstall: kind.LineVerb{Words: []string{"uninstall"}, DryRun: dryRun,
+		More: "A name's found by the one given, its short name or its full one. " +
+			"With --zap, an app's settings kit prefs saved go too, as with kit cask remove --zap; without it, they're kept."},
 	Example:  "--cask --force owner/tap/tool",
 	Declares: "as a cask or a formula, whichever brew installed it as, a tap's named with its tap",
-	DryRun:   []string{"-n", "--dry-run"},
 	Zap:      "--zap",
 	Names:    lineNames, Kinds: lineKinds,
 }
+
+// dryRun are brew install's and uninstall's flags for a dry run.
+var dryRun = []string{"-n", "--dry-run"}
 
 // Line runs l, a line copied for brew, as given, in Homebrew's turn to
 // change things, watched for going quiet, its sudo asking kit for an

@@ -20,15 +20,17 @@ var lineHelp = &kind.LineHelp{
 	Program: "mas",
 	Install: kind.LineVerb{Words: []string{"install"}, Aliases: map[string][]string{"install": {"get", "purchase"}},
 		More: "Each id is looked up in the App Store first, as kit mas add looks one up. " +
-			"mas needs an administrator's password, which kit asks for before it runs, as kit mas add does."},
-	Uninstall: kind.LineVerb{Words: []string{"uninstall"},
-		More: "mas needs an administrator's password, which kit asks for before it runs. " +
-			"The settings kit prefs saved for an app are kept: kit mas remove --zap removes them."},
+			"mas needs an administrator's password, which kit asks for before it runs, as kit mas add does: " +
+			"with no terminal to ask at, the line is refused."},
+	Uninstall: kind.LineVerb{Words: []string{"uninstall"}, DryRun: []string{"--dry-run"},
+		More: "An app's found by its id, whatever name it's declared by. " +
+			"mas needs an administrator's password, which kit asks for before it runs. " +
+			"The settings kit prefs saved for an app are kept, to come back if it's installed again: " +
+			"kit mas remove --zap, in place of the line, removes them."},
 	Example:  "497799835",
 	Declares: "by its name and id, as kit mas add declares it, as in xcode@497799835",
-	DryRun:   []string{"--dry-run"},
+	Usage:    "<id>...",
 	Names:    lineNames,
-	Kinds:    func([]string) []string { return []string{kindName} },
 }
 
 // Line runs l, a line copied for mas, as given, through sudo, as mas needs

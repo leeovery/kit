@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
@@ -27,11 +28,15 @@ import (
 // finds what's typed, as an App Store app by its id, has each name found
 // first, as kit <kind> add finds it, and goes by the name found.
 func (a *app) runLine(ctx context.Context, r *run, d kind.Descriptor, l copiedLine) error {
-	liner, ks, err := copiedKinds(r, d, l.args)
+	k, liner, ks, err := copiedKinds(r, d, l.args)
 	if err != nil {
 		return err
 	}
-	if l.names, err = a.find(ctx, r.kindsByName[d.Name], l.names); err != nil {
+	switch l.names, err = a.find(ctx, k, l.names); {
+	case errors.Is(err, ask.ErrCancelled):
+		// It says nothing was done itself.
+		return err
+	case err != nil:
 		return fmt.Errorf("%w; nothing was %s", err, lineWords(d, l).Done)
 	}
 	l.names = once(l.names)
@@ -240,7 +245,7 @@ func adminRefused(ctx context.Context, r *run, d kind.Descriptor, l copiedLine, 
 		waiting := waitingForAdmin(ctx, r, kindName, missing[kindName], held)
 		for _, name := range missing[kindName] {
 			if waiting[name] {
-				refused = append(refused, fmt.Errorf("%s %s", name, fmt.Sprintf(adminWait, d.Name+" "+strings.Join(l.verb, " "))))
+				refused = append(refused, fmt.Errorf("%s %s", name, fmt.Sprintf(adminWait, d.Name+" "+strings.Join(l.typed, " "))))
 			}
 		}
 	}
@@ -358,12 +363,22 @@ type removing struct {
 }
 
 // zapping is what an uninstall line does with what its apps leave: on, it
-// removes it, as the program's flag for it says (LineHelp.Zap); else it's
-// kept, and by is what removes it: that flag, or kit's own remove --zap
-// for a program without one.
+// removes it, as flag, the program's flag for it, says (LineHelp.Zap);
+// else it's kept. noun is the line's kind.
 type zapping struct {
-	on bool
-	by string
+	on         bool
+	flag, noun string
+}
+
+// kept says lo, what an app left, is kept, and what removes it: the
+// program's flag, in a line; else, for a program without one, kit's own
+// remove --zap in place of the line, as, the app gone, nothing kit has
+// removes it after: its saved settings come back if it's installed again.
+func (z zapping) kept(lo leftover) string {
+	if z.flag != "" {
+		return lo.kept(z.flag)
+	}
+	return "its saved settings kept, to come back if it's installed again: kit " + z.noun + " remove --zap, in place of the line, removes them"
 }
 
 // uninstallLine runs l, an uninstall line, once each name in it is found
@@ -376,7 +391,7 @@ func (a *app) uninstallLine(ctx context.Context, r *run, d kind.Descriptor, line
 	if err != nil {
 		return err
 	}
-	zap := zapping{on: d.Help.Line.Zap != "" && slices.Contains(l.args, d.Help.Line.Zap), by: cmp.Or(d.Help.Line.Zap, "kit "+d.Name+" remove --zap")}
+	zap := zapping{on: d.Help.Line.Zap != "" && slices.Contains(l.args, d.Help.Line.Zap), flag: d.Help.Line.Zap, noun: d.Name}
 	p, err := a.lineLeftovers(ctx, r, l, plans, zap.on)
 	if err != nil {
 		return err
@@ -580,7 +595,7 @@ func (rm *removing) said(ctx context.Context, p *prefs.Prefs, words kind.Words, 
 	case zap.on:
 		said = lo.zappedSaid(ctx, p, rm.forgot)
 	case len(lo.files)+len(lo.saved) > 0:
-		said = []string{lo.done + ", " + lo.kept(zap.by)}
+		said = []string{lo.done + ", " + zap.kept(*lo)}
 	default:
 		said = []string{lo.done}
 	}
