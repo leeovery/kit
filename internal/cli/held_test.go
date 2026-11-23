@@ -322,3 +322,19 @@ func TestReconcileSaysAFailedInstallsReadyingCouldntInstall(t *testing.T) {
 		t.Errorf("kit reconcile printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
 	}
 }
+
+// An install kit brew add makes of a line held back that fails says why
+// once.
+func TestAddSaysAHeldLinesFailedInstallOnce(t *testing.T) {
+	w := heldWorld(t)
+	w.write(t, ".secrets.zsh", "export TOKEN='plain-token-value'\n")
+	f := w.fake
+	f.On("brew", "list", "--formula", "--full-name", "-1").Prints(heldListed)
+	f.On("brew", "leaves").Prints(heldLeaves)
+	f.On("brew", "leaves", "--installed-on-request").Prints(heldOnRequest)
+	f.On("brew", "install", "--formula", "owner/private/fetcher").Exits(1).PrintsToStderr("Error: it broke\n")
+	out, errOut, code := w.run(t, "brew", "add", "owner/private/fetcher")
+	if want := "owner/private/fetcher failed couldn't install owner/private/fetcher: Error: it broke\n"; !strings.Contains(out, want) || code == 0 {
+		t.Errorf("kit brew add printed\n%s%s exit %d; want it to hold %q", out, errOut, code, want)
+	}
+}

@@ -338,7 +338,7 @@ func TestReconcileOffersAnExclusionsChoicesInItsWords(t *testing.T) {
 		t.Errorf("offered %q for one missing, want %q", missing, want)
 	}
 	for _, want := range []string{"◐ /Volumes/Old  stopping excluding", "● /Volumes/Old  no longer excluded"} {
-		if !strings.Contains(ansi.Strip(out), want) {
+		if !strings.Contains(turned(ansi.Strip(out)), want) {
 			t.Errorf("kit reconcile printed\n%s%s\nwant %q", ansi.Strip(out), errOut, want)
 		}
 	}

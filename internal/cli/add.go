@@ -291,7 +291,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 	verb := "already " + installs.Done
 	if !isIn {
 		if err := r.installAdding(event.WithChanging(ctx), k, name, p); err != nil {
-			return check.Result{State: check.Failed, Reason: couldnt(installs) + engine.Reason(err)}
+			return check.Result{State: check.Failed, Reason: saysCouldnt(installs, engine.Reason(err))}
 		}
 		verb = installs.Done
 	}

@@ -317,16 +317,24 @@ func wrap(s string, w int, hang string) []string {
 	return lines
 }
 
-// wholeWords is s with the hyphens of each word no wider than w unbreaking.
+// wholeWords is s with the hyphens of each word no wider than w unbreaking,
+// and those leading a wider one, so a flag's dashes never end a line.
 func wholeWords(s string, w int) string {
 	words := strings.Split(s, " ")
 	for i, word := range words {
 		if ansi.StringWidth(word) <= w {
 			words[i] = strings.ReplaceAll(word, "-", unbreakingHyphen)
+			continue
 		}
+		words[i] = dashes.ReplaceAllStringFunc(word, func(lead string) string {
+			return strings.ReplaceAll(lead, "-", unbreakingHyphen)
+		})
 	}
 	return strings.Join(words, " ")
 }
+
+// dashes are the dashes leading a word, after any styles it opens with.
+var dashes = regexp.MustCompile(`^(?:\x1b\[[0-9;]*m)*-+`)
 
 // Output is a tool's lines, as it printed them.
 func Output(lines ...string) []string { return kit.Output(lines...) }

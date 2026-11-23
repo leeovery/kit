@@ -96,12 +96,6 @@ func (s *tty) when(t *testing.T, what string, shows func(screen string) bool) st
 	return ""
 }
 
-// turned is a screen with its running marks as they start, whichever way
-// they've turned since.
-func turned(screen string) string {
-	return strings.NewReplacer("◓", "◐", "◑", "◐", "◒", "◐").Replace(screen)
-}
-
 // matches checks screen against testdata/<name>.golden, cell for cell: its
 // glyphs, their colours, and which are bold. -update writes it.
 func matches(t *testing.T, name, screen string) {

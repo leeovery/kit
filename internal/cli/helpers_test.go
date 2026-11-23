@@ -663,3 +663,9 @@ func (w *world) expectPassword() *runnertest.Script {
 	}
 	return w.fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(1)
 }
+
+// turned is a screen with its running marks as they start, whichever way
+// they've turned since.
+func turned(screen string) string {
+	return strings.NewReplacer("◓", "◐", "◑", "◐", "◒", "◐").Replace(screen)
+}
