@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/prefs"
+	"github.com/leeovery/kit/internal/release"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -176,6 +177,9 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 		return err
 	}
 	all := len(names) == 0 && !plan
+	if all {
+		a.askRelease(ctx, r)
+	}
 	hourlyRun, fullRun := all && a.scheduled, all && full
 	if hourlyRun || fullRun {
 		if err := nightly.Update(r.stateDir, func(rec *nightly.Record) {
@@ -218,6 +222,16 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 		return failure{}
 	}
 	return nil
+}
+
+// askRelease asks GitHub for kit's newest release, at most once a day,
+// before the checks read it. One that fails changes nothing and fails
+// nothing, the log saying why.
+func (a *app) askRelease(ctx context.Context, r *run) {
+	gh := a.GitHub()
+	if err := release.Ask(ctx, gh.Client, gh.Site, r.stateDir, r.now); err != nil {
+		r.sink.Emit(event.Logged{Time: r.now, Line: err.Error()})
+	}
 }
 
 // nightlyPipeline is the jobs, in order, then the run's other steps,

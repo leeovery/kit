@@ -36,7 +36,7 @@ plays while kit tests the Mac, then enter starts the boot, which ends like this:
 4. **Homebrew,** with Apple's command line tools.
 5. **Apps.** The terminal `kit.toml` names, such as Ghostty: `kit terminal` sets it.
 6. **kit-config.** Cloned to `~/.config/kit`, its files linked into your home folder.
-7. **kit,** installed through Homebrew, so it stays up to date.
+7. **kit,** installed through Homebrew. `kit status` says when a newer kit is out.
 8. **Full Disk Access.** You drag the terminal into the list System Settings shows.
 9. **The terminal.** It opens, and kit carries on there.
 

@@ -94,6 +94,7 @@ config ok all committed
 disk ok 48% free
 memory ok 0.3 GB swap, pressure normal
 load ok load 1.9 on 10 cores
+kit-version ok 0.1.0
 config-sync ok pushed
 config-private ok private on GitHub (someone/kit-config)
 hourly-launch ok hourly, through kit.app
@@ -131,7 +132,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 14 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 15 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[2]

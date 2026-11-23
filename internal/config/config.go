@@ -249,6 +249,12 @@ func Older(version, than string) bool {
 	return ok && known && slices.Compare(have, need) < 0
 }
 
+// IsRelease reports whether version is a release's, as in 0.1.0 or v0.1.0.
+func IsRelease(version string) bool {
+	_, ok := parseVersion(version)
+	return ok
+}
+
 // parseVersion reads a release's version, as in 0.1.0 or v0.1.0.
 func parseVersion(v string) ([]int, bool) {
 	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")

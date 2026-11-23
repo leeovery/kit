@@ -223,7 +223,9 @@ it says that plainly; else `kit cask add arq`. Its status unreadable says so; it
 agreement not yet accepted, or no plan made, is not set up.
 
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
-what's wrong and what to do: the Mac's (`disk`, `memory`, `load`), always;
+what's wrong and what to do: the Mac's (`disk`, `memory`, `load`, and `kit-version`: a newer release
+than the kit running, as `kit nightly` last recorded it, is an upgrade to do, `brew upgrade
+leeovery/tools/kit`; a build that isn't a release's, or no record yet, claims nothing), always;
 the backup tools' a Mac lists in `[backups]` (`time-machine`, `arq`: each runs on its own
 schedule, and kit checks it did, only the plans Arq is scheduled to run; Backups above); the config repository's
 (`config-sync`: commits that won't push, and the remote's not brought in for a day; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
@@ -987,7 +989,11 @@ minutes); and hourly, its retry of the apps' settings waiting to be restored, on
 their apps are installed and closed and have their settings folders, opening none. The hourly jobs run every time; the nightly ones once a day,
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
-state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
+state (`nightly.json`). A whole run first asks GitHub for kit's newest release, at most once a
+day, as install.sh does (the tag `releases/latest` redirects to, read and not followed, no token,
+a 10-second limit), and keeps the answer in `release.json`; an ask that fails keeps the last one,
+fails nothing, and is asked again next run. Nothing upgrades kit by itself (the maintainer, 23 Nov
+2026): `kit status` says a release is out, and the person upgrades. It installs and removes nothing. `--plan` says what's due; naming jobs
 runs those, now. Its runs notify no one (the maintainer, 12 Nov 2026: "record it so that you
 have access to the knowledge, but I don't want to be told"): what they find is in `kit status`,
 bare `kit` and the log. The notifications kit
