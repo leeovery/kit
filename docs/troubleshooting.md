@@ -126,9 +126,11 @@ version depends on the cask:
 
 | If the cask | It takes over |
 |---|---|
-| Updates itself | Its major version or later, in place |
-| Doesn't | The same version, or an older copy of its major |
-| Installs through a package | The same as one that doesn't |
+| Updates itself, no package | Its major version or later, as it is |
+| Doesn't, or has a package | The same version, or an older copy of its major |
+| Is a channel, as `@beta` | A prerelease of its major |
+
+A prerelease app, such as a beta, goes only to a channel's cask if one is there.
 
 The reason comes after the start of the message:
 
@@ -185,8 +187,18 @@ BBEdit.app is 14.6.2 and the cask's is 16.1: kit takes over only a copy of the c
 
 **Cause:** the cask updates itself, so it takes over a copy of its major version or later,
 a newer one too. An earlier major version may be one you have no licence past, so kit leaves
-it. The message names the cask for your version, if Homebrew has one. If it ends `can't tell
-whether this one is`, kit couldn't read a version.
+it. The message names the cask for your version, if Homebrew has one.
+
+If it ends `can't tell whether this one is`, kit can't compare the two versions. That happens
+in these cases:
+
+- the app says no version kit can read;
+- the cask's version is `latest`, and a line of the cask is there too;
+- the app's version is a build number below the cask's, such as Sublime Text's 4200 beside
+  4215.
+
+A build number below the cask's fails `kit apply` for a declared cask until the app updates
+itself past it. Run `kit apply cask` again then.
 
 **Fix:** to keep your version, declare its line in place of the cask:
 
@@ -196,6 +208,19 @@ kit cask add bbedit@14
 ```
 
 Or undeclare the cask, and keep the app by hand.
+
+### A prerelease is there
+
+```text
+Thaw.app is 3.0.0-beta.7 and the cask's is 2.1.0: kit takes over a prerelease only by its channel's cask, and thaw@beta is this one's
+```
+
+**Cause:** the app is a prerelease, and Homebrew has a channel's cask for it, such as a beta.
+kit hands a prerelease only to that cask. If the message ends `none here is at its major
+version`, no channel matches the app's major version.
+
+**Fix:** declare the channel's cask in place of this one, as for a line above:
+`kit cask add thaw@beta`. Or undeclare the cask, and keep the app by hand.
 
 ### kit can't look at the app
 

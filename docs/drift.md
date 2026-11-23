@@ -127,7 +127,8 @@ The package stays quiet for 7 days, then `kit reconcile` asks whether to keep it
   - a fork, or an app outside /Applications;
   - a version its cask won't take over, as
     [Troubleshooting](troubleshooting.md) lists;
-  - an app whose cask is a tap's, or puts more than apps in place.
+  - an app whose cask is a tap's, places more than apps, or is `latest` and doesn't update
+    itself.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 
