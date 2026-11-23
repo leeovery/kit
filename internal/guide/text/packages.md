@@ -74,11 +74,11 @@ this Mac or with `--shared` every Mac, and commits and pushes once:
 - A name already installed is declared, "already installed"; one the line
   didn't install isn't. A dry run (brew's `-n` or `--dry-run`, npm's and
   Composer's `--dry-run`, mas uninstall's `--dry-run`) declares nothing.
-- A plain cask line (`brew install --cask <name>`, with no other flags but
-  those changing only brew's output) gets `--adopt`, as kit's own cask
-  installs do: an app there that's the cask's is taken over, or an older
-  copy of its major version replaced. With any other flag the line runs as
-  given.
+- A plain line, whose flags are only brew's cask flag and those changing
+  only brew's output, gets `--adopt` when every cask it installs is one kit
+  vets, formulae in it or not, as kit's own cask installs do: an app there
+  that's the cask's is taken over, or an older copy of its major version
+  replaced. A line with any other flag, or a tap's cask, runs as given.
 - An uninstall undeclares only what's no longer installed, by whichever
   form it's declared: brew's short or full name, npm's and Composer's with
   or without the version, mas by id, gh by the repository or the command.
@@ -89,11 +89,14 @@ this Mac or with `--shared` every Mac, and commits and pushes once:
 
 Which to use: when the person gives you a line from a README, put kit in
 front of it; when you're choosing the package yourself, use the kind's
-add, as `kit brew add`. Known limits: npm's `add`, `remove` and `rm` reach kit's
-own `kit npm add` and `kit npm remove`, which refuse `-g`: use `install -g`
-and `uninstall -g`, or `kit npm add` without `-g`. `kit mas uninstall`
-looks each id up in the App Store first, so an app it no longer has needs
-`kit mas remove` by its declared name.
+add, as `kit brew add`.
+
+Known limits: npm's `add`, `remove` and `rm`, and brew's `remove` and
+`rm`, reach kit's own `kit npm add`, `kit npm remove` and
+`kit brew remove`, which refuse the program's flags (`-g`, brew's cask
+flag): use `install` and `uninstall`, or kit's own add and remove without
+them. `kit mas uninstall` looks each id up in the App Store first, so an
+app it no longer has needs `kit mas remove` by its declared name.
 
 ## Apps installed by hand
 

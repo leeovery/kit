@@ -25,7 +25,8 @@ packages, settings and secrets sorted, all but `[claude mcp]`. The rest, such as
 
 **`shared`.** The folder of kit-config whose declarations file is for every Mac. A Mac has what
 `shared/declarations` declares, and what its own file declares. `--shared` on an `add` command
-puts the line in the shared file. kit makes the folder the first time you declare something with `--shared`.
+puts the line in the shared file. kit makes the folder the first time you declare something
+with `--shared`.
 
 **Held section.** A section whose header holds its lines back until something is in place:
 `--after` a step, or `--secret` a secret. For example, `[homebrew casks --secret TOKEN]` installs

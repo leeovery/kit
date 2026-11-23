@@ -11,7 +11,7 @@ install you mean to keep.
 kit brew add jq
 ```
 
-kit installs jq, writes its line, then commits and pushes kit-config:
+kit installs jq, writes its line, and pushes kit-config:
 
 <img src="../art/packages-add.webp" alt="kit brew add jq at a terminal: jq installed and declared in laptop, then kit-config committed and pushed" width="443">
 
@@ -72,11 +72,13 @@ installed, and pushes kit-config. kit takes these lines, and the uninstall of ea
 - `gh extension install owner/gh-name`
 - `composer global require`
 
-Type `add` yourself, and put kit in front of a copied line. In the line:
+When you pick the package, use `add`. When you copy a README's line, put kit in front. In the
+line:
 
-- **Flags are for this install only.** kit-config keeps the names, with an npm version or a
-  Composer constraint.
-- **`--shared` and `--note` are kit's.** kit's other flags go first: `kit --plain brew install jq`.
+- **Flags are for this install only.** kit-config keeps names, with an npm version or Composer
+  constraint.
+- **`--shared`, and `--note` on an install, are kit's.** kit's other flags go first:
+  `kit --plain brew install jq`.
 - **One name kit can't declare refuses the line,** and nothing runs.
 - **A cask line adopts the app already there,** as `kit cask add` does, unless a flag changes
   how it installs.
@@ -112,7 +114,7 @@ has Homebrew take the app over: see [Troubleshooting](troubleshooting.md) if it 
 | `kit <kind> add <name>...` | Install, and declare for this Mac |
 | `add --shared` | Declare for every Mac instead |
 | `add --note "<why>"` | Keep why, after the name |
-| `kit <kind> install <line>` | Run a copied line, then declare |
+| `kit <kind> <copied line>` | Run it, then declare |
 | `kit <kind> remove <name>...` | Uninstall, and undeclare |
 | `remove --shared` | Needed to remove a shared line |
 | `kit list [<kind>]` | List what's declared for this Mac |

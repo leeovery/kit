@@ -29,8 +29,8 @@ pushes kit-config once:
 ## What happens
 
 - **A day's grace.** Drift counts only after a day. A package you try and remove the same
-  afternoon never needs you. Until then, `kit status` counts it as new.
-- **Every hour, kit looks.** The hourly run runs every check, so drift turns up unasked. It tells no one: `kit status` shows it.
+  afternoon never needs you.
+- **Every hour, kit looks.** The hourly run runs every check, so drift turns up unasked.
 - **One commit for the lot.** Whatever you settle in one run goes into kit-config as one
   commit, pushed.
 - **Nothing is lost by stopping.** If you stop part way, kit does what you answered so far.
@@ -85,7 +85,7 @@ Each item takes only some, and `--snooze` takes any:
 | An app installed by hand | `--adopt`, `--leave` |
 
 `--shared` with `--adopt` or `--undeclare` uses the shared file, for every Mac. `--note "why"`
-keeps a note after the line it adopts. `kit reconcile brew cask` goes through only those kinds.
+keeps a note after the line it adopts.
 
 ## Apps you installed by hand
 
@@ -100,8 +100,7 @@ An app you dragged into Applications is drift if kit can match it to a cask.
 `kit status` reads `installed by hand as Google Chrome.app, not declared`. Adopting it declares
 the cask, and Homebrew takes the app over or replaces an older copy.
 
-`kit status` counts a left app under Packages. Adopt it later with
-`kit reconcile cask:<name> --adopt` or `kit cask add <name>`.
+Adopt a left app later with `kit reconcile cask:<name> --adopt` or `kit cask add <name>`.
 
 ## Trying something out
 
@@ -123,6 +122,8 @@ The package stays quiet for 7 days, then `kit reconcile` asks whether to keep it
 - **A replaced linked file is never lost.** `--adopt` moves the copy on the Mac into
   kit-config, and links it back. `--revert` links the copy in kit-config instead, and moves the
   other to the Bin.
+- **`--adopt --shared` declares the cask for every Mac.** Each Mac with the app has Homebrew
+  take it over, even one where you left it by hand. Every Mac without it installs it.
 - **Some apps never match a cask:**
   - a fork, or an app outside /Applications;
   - a version its cask won't take, as [Troubleshooting](troubleshooting.md) lists;

@@ -27,8 +27,8 @@ with `kit setup`: `kit agent in-use` says how.
    changed by hand is lost when the Mac is replaced.
 
 3. Change kit-config with kit's commands: `kit cask add`, `kit brew add` and
-   the other kinds' add and remove, or kit in front of an install line
-   copied from a README (`kit brew install …`, `kit agent packages`),
+   the other kinds' add and remove, or kit in front of a copied line, an
+   install command from a README (`kit brew install …`, `kit agent packages`),
    `kit step add`, `kit secret add`,
    `kit file add`, `kit manual add` and `kit reconcile`; and kit.toml's
    settings with `kit terminal` (the terminal a new Mac's boot hands over

@@ -899,8 +899,9 @@ what else the help says), how to find a line's names (`Names`) and which kinds t
   its command), undeclares only what its own kind no longer has, and needs `--shared` for one
   declared for every Mac, refusing the line whole without it. An app's kept settings go as
   `kit cask remove` handles them: `--zap` in a brew line removes them, a mas line keeps them.
-- Known limits: npm's `add`, `remove` and `rm` are kit's own commands' names, so such a line
-  reaches `kit npm add` and fails on `-g`; `kit mas uninstall` finds each id in the App Store
+- Known limits: npm's `add`, `remove` and `rm`, and brew's `remove` and `rm`, are kit's own
+  commands' names, so such a line reaches kit's add or remove and fails on the program's flags
+  (`-g`, `--cask`); `kit mas uninstall` finds each id in the App Store
   first (`Finder`), so an app it no longer has needs `kit mas remove`.
 `kit <kind> add` and `remove` stay as they are: the line is for a command copied, add for kit's
 own way. No command's name clashes with kit's (`TestNoCommandsNamesClash`).
