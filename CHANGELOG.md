@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-11-23
+
+✨ Added
+- `kit status` now flags when a newer kit release is out — the scheduled run checks GitHub once a day, and `kit status kit-version` points you to `brew upgrade leeovery/tools/kit`; nothing upgrades kit by itself.
+
 ## [0.5.1] - 2026-11-23
 
 🐛 Fixed
