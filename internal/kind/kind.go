@@ -131,6 +131,15 @@ type Misser interface {
 	Missed(ctx context.Context, names []string) ([]Installed, error)
 }
 
+// Liner is a kind whose program kit runs a line of, as copied for it
+// (LineHelp): kit brew install --cask firefox runs brew install --cask
+// firefox.
+type Liner interface {
+	// Line runs the program's verb with args, as given, in its turn to
+	// change things, watched for going quiet as an install is.
+	Line(ctx context.Context, verb string, args []string) error
+}
+
 // Adoptable is a kind that can take over things put on the Mac by hand,
 // apart from it, as a cask installs an app dragged into the Applications
 // folder: kit reconcile adopts one, declaring it, its install taking it

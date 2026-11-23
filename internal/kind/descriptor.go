@@ -97,6 +97,30 @@ type Help struct {
 	// Switch is, for a kind whose things can be declared off and kept
 	// (Switcher), its commands turning them off and on: nil for none.
 	Switch *SwitchHelp
+	// Line is, for a kind whose command takes a line copied for its
+	// program (Liner), what's in such a line: nil for none.
+	Line *LineHelp
+	// One is one of its things, as a line's results name what each name
+	// installed as, when it could be more than one kind's: a cask.
+	One string
+}
+
+// LineHelp is how a kind's command takes a line copied for its program,
+// as a README gives it, with kit in front, as in kit brew install --cask
+// firefox: the program's verbs that install and uninstall, each a command
+// of kit's of the same name.
+type LineHelp struct {
+	Install, Uninstall string
+	// Example is a line's arguments, as its help shows one; Declares says
+	// what each name the line installed is declared as.
+	Example, Declares string
+	// Names are the names in a line's arguments, its flags and their
+	// values left out: an error when there are none, or one is something
+	// kit-config can't declare, as a file's path or an address.
+	Names func(args []string) ([]string, error)
+	// Kinds are the kinds' names a line's things can be, as its arguments
+	// say, in the order the program takes a name more than one has.
+	Kinds func(args []string) []string
 }
 
 // SwitchHelp is what kit <name> on and off do, for a kind whose things can

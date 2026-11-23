@@ -267,6 +267,13 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 		}
 		verb = installs.Done
 	}
+	return declareAdding(ctx, r, c, k, scope, name, opts, verb, p)
+}
+
+// declareAdding declares name, installed, as verb says, as p says, unless
+// it's declared already, or temporary: its line built and held now, unless
+// it was before the install (p.ready).
+func declareAdding(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name string, opts addOptions, verb string, p adding) check.Result {
 	if len(p.mine) > 0 {
 		return check.Result{State: check.OK}.Saying(verb, "declared already, in "+p.mine[0].Scope)
 	}
@@ -282,7 +289,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 		}
 	}
-	said, err := c.declare(kindName, scope, p.line)
+	said, err := c.declare(k.Name(), scope, p.line)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}

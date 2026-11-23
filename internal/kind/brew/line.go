@@ -1,0 +1,98 @@
+package brew
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/runner"
+)
+
+// lineHelp is how kit brew takes a line copied for brew: kit brew install
+// --cask firefox.
+var lineHelp = &kind.LineHelp{
+	Install: "install", Uninstall: "uninstall",
+	Example:  "--cask --force owner/tap/tool",
+	Declares: "as a cask or a formula, whichever brew installed it as, a tap's named with its tap",
+	Names:    lineNames, Kinds: lineKinds,
+}
+
+// Line runs brew's verb, install or uninstall, with args, a line copied
+// for brew, as given, in Homebrew's turn to change things, watched for
+// going quiet, its sudo asking kit for an administrator's password, as
+// kit's own installs and uninstalls run: an install after brew update, as
+// kit runs brew without updating itself.
+func (f formulae) Line(ctx context.Context, verb string, args []string) error {
+	words := kind.UninstallWords
+	cmd := runner.Command{Name: "brew", Args: slices.Concat([]string{verb}, args)}
+	if verb == lineHelp.Install {
+		words = kind.InstallWords
+		names, _ := lineNames(args)
+		cmd.Timeout = installTimeout(len(names))
+		f.updated(ctx)
+	}
+	defer f.take(ctx, f.Name())()
+	return f.watched(ctx, words.Doing, f.sudoed(ctx, f.batched(cmd)))
+}
+
+// lineNames are the names in args, a line for brew install or uninstall:
+// its flags left out, and the value after one that takes it there rather
+// than after an =, as --appdir does. A formula's file, or an address, is
+// refused, as kit-config declares names alone.
+func lineNames(args []string) ([]string, error) {
+	var names []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case strings.HasPrefix(arg, "-"):
+			if takesValue(arg) {
+				i++
+			}
+		case isFileOrAddress(arg):
+			return nil, fmt.Errorf("%s is a file or an address, which kit-config can't declare: give brew a name", arg)
+		default:
+			names = append(names, arg)
+		}
+	}
+	if len(names) == 0 {
+		return nil, errors.New("the line names nothing for brew: give it a name, as in kit brew install jq")
+	}
+	return names, nil
+}
+
+// takesValue reports whether flag, of brew install's, takes the argument
+// after it as its value: --cc, --bottle-arch, --language, and the folders
+// a cask's artifacts go in, as --appdir; never one with its value after an
+// =.
+func takesValue(flag string) bool {
+	if strings.Contains(flag, "=") {
+		return false
+	}
+	return slices.Contains([]string{"--cc", "--bottle-arch", "--language"}, flag) || strings.HasPrefix(flag, "--") && strings.HasSuffix(flag, "dir")
+}
+
+// isFileOrAddress reports whether arg, in brew's line, is a file or an
+// address rather than a name: a path, a formula's or a cask's file, or a
+// URL.
+func isFileOrAddress(arg string) bool {
+	if strings.Contains(arg, "://") || strings.HasSuffix(strings.ToLower(arg), ".rb") {
+		return true
+	}
+	return slices.ContainsFunc([]string{"/", "./", "../", "~"}, func(start string) bool { return strings.HasPrefix(arg, start) })
+}
+
+// lineKinds are the kinds the things args, a line for brew, names can be:
+// casks with --cask, formulae with --formula, else either, formulae first,
+// as brew takes a name that's both as the formula.
+func lineKinds(args []string) []string {
+	switch {
+	case slices.ContainsFunc(args, func(arg string) bool { return arg == "--cask" || arg == "--casks" }):
+		return []string{casksName}
+	case slices.ContainsFunc(args, func(arg string) bool { return arg == "--formula" || arg == "--formulae" }):
+		return []string{formulaeName}
+	}
+	return []string{formulaeName, casksName}
+}

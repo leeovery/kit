@@ -169,6 +169,9 @@ on.`
 		remove.Flags().BoolVar(&ropts.keep, "keep", false, "keep "+n.Leaves+", without asking")
 	}
 	cmd.AddCommand(add, remove)
+	if n.Line != nil {
+		cmd.AddCommand(newLineCommands(a, d)...)
+	}
 	if n.Switch != nil {
 		cmd.AddCommand(switchCommands(a, d)...)
 	}
