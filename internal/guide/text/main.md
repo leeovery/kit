@@ -27,7 +27,9 @@ with `kit setup`: `kit agent in-use` says how.
    changed by hand is lost when the Mac is replaced.
 
 3. Change kit-config with kit's commands: `kit cask add`, `kit brew add` and
-   the other kinds' add and remove, `kit step add`, `kit secret add`,
+   the other kinds' add and remove, or kit in front of a copied line, an
+   install command from a README (`kit brew install …`, `kit agent packages`),
+   `kit step add`, `kit secret add`,
    `kit file add`, `kit manual add` and `kit reconcile`; and kit.toml's
    settings with `kit terminal` (the terminal a new Mac's boot hands over
    to) and `kit nightly at` (when the nightly run falls due). Each commits
@@ -134,10 +136,10 @@ use `sudo -n`, to make one pass.
 ### What a step can rely on
 
 kit's environment, not your shell's: HOME, the PATH kit-config's `[paths]`
-makes, USER, LOGNAME, SHELL, TMPDIR, LANG, LC_ALL and SSH_AUTH_SOCK, the
-secrets store's own variables, and the secrets it names. No token, alias or
-function from a shell is there. It runs in its folder, with nothing on its
-input.
+makes (then Homebrew's and the system's), USER, LOGNAME, SHELL, TMPDIR,
+LANG, LC_ALL and SSH_AUTH_SOCK, the secrets store's own variables, and the
+secrets it names. No token, alias or function from a shell is there. It
+runs in its folder, with nothing on its input.
 
 What it names: `--after` for each thing kit installs that it uses (a step,
 or a step's thing, as in cask:firefox), and `--secret` for each secret. A

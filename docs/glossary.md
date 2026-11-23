@@ -7,7 +7,8 @@ Each term here has one meaning, and the docs use it in that sense only.
 **kit-config.** The private git repository that declares what each of your Macs should have.
 kit keeps its clone in `~/.config/kit`, or `$XDG_CONFIG_HOME/kit`, unless `KIT_CONFIG` names
 another folder. It holds
-`kit.toml`, a folder for each Mac, and the `shared` folder.
+`kit.toml` and a folder for each Mac. Once you declare something for every Mac, it holds the
+`shared` folder too.
 
 **kit.toml.** The file at the top of kit-config that names your Macs. It also names the terminal
 a new Mac installs and when nightly jobs run.
@@ -24,7 +25,8 @@ packages, settings and secrets sorted, all but `[claude mcp]`. The rest, such as
 
 **`shared`.** The folder of kit-config whose declarations file is for every Mac. A Mac has what
 `shared/declarations` declares, and what its own file declares. `--shared` on an `add` command
-puts the line in the shared file.
+puts the line in the shared file. kit makes the folder the first time you declare something
+with `--shared`.
 
 **Held section.** A section whose header holds its lines back until something is in place:
 `--after` a step, or `--secret` a secret. For example, `[homebrew casks --secret TOKEN]` installs
@@ -33,6 +35,10 @@ its casks once `TOKEN` has synced.
 **Kind.** A sort of thing kit lists and puts in place, such as Homebrew casks or macOS settings.
 Each kind has its own section, `add` and `remove` commands, and step. `kit --help` lists the
 kinds under Packages and Settings, and secrets under Files, secrets and features.
+
+**Copied line.** An install command copied from a README, such as `brew install jq`, run with
+kit in front: `kit brew install jq`. The program runs it as given, then kit declares each name
+it installed. A copied uninstall line, such as `kit brew uninstall jq`, undeclares instead.
 
 **Secret.** A value kept in a password manager, such as 1Password, and put in place on each Mac:
 an environment variable, or a file. kit-config holds where the value is kept, never the value.

@@ -55,7 +55,7 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 		}
 	}
 	missing = slices.DeleteFunc(missing, func(name string) bool { return refused[name] != nil })
-	settings, err := a.keptSettings(r, kindName)
+	settings, err := a.keptSettings(r, kindName, false)
 	if err != nil {
 		return err
 	}
@@ -80,13 +80,15 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	return c.finish()
 }
 
-// keptSettings is what installs an app of the kind called kindName, as
-// install does, then restores the settings kit prefs kept for it alone,
-// till it was installed, before the person first opens it, saying what
-// became of them, after a semicolon, or nothing when there were none: nil
-// unless the kind's things are apps and kit prefs is on for this Mac. The
-// app is the one that wasn't there before the install.
-func (a *app) keptSettings(r *run, kindName string) (func(context.Context, func() check.Result) check.Result, error) {
+// keptSettings is what installs apps of the kind called kindName, as
+// install does, then restores the settings kit prefs kept for each, till
+// it was installed, before the person first opens it, saying what became
+// of them, after a semicolon, or nothing when there were none: nil unless
+// the kind's things are apps and kit prefs is on for this Mac. The apps
+// are those that weren't there before the install, whether or not it all
+// went: each named, with named, else its. One that failed says so after
+// why.
+func (a *app) keptSettings(r *run, kindName string, named bool) (func(context.Context, func() check.Result) check.Result, error) {
 	if d, _ := kinds.Named(kindName); !d.Apps {
 		return nil, nil
 	}
@@ -101,29 +103,42 @@ func (a *app) keptSettings(r *run, kindName string) (func(context.Context, func(
 	return func(ctx context.Context, install func() check.Result) check.Result {
 		before := p.Apps()
 		res := install()
-		if res.State != check.OK {
+		var said []string
+		for _, id := range slices.DeleteFunc(p.Apps(), func(id string) bool { return slices.Contains(before, id) }) {
+			whose := "its"
+			if named {
+				whose = p.AppName(id) + "'s"
+			}
+			report, err := p.RestoreKept(ctx, []string{id})
+			if s := keptSaid(report, err, whose); s != "" {
+				said = append(said, s)
+			}
+		}
+		switch {
+		case len(said) == 0:
+			return res
+		case res.State == check.Failed:
+			res.Reason = strings.Join(append([]string{res.Reason}, said...), "; ")
 			return res
 		}
-		added := slices.DeleteFunc(p.Apps(), func(id string) bool { return slices.Contains(before, id) })
-		report, err := p.RestoreKept(ctx, added)
-		return res.Adding(keptSaid(report, err))
+		return res.Adding(said...)
 	}, nil
 }
 
 // keptSaid is what became of the settings kept for an app just installed,
-// as report, or err, says: "" when none were kept.
-func keptSaid(report prefs.RestoreReport, err error) string {
+// whose they are, as report, or err, says: "" when none were kept.
+func keptSaid(report prefs.RestoreReport, err error, whose string) string {
 	switch {
 	case err != nil:
-		return "its saved settings weren't restored: " + err.Error()
+		return whose + " saved settings weren't restored: " + err.Error()
 	case len(report.Failed) > 0:
-		return "its saved settings didn't come back: " + report.Failed[slices.Sorted(maps.Keys(report.Failed))[0]]
+		return whose + " saved settings didn't come back: " + report.Failed[slices.Sorted(maps.Keys(report.Failed))[0]]
 	case len(report.ToOpen) > 0:
-		return "its saved settings come back once it's been opened and quit"
+		return whose + " saved settings come back once it's been opened and quit"
 	case len(report.Waiting) > 0:
-		return "its saved settings come back once it's quit"
+		return whose + " saved settings come back once it's quit"
 	case len(report.Restored) > 0:
-		return "its saved settings restored"
+		return whose + " saved settings restored"
 	}
 	return ""
 }
@@ -133,6 +148,19 @@ func once(names []string) []string {
 	var out []string
 	for _, name := range names {
 		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// onceBy is names, each thing once, as key matches them, in any case: the
+// first given of each, as npm's typescript@5 after typescript is the same
+// package.
+func onceBy(names []string, key func(string) string) []string {
+	var out []string
+	for _, name := range names {
+		if !slices.ContainsFunc(out, func(had string) bool { return strings.EqualFold(key(had), key(name)) }) {
 			out = append(out, name)
 		}
 	}
@@ -267,6 +295,13 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 		}
 		verb = installs.Done
 	}
+	return declareAdding(ctx, r, c, k, scope, name, opts, verb, p)
+}
+
+// declareAdding declares name, installed, as verb says, as p says, unless
+// it's declared already, or temporary: its line built and held now, unless
+// it was before the install (p.ready).
+func declareAdding(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name string, opts addOptions, verb string, p adding) check.Result {
 	if len(p.mine) > 0 {
 		return check.Result{State: check.OK}.Saying(verb, "declared already, in "+p.mine[0].Scope)
 	}
@@ -282,7 +317,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 		}
 	}
-	said, err := c.declare(kindName, scope, p.line)
+	said, err := c.declare(k.Name(), scope, p.line)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
@@ -305,23 +340,38 @@ func (r *run) holdLine(ctx context.Context, k kind.Kind, scope string, p *adding
 // apply installs that section's lines, once they're in place, with them
 // set from kit's own secrets.
 func (r *run) installAdding(ctx context.Context, k kind.Kind, name string, p adding) error {
-	line := p.line
-	if len(p.mine) > 0 {
-		line = p.mine[0]
-	}
-	secrets := line.Secrets()
-	if len(secrets) == 0 {
-		return k.Install(ctx, []string{name})
-	}
-	waits, env, err := r.needing(secrets)
-	if err != nil {
+	line := p.declared()
+	h, held, err := r.heldBy(line)
+	switch {
+	case err != nil:
 		return err
+	case !held:
+		return k.Install(ctx, []string{name})
 	}
 	list := r.lists[k.Name()]
 	if !slices.Contains(list.Names(), name) {
 		list.Entries = append(slices.Clone(list.Entries), config.Entry{Name: name, Hold: line.Hold})
 	}
-	return kind.InstallDeclared(ctx, k, list, []kind.Held{{Hold: line.Hold, Waits: waits, Env: env}}, []string{name})
+	return kind.InstallDeclared(ctx, k, list, []kind.Held{h}, []string{name})
+}
+
+// declared is the line adding declares, or the one declared already.
+func (p adding) declared() config.Entry {
+	if len(p.mine) > 0 {
+		return p.mine[0]
+	}
+	return p.line
+}
+
+// heldBy is how e, a line to install, is held for the secrets installing
+// it needs, set from kit's own secrets: false when it needs none.
+func (r *run) heldBy(e config.Entry) (kind.Held, bool, error) {
+	secrets := e.Secrets()
+	if len(secrets) == 0 {
+		return kind.Held{}, false, nil
+	}
+	waits, env, err := r.needing(secrets)
+	return kind.Held{Hold: e.Hold, Waits: waits, Env: env}, true, err
 }
 
 // temporarily marks name, installed, as not declared for now: quiet for 7

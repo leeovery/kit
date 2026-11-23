@@ -131,6 +131,41 @@ type Misser interface {
 	Missed(ctx context.Context, names []string) ([]Installed, error)
 }
 
+// Liner is a kind whose program kit runs a line of, as copied for it
+// (LineHelp): kit brew install --cask firefox runs brew install --cask
+// firefox.
+type Liner interface {
+	// Line runs l, as given, in the program's turn to change things,
+	// watched for going quiet as an install is.
+	Line(ctx context.Context, l CopiedLine) error
+	// Refuses says why l, an install line, isn't to run, as the kind's own
+	// install of a thing in it would refuse it, judged before anything
+	// runs: nil when it runs.
+	Refuses(ctx context.Context, l CopiedLine) error
+}
+
+// CopiedLine is a line copied for a kind's program, to run: the program's
+// verb, as words, then the arguments given after it; whether it installs,
+// and whether it's a dry run; and the names in it kit found aren't
+// installed yet, by the kind each installs as, for what the program's own
+// installs of them do, as Homebrew's casks adopting an app already there.
+type CopiedLine struct {
+	Verb, Args       []string
+	Installs, DryRun bool
+	New              map[string][]string
+}
+
+// HeldEnv is the environment an install of names, held as h says, runs
+// in, once what h waits for is there: an error saying what isn't, if it
+// isn't.
+func HeldEnv(ctx context.Context, h Held, names []string) ([]string, error) {
+	env, why, err := readyHeld(ctx, h, names)
+	if err == nil && why != "" {
+		err = errors.New(why)
+	}
+	return env, err
+}
+
 // Adoptable is a kind that can take over things put on the Mac by hand,
 // apart from it, as a cask installs an app dragged into the Applications
 // folder: kit reconcile adopts one, declaring it, its install taking it
@@ -411,6 +446,16 @@ type Announcer interface {
 type Readier interface {
 	// Ready readies what names need, saying what it's doing as it does.
 	Ready(ctx context.Context, names []string) error
+}
+
+// Unreadier is a Readier whose readying can be put back, as Homebrew
+// untaps the taps it added: for a line refused once it's readied.
+type Unreadier interface {
+	Readier
+	// Readied readies what names need, as Ready does, and returns what
+	// puts back what it changed, nil when it changed nothing, even when
+	// it failed part way.
+	Readied(ctx context.Context, names []string) (undo func(context.Context) error, err error)
 }
 
 // Shortened is a kind whose things are shown by part of their names, as
@@ -1368,7 +1413,7 @@ func withMissed(ctx context.Context, k Kind, installed []Installed, names []stri
 	if !ok {
 		return installed, nil
 	}
-	key := keyOf(k)
+	key := KeyOf(k)
 	listed := make(map[string]bool, len(installed))
 	for _, it := range installed {
 		listed[key(it.Name)] = true
@@ -1386,9 +1431,9 @@ func withMissed(ctx context.Context, k Kind, installed []Installed, names []stri
 	return append(installed, found...), err
 }
 
-// keyOf is how k matches its things' names: as they are, unless it says
+// KeyOf is how k matches its things' names: as they are, unless it says
 // (Keyed).
-func keyOf(k Kind) func(string) string {
+func KeyOf(k Kind) func(string) string {
 	if kd, ok := k.(Keyed); ok {
 		return kd.Key
 	}
@@ -1426,7 +1471,7 @@ func (t Taking) Off(name string) bool { return t.off[t.key(name)] }
 // when what's installed couldn't be looked at.
 func Taken(ctx context.Context, k Kind, declared config.List) (Taking, error) {
 	c := compare(ctx, k, declared)
-	t := Taking{key: keyOf(k), taken: c.taken, off: c.off}
+	t := Taking{key: KeyOf(k), taken: c.taken, off: c.off}
 	switch {
 	case c.looked:
 		return t, nil
@@ -1472,7 +1517,7 @@ func drift(ctx context.Context, k Kind, declared config.List, look func(context.
 		return res
 	}
 	res.HandLook = &check.Look{Apps: found.Apps}
-	key := keyOf(k)
+	key := KeyOf(k)
 	var names []string
 	for name := range found.Things {
 		if !c.taken[key(name)] {
@@ -1547,7 +1592,7 @@ func compare(ctx context.Context, k Kind, declared config.List) comparison {
 	if installed, err = withMissed(ctx, k, installed, declared.On()); err != nil {
 		return comparison{res: failed(k, err)}
 	}
-	key := keyOf(k)
+	key := KeyOf(k)
 	byKey := make(map[string]Installed, len(installed))
 	for _, it := range installed {
 		byKey[key(it.Name)] = it

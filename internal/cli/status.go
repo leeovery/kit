@@ -371,10 +371,8 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	if err != nil {
 		return nil, err
 	}
-	if len(shellPath) > 0 {
-		step := steps.PathFile(shellPath, filepath.Join(dirs.State, steps.PathFileName))
-		addSetup(step, applyDrifter{step: step, words: kind.Words{Label: "Write", Does: "write it", Doing: "writing"}})
-	}
+	pathFile := steps.PathFile(shellPath, filepath.Join(dirs.State, steps.PathFileName))
+	addSetup(pathFile, applyDrifter{step: pathFile, words: kind.Words{Label: "Write", Does: "write it", Doing: "writing"}})
 	// kindSteps are the kinds' steps; needed, the steps they need that are
 	// their own, as Homebrew's.
 	var kindSteps, needed []engine.Step
@@ -672,7 +670,7 @@ func (a *app) healing(dirs config.Dirs, err error) (basis, error) {
 	if nameErr != nil || homeErr != nil || machine == "" {
 		return basis{}, err
 	}
-	return basis{machine: machine, home: home, path: config.SearchPathOf(a.Homebrew)}, nil
+	return basis{machine: machine, home: home, path: config.SearchPathOf(nil)}, nil
 }
 
 // unhealed is err, the config still unread once kit-config's remote

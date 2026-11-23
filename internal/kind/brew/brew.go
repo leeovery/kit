@@ -100,6 +100,8 @@ var (
 			What:   "Homebrew's formulae",
 			Add:    "Install formulae, and declare them",
 			Remove: "Uninstall formulae, and undeclare them",
+			Line:   lineHelp,
+			One:    "a formula",
 		},
 		Row:   "Homebrew formulae",
 		Tool:  "Homebrew",
@@ -118,6 +120,7 @@ var (
 			Remove: "Uninstall casks, and undeclare them",
 			Leaves: "its files and settings",
 			Takes:  "the files its cask's zap list names, from this Mac, and its saved settings from kit prefs' store, at the next capture",
+			One:    "a cask",
 		},
 		Apps:  true,
 		Row:   "Homebrew casks",
@@ -270,6 +273,15 @@ func SSHConfig() (string, error) {
 func (h *Homebrew) ready(ctx context.Context, kindName string, names []string) error {
 	_, err := h.tap(ctx, kindName, names)
 	return err
+}
+
+// readied is ready, returning what untaps the taps it added: nil for none.
+func (h *Homebrew) readied(ctx context.Context, kindName string, names []string) (func(context.Context) error, error) {
+	added, err := h.tap(ctx, kindName, names)
+	if len(added) == 0 {
+		return nil, err
+	}
+	return func(ctx context.Context) error { return h.untap(ctx, kindName, added) }, err
 }
 
 // tap taps the taps names, the kind named kindName's, are from that aren't
@@ -638,6 +650,11 @@ func (f formulae) Ready(ctx context.Context, names []string) error {
 	return f.ready(ctx, f.Name(), names)
 }
 
+// Readied is Ready, returning what untaps the taps it added.
+func (f formulae) Readied(ctx context.Context, names []string) (func(context.Context) error, error) {
+	return f.readied(ctx, f.Name(), names)
+}
+
 // Shares names the kind formulae take turns with: casks, which Homebrew
 // installs too.
 func (formulae) Shares() []string { return []string{"cask"} }
@@ -731,6 +748,11 @@ func (casks) Short(name string) string { return lastPart(name) }
 // Ready taps the taps the casks names are from, before any's installed.
 func (c casks) Ready(ctx context.Context, names []string) error {
 	return c.ready(ctx, c.Name(), names)
+}
+
+// Readied is Ready, returning what untaps the taps it added.
+func (c casks) Readied(ctx context.Context, names []string) (func(context.Context) error, error) {
+	return c.readied(ctx, c.Name(), names)
 }
 
 // Shares names the kind casks take turns with: formulae, which Homebrew

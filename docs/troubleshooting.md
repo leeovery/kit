@@ -289,6 +289,54 @@ its line out.
 If you keep yours, the app stays as it is. If the cask is in the shared file, add `--shared`.
 That takes the cask off every Mac: no answer keeps a shared cask off one Mac only.
 
+## kit refuses a copied line
+
+```text
+kit: dash isn't a repository: give gh one, as owner/gh-dash; nothing was installed
+```
+
+**Cause:** kit refuses a [copied line](glossary.md) if it can't declare every name in it, or
+can't ask for a password the line needs. It refuses the whole line before anything runs.
+
+**Fix:** change the line as the message says, then run it again:
+
+| If kit says | Fix |
+|---|---|
+| `isn't a repository` | Give gh `owner/gh-name` |
+| `is an address or a folder` | Give gh `owner/gh-name` |
+| `isn't global` | Add `-g` to the npm line |
+| `is a file or an address` | Give brew the name |
+| `isn't a package's name` | Give npm or Composer the name |
+| `isn't an App Store app's id` | Give mas the app's id |
+| `so takes no --all` | Give mas each app's id |
+| `declared for every Mac` | Add `--shared` to the uninstall |
+| `needs an administrator's password` | Run the line at a terminal |
+
+## A copied npm add or brew rm fails on its flag
+
+```text
+kit: unknown shorthand flag: 'g' in -g
+```
+
+**Cause:** `kit npm add`, `kit npm remove` and `kit brew remove` are kit commands of their
+own. A line with npm's `add`, `remove` or `rm`, or brew's `remove` or `rm`, reaches them. They
+take none of the program's flags, such as `-g` or `--cask`.
+
+**Fix:** use `install` and `uninstall` in the line, as in `kit npm install -g <name>` or
+`kit brew uninstall --cask <name>`. Or drop the flags, and use kit's own `add` or `remove`.
+
+## kit mas uninstall says "no App Store app has the id"
+
+```text
+kit: no App Store app has the id 123456789; nothing was uninstalled
+```
+
+**Cause:** `kit mas uninstall` looks each id up in the App Store first, to know the app. An app
+the App Store no longer has fails that lookup.
+
+**Fix:** uninstall it with `kit mas remove`, which takes the app as kit-config declares it.
+`kit list mas` shows that name.
+
 ## kit.app needs Full Disk Access again
 
 `kit status` shows the step `kit-app-access` as `not given to this build of kit.app`.

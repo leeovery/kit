@@ -107,9 +107,6 @@ type Boot struct {
 	// Self is kit, as the terminal handed over to runs it, and Version its
 	// version.
 	Self, Version string
-	// Homebrew are Homebrew's folders, put on every Mac's PATH by a config
-	// starting on this Mac (config.HomebrewPaths).
-	Homebrew []string
 	// Keep keeps the password given, for the rest of the run, for sudo
 	// when the programs the boot runs ask for it (askpass).
 	Keep func(password string)

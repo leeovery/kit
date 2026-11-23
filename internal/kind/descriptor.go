@@ -97,6 +97,49 @@ type Help struct {
 	// Switch is, for a kind whose things can be declared off and kept
 	// (Switcher), its commands turning them off and on: nil for none.
 	Switch *SwitchHelp
+	// Line is, for a kind whose command takes a line copied for its
+	// program (Liner), what's in such a line: nil for none.
+	Line *LineHelp
+	// One is one of its things, as a line's results name what each name
+	// installed as, when it could be more than one kind's: a cask.
+	One string
+}
+
+// LineHelp is how a kind's command takes a line copied for its program,
+// as a README gives it, with kit in front, as in kit brew install --cask
+// firefox: the program, as typed; and its verbs that install and
+// uninstall, each a command of kit's of the same words.
+type LineHelp struct {
+	Program            string
+	Install, Uninstall LineVerb
+	// Example is a line's arguments, as its help shows one; Declares says
+	// what each name the line installed is declared as; Usage is what its
+	// commands' usage shows after the verb: "<name>..." when "".
+	Example, Declares, Usage string
+	// Zap is the flag an uninstall removes what an app leaves with, as
+	// kit's --zap does: "" for none.
+	Zap string
+	// Names are the names in a line's arguments, its flags and their
+	// values left out: an error when there are none, or one is something
+	// kit-config can't declare, as a file's path or an address.
+	Names func(args []string) ([]string, error)
+	// Kinds are the kinds' names a line's things can be, as its arguments
+	// say, in the order the program takes a name more than one has: the
+	// kind's own alone when nil.
+	Kinds func(args []string) []string
+}
+
+// LineVerb is a verb of a program's a line starts with: its words, as in
+// gh's extension install, each a command of kit's holding the next; the
+// other words each goes by, by the word, as gh's ext for extension and
+// npm's i for install; its flags that have the program only say what it
+// would do, so a line with one declares and undeclares nothing; and what
+// else its command's help says, of what kit does for the program.
+type LineVerb struct {
+	Words   []string
+	Aliases map[string][]string
+	DryRun  []string
+	More    string
 }
 
 // SwitchHelp is what kit <name> on and off do, for a kind whose things can

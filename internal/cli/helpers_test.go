@@ -294,9 +294,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		},
 		Self:      func() (string, error) { return cmp.Or(w.self, filepath.Join(w.home, kitPath)), nil },
 		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
-		// Never the real Mac's, as kit's runs would find its programs there.
-		Homebrew: []string{filepath.Join(w.home, "homebrew", "bin")},
-		SSHDir:   filepath.Join(w.home, "etc", "ssh"),
+		SSHDir:    filepath.Join(w.home, "etc", "ssh"),
 		// Nothing listens there: a test waking Remote Login says where.
 		SSHAddress: cmp.Or(w.sshAt, "127.0.0.1:1"),
 		TCC:        filepath.Join(w.home, "TCC.db"),

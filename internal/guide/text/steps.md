@@ -54,11 +54,11 @@ a comment.
 ## What it can rely on
 
 Its environment is kit's, never your shell's: HOME, the PATH kit-config's
-`[paths]` makes (then the system's), USER, LOGNAME, SHELL, TMPDIR, LANG,
-LC_ALL, SSH_AUTH_SOCK, the secrets store's own variables, Homebrew told not
-to update itself, git told not to ask for a password, and the secrets it
-names that are variables. A token in your shell is not there: name it with
-`--secret`, once it's declared with `kit secret add`.
+`[paths]` makes (then Homebrew's and the system's), USER, LOGNAME, SHELL,
+TMPDIR, LANG, LC_ALL, SSH_AUTH_SOCK, the secrets store's own variables,
+Homebrew told not to update itself, git told not to ask for a password, and
+the secrets it names that are variables. A token in your shell is not
+there: name it with `--secret`, once it's declared with `kit secret add`.
 
 On a new Mac its check can run before its secrets have synced, without
 them; kit holds its apply till they're in place. So a check that needs a

@@ -31,8 +31,10 @@ type table struct {
 	// answered, or failed with.
 	list   []string
 	listed func(res runner.Result, err error) ([]string, error)
-	// key is the part of a name things match by.
-	key             func(name string) string
+	// key is the part of a name things match by; short, the name the
+	// program also takes a thing by, from its full one, as gh an
+	// extension by its command: nil for none.
+	key, short      func(name string) string
 	install, remove command
 }
 
@@ -59,6 +61,7 @@ var NPMDescriptor = table{
 		What:   "npm's global packages",
 		Add:    "Install global npm packages, and declare them",
 		Remove: "Uninstall global npm packages, and undeclare them",
+		Line:   npmLine,
 	},
 	list:    []string{"ls", "--global", "--depth=0", "--json"},
 	listed:  npmListed,
@@ -77,6 +80,7 @@ var ComposerDescriptor = table{
 		What:   "Composer's global packages",
 		Add:    "Install global Composer packages, and declare them",
 		Remove: "Uninstall global Composer packages, and undeclare them",
+		Line:   composerLine,
 	},
 	list:    []string{"global", "show", "--direct", "--format=json"},
 	listed:  composerListed,
@@ -94,10 +98,12 @@ var GHDescriptor = table{
 		What:   "The GitHub CLI's extensions",
 		Add:    "Install GitHub CLI extensions, as owner/repo, and declare them",
 		Remove: "Uninstall GitHub CLI extensions, and undeclare them",
+		Line:   ghLine,
 	},
 	list:    []string{"extension", "list"},
 	listed:  ghListed,
 	key:     strings.ToLower,
+	short:   ghCommand,
 	install: command{args: []string{"extension", "install"}, timeout: 5 * time.Minute, each: true},
 	remove:  command{args: []string{"extension", "remove"}, each: true, name: ghCommand},
 }.descriptor()
@@ -127,11 +133,16 @@ func (t *tool) Program() string        { return t.program }
 func (t *tool) Key(name string) string { return t.key(name) }
 
 func (t *tool) exec(ctx context.Context, timeout time.Duration, args ...string) (runner.Result, error) {
+	return t.run.Run(ctx, t.command(timeout, args))
+}
+
+// command is the program run with args, given timeout, from where it runs.
+func (t *tool) command(timeout time.Duration, args []string) runner.Command {
 	cmd := runner.Command{Name: t.program, Args: args, Timeout: timeout}
 	if t.fromHome {
 		cmd.Dir = t.home
 	}
-	return t.run.Run(ctx, cmd)
+	return cmd
 }
 
 // Installed lists what the program lists, each installed for itself; what

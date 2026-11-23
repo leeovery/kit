@@ -23,7 +23,7 @@ func laptopWorld(t *testing.T) *world {
 		"studio/declarations": "[homebrew formulae]\nffmpeg\n",
 	})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
-	w.write(t, filepath.Join(".local", "state", "kit", "path"), filepath.Join(w.home, ".local", "bin")+":/opt/homebrew/bin\n")
+	w.write(t, filepath.Join(".local", "state", "kit", "path"), filepath.Join(w.home, ".local", "bin")+":/opt/homebrew/bin:/opt/homebrew/sbin\n")
 	// The drift was first seen two days ago, so it needs attention.
 	w.write(t, filepath.Join(".local", "state", "kit", "drift.json"),
 		`{"first_seen": {"brew:ffmpeg": "2025-12-31T00:00:00Z", "brew:node@20": "2025-12-31T00:00:00Z", "cask:firefox": "2025-12-31T00:00:00Z"}}`)
@@ -83,7 +83,7 @@ func TestStatus(t *testing.T) {
 	out, errOut, status := w.run(t, "status")
 	want := `kit status · laptop
 homebrew ok /opt/homebrew
-path ok 2 directories
+path ok 3 directories
 brew attention 3 declared, all installed
 brew extra ffmpeg
 brew unused-dependency node@20
@@ -219,7 +219,7 @@ func TestStatusRunsProgramsOnKitsOwnPath(t *testing.T) {
 	if _, _, status := w.run(t, "status"); status != 0 {
 		t.Fatalf("kit status exit %d, want 0", status)
 	}
-	wantPath := []string{filepath.Join(w.home, ".local", "bin"), "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+	wantPath := []string{filepath.Join(w.home, ".local", "bin"), "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
 	if !slices.Equal(w.path, wantPath) {
 		t.Errorf("kit's PATH = %q, want %q", w.path, wantPath)
 	}

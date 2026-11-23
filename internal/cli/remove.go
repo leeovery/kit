@@ -112,19 +112,10 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 			// Refused, as removeOne says, it's nothing to ask about.
 			continue
 		}
-		left, err := l.Leaves(ctx, name)
+		lo, unread, err := leftoverOf(ctx, r, k, l, p, features.on(steps.FeaturePrefs), name)
 		if err != nil && !opts.zap {
 			// Not knowing what it leaves, kit uninstalls it as any thing.
 			continue
-		}
-		lo := leftover{app: cmp.Or(left.App, name), done: descriptorOf(k).Removes().Done, zapped: left.Domains, saving: features.on(steps.FeaturePrefs)}
-		for _, f := range left.Files {
-			lo.files = append(lo.files, tilde.Shown(r.homeDir, f))
-		}
-		var unread error
-		if left.Bundle != "" && lo.saving {
-			// A store kit won't read has no saved settings it would delete.
-			lo.saved, unread = p.SavedFor(ctx, left.Bundle)
 		}
 		zap, said, err := a.zapping(ctx, lo, opts.zap)
 		if err != nil {
@@ -149,21 +140,45 @@ func (lo leftover) uninstaller(p *prefs.Prefs, k kind.Kind, l kind.Leaver, name 
 			if err := l.RemoveAll(ctx, []string{name}); err != nil {
 				return nil, putBack(ctx, p, lo.saved, err)
 			}
-			forgot = cmp.Or(forgot, p.Forget(ctx, p.Unowned(lo.zapped)))
-			if forgot != nil {
-				return []string{lo.removed() + ", but its settings are still held to be restored: " + forgot.Error()}, nil
-			}
-			return []string{lo.removed()}, nil
+			return lo.zappedSaid(ctx, p, forgot), nil
 		}
 	case said:
 		return func(ctx context.Context) ([]string, error) {
 			if err := k.Remove(ctx, []string{name}); err != nil {
 				return nil, err
 			}
-			return []string{lo.done + ", " + lo.kept()}, nil
+			return []string{lo.done + ", " + lo.kept("--zap")}, nil
 		}
 	}
 	return nil
+}
+
+// leftoverOf is what name, an app of k, leaves, as removing it tells of it
+// (leftover), saving saying whether kit prefs saves settings on this Mac;
+// unread is why the settings it saved for it weren't read, and err why
+// what it leaves couldn't be told, which it says nothing of.
+func leftoverOf(ctx context.Context, r *run, k kind.Kind, l kind.Leaver, p *prefs.Prefs, saving bool, name string) (lo leftover, unread, err error) {
+	left, err := l.Leaves(ctx, name)
+	lo = leftover{app: cmp.Or(left.App, name), done: descriptorOf(k).Removes().Done, zapped: left.Domains, saving: saving}
+	for _, f := range left.Files {
+		lo.files = append(lo.files, tilde.Shown(r.homeDir, f))
+	}
+	if left.Bundle != "" && saving {
+		// A store kit won't read has no saved settings it would delete.
+		lo.saved, unread = p.SavedFor(ctx, left.Bundle)
+	}
+	return lo, unread, err
+}
+
+// zappedSaid is what an uninstall that removed what lo is left says, once
+// it's done, its files' domains no app installed uses deleted then, as the
+// saved settings were before it; forgot is why they weren't, if they
+// weren't.
+func (lo leftover) zappedSaid(ctx context.Context, p *prefs.Prefs, forgot error) []string {
+	if forgot = cmp.Or(forgot, p.Forget(ctx, p.Unowned(lo.zapped))); forgot != nil {
+		return []string{lo.removed() + ", but its settings are still held to be restored: " + forgot.Error()}
+	}
+	return []string{lo.removed()}
 }
 
 // unreadSaid is do, or, nil, k's own uninstall of name, saying why kit
@@ -281,12 +296,13 @@ func (lo leftover) removed() string {
 	return lo.done
 }
 
-// kept is what's become of them, kept, and how to remove them.
-func (lo leftover) kept() string {
+// kept is what's become of them, kept, and that by, a flag or a command,
+// removes them.
+func (lo leftover) kept(by string) string {
 	if len(lo.files) > 0 {
-		return "its files kept: --zap removes them"
+		return "its files kept: " + by + " removes them"
 	}
-	return "its saved settings kept: --zap removes them"
+	return "its saved settings kept: " + by + " removes them"
 }
 
 // takeOff takes name off the Mac, when it's on it (isIn), as how does, or,

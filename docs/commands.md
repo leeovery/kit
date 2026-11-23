@@ -49,6 +49,33 @@ Claude Code has already.
 `kit claude-mcp` also has `on` and `off`. `on` installs a declared server. `off` removes a
 server from Claude Code, and keeps its line.
 
+A few take more than the name they keep:
+
+- `kit mas add` takes an app by name or by id. The line keeps both.
+- `kit login-item add` takes an app by name, path or bundle id. The line keeps the bundle id.
+- An npm package, a Composer package or a skill may carry a version. kit keeps it for installing.
+
+Five of these also run a [copied line](glossary.md): an install command from a README, with kit
+in front. The program runs the line as given, then kit declares what it installed. An uninstall
+line undeclares what it took off.
+
+| Copied install | Copied uninstall |
+|---|---|
+| `kit brew install` | `kit brew uninstall` |
+| `kit npm install -g` | `kit npm uninstall -g` |
+| `kit mas install` | `kit mas uninstall` |
+| `kit gh extension install` | `kit gh extension remove` |
+| `kit composer global require` | `kit composer global remove` |
+
+In the line, kit's flags are `--shared`, and `--note` on an install only. kit's other flags go
+before the kind, as in `kit --plain brew install jq`. Most short words work, such as
+`kit npm i -g`. Four reach kit's own `add` and `remove` instead:
+
+- npm's `add`, `remove` and `rm`;
+- brew's `remove` and `rm`.
+
+[Packages](packages.md) covers when to use which.
+
 ## Settings
 
 Each of these has `add` and `remove`. For the first three, `add` declares a setting with the

@@ -87,6 +87,7 @@ var Descriptor = kind.Descriptor{
 		Remove: "Uninstall App Store apps, and undeclare them",
 		Leaves: "its settings",
 		Takes:  "its saved settings, from this Mac and, at the next capture, from kit prefs' store",
+		Line:   lineHelp,
 	},
 	Apps: true,
 	Row:  "App Store apps",
@@ -370,9 +371,15 @@ func (s *AppStore) install(ctx context.Context, name string, signedIn bool) erro
 	if id(name) == 0 {
 		return notAnApp(name)
 	}
+	return s.installing(ctx, []string{"install", strconv.FormatInt(id(name), 10)}, installTimeout, signedIn)
+}
+
+// installing runs mas with args, which install, through sudo, given
+// timeout, as install says.
+func (s *AppStore) installing(ctx context.Context, args []string, timeout time.Duration, signedIn bool) error {
 	var hung bool
 	err := kind.AdminAgain(ctx, func() (err error) {
-		hung, err = s.attempt(ctx, name, signedIn)
+		hung, err = s.attempt(ctx, args, timeout, signedIn)
 		return err
 	})
 	switch {
@@ -381,15 +388,15 @@ func (s *AppStore) install(ctx context.Context, name string, signedIn bool) erro
 	case kind.SudoForgot(err):
 		return errAdminWait
 	case !hung && !signedOut(err):
-		return failed(err)
+		return failed(err, timeout)
 	}
 	return &notSignedIn{err: err, hung: hung}
 }
 
-// attempt installs name once, reporting whether it hung: till an app's in
-// (signedIn), mas not saying anything for firstWord. What's left of an
-// install kit ended is stopped (stopStray).
-func (s *AppStore) attempt(ctx context.Context, name string, signedIn bool) (hung bool, err error) {
+// attempt runs mas with args, which install, once, reporting whether it
+// hung: till an app's in (signedIn), mas not saying anything for
+// firstWord. What's left of an install kit ended is stopped (stopStray).
+func (s *AppStore) attempt(ctx context.Context, args []string, timeout time.Duration, signedIn bool) (hung bool, err error) {
 	run, lines := ctx, kind.Lines(ctx)
 	if !signedIn {
 		first, heard, cancel := hold.UntilHeard(ctx, firstWord)
@@ -402,24 +409,24 @@ func (s *AppStore) attempt(ctx context.Context, name string, signedIn bool) (hun
 			}
 		}
 	}
-	res, err := s.sudo(run, "install", []string{name}, installTimeout, lines)
+	res, err := s.sudoed(run, args, timeout, lines)
 	hung = !signedIn && errors.Is(run.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 	if err != nil && ctx.Err() == nil && (hung || errors.Is(err, context.DeadlineExceeded)) {
-		s.stopStray(ctx, res.Group, name)
+		s.stopStray(ctx, res.Group, args)
 	}
 	return hung, err
 }
 
-// stopStray stops what's left of kit's install of name, in group, the
-// process group it ran in, once kit's ended it: sudo passes on to mas that
-// it's to stop, but mas, running as root, can carry on, holding up the
-// next try. What pgrep finds of it in the group is killed through sudo;
-// nothing outside it, as a mas run by hand.
-func (s *AppStore) stopStray(ctx context.Context, group int, name string) {
+// stopStray stops what's left of kit's run of mas with args, which
+// install, in group, the process group it ran in, once kit's ended it:
+// sudo passes on to mas that it's to stop, but mas, running as root, can
+// carry on, holding up the next try. What pgrep finds of it in the group
+// is killed through sudo; nothing outside it, as a mas run by hand.
+func (s *AppStore) stopStray(ctx context.Context, group int, args []string) {
 	if group == 0 {
 		return
 	}
-	res, err := s.run.Run(ctx, runner.Command{Name: "pgrep", Args: []string{"-g", strconv.Itoa(group), "-f", fmt.Sprintf("^(/[^ ]*/)?mas install %d$", id(name))}})
+	res, err := s.run.Run(ctx, runner.Command{Name: "pgrep", Args: []string{"-g", strconv.Itoa(group), "-f", "^(/[^ ]*/)?mas " + regexp.QuoteMeta(strings.Join(args, " ")) + "$"}})
 	pids := strings.Fields(string(res.Stdout))
 	if err != nil || len(pids) == 0 {
 		return
@@ -430,15 +437,15 @@ func (s *AppStore) stopStray(ctx context.Context, group int, name string) {
 	})
 }
 
-// failed is err, an app's install failing, in kit's words: what mas said,
-// as the run's reason reads it from its exit; else how it ended, never the
-// command, which the run's log has.
-func failed(err error) error {
+// failed is err, an install, given timeout, failing, in kit's words: what
+// mas said, as the run's reason reads it from its exit; else how it ended,
+// never the command, which the run's log has.
+func failed(err error, timeout time.Duration) error {
 	if _, exited := errors.AsType[*runner.ExitError](err); exited {
 		return err
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("mas didn't finish in %d minutes", int(installTimeout.Minutes()))
+		return fmt.Errorf("mas didn't finish in %d minutes", int(timeout.Minutes()))
 	}
 	return errors.New("mas was stopped")
 }
@@ -527,7 +534,7 @@ func (*AppStore) Done(line string, names []string) (string, bool) {
 // sudo runs mas's verb of names through sudo, given timeout, its lines to
 // lines as they come.
 func (s *AppStore) sudo(ctx context.Context, verb string, names []string, timeout time.Duration, lines func(string)) (runner.Result, error) {
-	args := []string{"-n", "mas", verb}
+	args := []string{verb}
 	for _, name := range names {
 		n := id(name)
 		if n == 0 {
@@ -535,7 +542,13 @@ func (s *AppStore) sudo(ctx context.Context, verb string, names []string, timeou
 		}
 		args = append(args, strconv.FormatInt(n, 10))
 	}
-	return s.run.Run(ctx, runner.Command{Name: "sudo", Args: args, Timeout: timeout, Lines: lines})
+	return s.sudoed(ctx, args, timeout, lines)
+}
+
+// sudoed runs mas with args through sudo, given timeout, its lines to lines
+// as they come.
+func (s *AppStore) sudoed(ctx context.Context, args []string, timeout time.Duration, lines func(string)) (runner.Result, error) {
+	return s.run.Run(ctx, runner.Command{Name: "sudo", Args: slices.Concat([]string{"-n", "mas"}, args), Timeout: timeout, Lines: lines})
 }
 
 // notAnApp refuses name, which isn't an App Store app's.
@@ -619,4 +632,5 @@ var _ interface {
 	kind.Admin
 	kind.Blocker
 	kind.Finder
+	kind.Liner
 } = (*AppStore)(nil)

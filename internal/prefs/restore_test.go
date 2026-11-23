@@ -380,6 +380,17 @@ func TestAHelperIsNamedByItsApp(t *testing.T) {
 	}
 }
 
+// An app installed is named as its bundle is; one that isn't, by its id.
+func TestAppName(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.app(t, w.apps, "Example Editor", "com.example.editor")
+	for id, want := range map[string]string{"com.example.editor": "Example Editor", "com.example.gone": "com.example.gone"} {
+		if got := w.p.AppName(id); got != want {
+			t.Errorf("AppName(%s) = %q, want %q", id, got, want)
+		}
+	}
+}
+
 // opened is the calls of w's fake that opened an app.
 func (w *world) opened() []string {
 	var out []string

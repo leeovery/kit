@@ -35,6 +35,9 @@ A Mac reads `shared/` and the folder named after it. The name comes from `kit ma
 must be one of the Macs `kit.toml` names. A folder with a declarations file for a Mac
 `kit.toml` doesn't name is an error.
 
+A new kit-config has no `shared/` folder. kit makes the folder the first time you declare
+something for every Mac, with `--shared`.
+
 ## kit.toml
 
 ```toml
@@ -116,11 +119,19 @@ keep the order you wrote. kit puts a new line in `[paths]` or `[restore]` last, 
 anywhere else in its place by name. A kind is looked after only while a file has its section,
 even an empty one.
 
-The PATH runs in this order: the Mac file's `[paths]`, then the shared file's, then the
-system's folders. Each folder appears once, in the first place it's listed. If a Mac file
-lists a folder the shared file has, that folder moves ahead of the shared folders on that
-Mac. kit's PATH and your shell's both follow this order. A relative folder, such as
-`node_modules/.bin`, stays in your shell's PATH but out of kit's.
+The PATH runs in this order:
+
+1. The Mac file's `[paths]`.
+2. The shared file's `[paths]`.
+3. Homebrew's folders, `/opt/homebrew/bin` and `/opt/homebrew/sbin`. kit adds them, so you
+   don't declare them.
+4. The system's folders.
+
+Each folder appears once, in the first place it's listed. If a file lists one of Homebrew's
+folders, that folder keeps its place in the file. If a Mac file lists a folder the shared file
+has, that folder moves ahead of the shared folders on that Mac. kit's PATH and your shell's
+both follow this order. A relative folder, such as `node_modules/.bin`, stays in your shell's
+PATH but out of kit's.
 
 ### The sections
 

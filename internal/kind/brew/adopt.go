@@ -153,32 +153,52 @@ func (a adoption) notAdopted(err error) []toAdopt {
 }
 
 // stillFailed is failed, brew install --adopt's failure, once some of a's
-// casks are replaced: none when every one is in; else its lines of those
-// still missing alone, as brew lists them, so it never says why one now in
-// failed. As it is when brew can't list them, or it names none of them.
+// casks are replaced: its lines of anything but the casks now in, as brew
+// lists them, so it never says why one now in failed, and never drops why
+// another failed, a formula of the same line among them; none when it
+// says nothing else and every one is in. As it is when brew can't list
+// them, or it says nothing else and one's still missing.
 func (c casks) stillFailed(ctx context.Context, a adoption, failed error) error {
 	listed, err := c.lines(ctx, "list", "--cask", "--full-name", "-1")
 	if err != nil {
 		return failed
 	}
-	var missing []string
+	var in []string
 	for _, t := range a.adopt {
-		if !slices.Contains(listed, t.cask.token) {
-			missing = append(missing, t.cask.token)
+		if slices.Contains(listed, t.cask.token) {
+			in = append(in, t.cask.token)
 		}
 	}
 	exit, ok := errors.AsType[*runner.ExitError](failed)
+	if !ok {
+		if len(in) == len(a.adopt) {
+			return nil
+		}
+		return failed
+	}
+	var said []string
+	for _, line := range exit.Lines("Error:") {
+		if !aboutOneOf(line, in) {
+			said = append(said, line)
+		}
+	}
 	switch {
-	case len(missing) == 0:
+	case len(said) > 0:
+		return runner.NewExitError(exit.Command, exit.Code, []byte(strings.Join(said, "\n")))
+	case len(in) == len(a.adopt):
 		return nil
-	case !ok:
-		return failed
 	}
-	said := saidOf(exit, func(token string) bool { return slices.Contains(missing, token) })
-	if said == nil {
-		return failed
-	}
-	return said
+	return failed
+}
+
+// aboutOneOf reports whether line, of brew install's failure, is about one
+// of the casks tokens names: failing it, or naming what it put in the
+// Caskroom, as its version beside the app there's.
+func aboutOneOf(line string, tokens []string) bool {
+	m := caskFailed.FindStringSubmatch(line)
+	return slices.ContainsFunc(tokens, func(token string) bool {
+		return m != nil && m[1] == token || strings.Contains(line, "/Caskroom/"+token+"/")
+	})
 }
 
 // unsaid is failed, brew install's failure, without why the casks refused

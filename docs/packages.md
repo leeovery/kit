@@ -11,11 +11,11 @@ install you mean to keep.
 kit brew add jq
 ```
 
-kit installs jq, writes its line, then commits and pushes kit-config:
+kit installs jq, writes its line, and pushes kit-config:
 
 <img src="../art/packages-add.webp" alt="kit brew add jq at a terminal: jq installed and declared in laptop, then kit-config committed and pushed" width="443">
 
-The line lands in this Mac's declarations file, in sorted order:
+The line lands in this Mac's declarations file, sorted:
 
 ```text
 [homebrew formulae]
@@ -45,14 +45,6 @@ Each kind has a section in a declarations file, and an `add` and a `remove` comm
 | `kit claude-mcp` | `[claude mcp]` | a server's name |
 | `kit claude-skill` | `[claude skills]` | `owner/repo/skill` |
 
-A few kinds take more than the name they keep:
-
-- `kit mas add` takes an app by name or by id. The line keeps both, so the list reads by name.
-- `kit login-item add` takes an app by name, path or bundle id. The line keeps the bundle id.
-- An npm package, a Composer package or a skill may carry a version. kit keeps it for installing.
-- `kit claude-mcp add` declares a server Claude Code has already, as Claude Code has it.
-  `kit claude-mcp off` removes the server but keeps its line.
-
 ## What happens
 
 - **This Mac only, unless you say.** Without `--shared`, the line goes in this Mac's file. With `--shared`, it goes in `shared/declarations` for every Mac,
@@ -64,6 +56,35 @@ A few kinds take more than the name they keep:
 - **A new Mac installs it all,** once what each kind needs is in place, such as npm for npm
   packages. [A new Mac from one line](new-mac.md) says what waits for what.
 
+## Lines copied from a README
+
+```bash
+# A README's line, with kit in front
+kit brew install --cask owner/tap/tool
+```
+
+Homebrew runs the line as given, output and all. kit then declares each name it
+installed, and pushes kit-config. kit takes these lines, and the uninstall of each:
+
+- `brew install`
+- `npm install -g`
+- `mas install <id>`
+- `gh extension install owner/gh-name`
+- `composer global require`
+
+When you pick the package, use `add`. When you copy a README's line, put kit in front. In the
+line:
+
+- **Flags are for this install only.** kit-config keeps names, with an npm version or Composer
+  constraint.
+- **`--shared`, and `--note` on an install, are kit's.** kit's other flags go first:
+  `kit --plain brew install jq`.
+- **One name kit can't declare refuses the line,** and nothing runs.
+- **A cask line adopts the app already there,** as `kit cask add` does, unless a flag changes
+  how it installs.
+
+[Troubleshooting](troubleshooting.md) covers the lines kit refuses.
+
 ## Your own installs show up
 
 A package you install with brew or npm yourself is drift. After its first day, `kit status` lists it under CONFIG:
@@ -73,8 +94,7 @@ A package you install with brew or npm yourself is drift. After its first day, `
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
 
 Apps you dragged into Applications show up too, if kit can match them to a cask. Adopting one
-has Homebrew take the app over, if its cask takes that version: see
-[Troubleshooting](troubleshooting.md). `--leave` keeps the app by hand.
+has Homebrew take the app over: see [Troubleshooting](troubleshooting.md) if it fails. `--leave` keeps the app by hand.
 
 ## Good to know
 
@@ -84,8 +104,6 @@ has Homebrew take the app over, if its cask takes that version: see
 - **Trying something out?** `--temp` installs without declaring, quiet for 7 days.
 - **Private taps need a token.** kit checks a tap's download as you add it. If it's private, the
   line waits on a secret: see [Secrets from 1Password](secrets.md).
-- **`--adopt --shared` declares the cask for every Mac.** Each Mac with the app has Homebrew
-  take it over, even one where you left it by hand. Every Mac without it installs it.
 - **Installing isn't setting up.** A sign-in or a licence a package needs is a
   [step of your own](steps.md) or a step by hand, after the package.
 
@@ -96,7 +114,7 @@ has Homebrew take the app over, if its cask takes that version: see
 | `kit <kind> add <name>...` | Install, and declare for this Mac |
 | `add --shared` | Declare for every Mac instead |
 | `add --note "<why>"` | Keep why, after the name |
-| `add --temp` | Install without declaring |
+| `kit <kind> <copied line>` | Run it, then declare |
 | `kit <kind> remove <name>...` | Uninstall, and undeclare |
 | `remove --shared` | Needed to remove a shared line |
 | `kit list [<kind>]` | List what's declared for this Mac |

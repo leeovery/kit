@@ -94,9 +94,6 @@ type Deps struct {
 	// SudoLocal is sudo's file of local settings, which the touch-id-sudo
 	// feature checks: /etc/pam.d/sudo_local.
 	SudoLocal string
-	// Homebrew are Homebrew's folders, which a config starting on this Mac
-	// puts on every Mac's PATH: config.HomebrewPaths.
-	Homebrew []string
 	// SSHDir is where the Mac keeps its SSH host keys, which the host-key
 	// step reads, and SSHAddress where its Remote Login answers, which the
 	// step wakes to make them: /etc/ssh and 127.0.0.1:22 when "".
@@ -186,6 +183,9 @@ type app struct {
 	// unwinds put back what the faces kit shows have taken of the
 	// terminal, should kit panic.
 	unwinds []func()
+	// args are kit's command line, as given, for a command that reads it
+	// whole: a line copied for a kind's program.
+	args []string
 }
 
 // NewRootCommand builds the kit command tree. A command is known by the
@@ -198,14 +198,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 		Short: "Set up a Mac from a config repository, and keep it that way",
 		// Flags and arguments have parsed by the time this runs, so usage still
 		// follows a mistyped command line but not a failure after it.
-		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
-			a.parsed = true
-			if a.json {
-				a.document = &document{Writer: a.Stdout}
-				a.Stdout = a.document
-				cmd.Root().SetOut(a.Stdout)
-			}
-		},
+		PersistentPreRun:  func(cmd *cobra.Command, _ []string) { a.ready(cmd) },
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		Long: `kit sets a Mac up from a config repository, and keeps it that way.
@@ -245,6 +238,17 @@ status is the report, every check.`,
 	return root
 }
 
+// ready readies kit to run cmd, its command line read: with --json,
+// standard output is the document.
+func (a *app) ready(cmd *cobra.Command) {
+	a.parsed = true
+	if a.json {
+		a.document = &document{Writer: a.Stdout}
+		a.Stdout = a.document
+		cmd.Root().SetOut(a.Stdout)
+	}
+}
+
 // Execute runs root with args in ctx, shows what went wrong, if anything,
 // and returns the status to exit with: 0, failedStatus, or couldntStatus.
 // Should kit panic, the terminal is put back before the panic shows.
@@ -252,6 +256,7 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	root.SetArgs(args)
 	e, ok := root.ErrOrStderr().(*errOut)
 	if ok {
+		e.a.args = args
 		defer e.a.unwind()
 	}
 	// kit shows a usage itself, where one helps (errOut.show): cobra's goes
@@ -425,7 +430,6 @@ func Real(version string) Deps {
 		Self:         os.Executable,
 		WatchDialogs: true,
 		SudoLocal:    steps.SudoLocal,
-		Homebrew:     config.HomebrewPaths,
 		TCC:          "/Library/Application Support/com.apple.TCC/TCC.db",
 		AppDirs:      []string{"/Applications"},
 	}
