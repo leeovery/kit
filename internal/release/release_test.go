@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -39,6 +41,8 @@ func TestCheck(t *testing.T) {
 		{"a newer release out", "0.5.1", "0.5.2", check.Attention, "kit 0.5.2 is out; this Mac runs 0.5.1"},
 		{"the newest", "0.5.1", "0.5.1", check.OK, ""},
 		{"newer than the newest", "0.6.0", "0.5.2", check.OK, ""},
+		{"a newer release, by number", "0.5.9", "0.5.10", check.Attention, "kit 0.5.10 is out; this Mac runs 0.5.9"},
+		{"newer, by number", "0.5.10", "0.5.9", check.OK, ""},
 		{"a build of its own", "dev", "0.5.2", check.OK, ""},
 		{"no record yet", "0.5.1", "", check.OK, ""},
 	} {
@@ -100,6 +104,7 @@ func TestAsk(t *testing.T) {
 		{"a redirect to a tag", release.Record{}, http.StatusFound, "https://github.com/leeovery/kit/releases/tag/v0.5.2", true, release.Record{Newest: "0.5.2", Asked: now}},
 		{"a relative redirect", last, http.StatusFound, "/leeovery/kit/releases/tag/v0.5.2", true, release.Record{Newest: "0.5.2", Asked: now}},
 		{"asked within the day", release.Record{Newest: "0.5.0", Asked: now.Add(-23 * time.Hour)}, http.StatusFound, "/leeovery/kit/releases/tag/v0.5.2", false, release.Record{Newest: "0.5.0", Asked: now.Add(-23 * time.Hour)}},
+		{"asked in the future", release.Record{Newest: "0.5.0", Asked: now.Add(time.Hour)}, http.StatusFound, "/leeovery/kit/releases/tag/v0.5.2", true, release.Record{Newest: "0.5.2", Asked: now}},
 		{"GitHub down", last, http.StatusServiceUnavailable, "", true, last},
 		{"no release yet", last, http.StatusFound, "https://github.com/leeovery/kit/releases", true, last},
 		{"a tag that isn't a release's", last, http.StatusFound, "https://github.com/leeovery/kit/releases/tag/nightly", true, last},
@@ -118,11 +123,7 @@ func TestAsk(t *testing.T) {
 			if failed := tt.asked && tt.want == last; (err != nil) != failed {
 				t.Errorf("Ask = %v, want an error %v", err, failed)
 			}
-			got, err := release.Load(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !got.Asked.Equal(tt.want.Asked) || got.Newest != tt.want.Newest {
+			if got := release.Load(dir); !got.Asked.Equal(tt.want.Asked) || got.Newest != tt.want.Newest {
 				t.Errorf("record = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -137,7 +138,28 @@ func TestAskOffline(t *testing.T) {
 	if err := release.Ask(context.Background(), &http.Client{}, "http://127.0.0.1:1", dir, now); err == nil {
 		t.Error("Ask = nil, want an error")
 	}
-	if got, _ := release.Load(dir); got.Newest != last.Newest || !got.Asked.Equal(last.Asked) {
+	if got := release.Load(dir); got.Newest != last.Newest || !got.Asked.Equal(last.Asked) {
 		t.Errorf("record = %+v, want %+v", got, last)
+	}
+}
+
+// A record that won't read, empty or broken, counts as none: the check
+// claims nothing, and the next answer replaces it.
+func TestUnreadableRecord(t *testing.T) {
+	for _, content := range []string{"", "{not json"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "release.json"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if res := release.Check("0.5.1", "owner/tap/kit", dir).Check(context.Background()); res.State != check.OK || len(res.Items) > 0 {
+			t.Errorf("with %q recorded, Check = %+v, want ok, claiming nothing", content, res)
+		}
+		site, _ := github(t, http.StatusFound, "/leeovery/kit/releases/tag/v0.5.2")
+		if err := release.Ask(context.Background(), &http.Client{}, site, dir, now); err != nil {
+			t.Errorf("with %q recorded, Ask = %v", content, err)
+		}
+		if got := release.Load(dir); got.Newest != "0.5.2" || !got.Asked.Equal(now) {
+			t.Errorf("with %q recorded, the record after asking = %+v, want 0.5.2 asked now", content, got)
+		}
 	}
 }

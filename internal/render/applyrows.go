@@ -8,7 +8,6 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
-	"github.com/leeovery/kit/internal/release"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -41,7 +40,7 @@ func Rows() []string { return slices.Clone(applyRows) }
 // row: a kind's step, and the steps it needs, say theirs (event.Step.Row).
 var rowSteps = map[string][]string{
 	rowThisMac: {"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-apps", "boot-kit-config", "boot-kit",
-		"boot-full-disk-access", "boot-terminal", "disk", "memory", "load", release.StepName, "full-disk-access"},
+		"boot-full-disk-access", "boot-terminal", "disk", "memory", "load", "kit-version", "full-disk-access"},
 	rowFiles:    {"file", "path"},
 	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},
 	rowGit:      {"config", "config-sync", "config-private", "new-mac"},

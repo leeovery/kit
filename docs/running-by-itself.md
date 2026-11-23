@@ -100,18 +100,16 @@ flags the runs themselves:
 
 - no hourly run in the last two hours;
 - no nightly run finished in the last 26 hours, if the Mac has nightly jobs or saves apps' settings;
-- a job that failed, and what it said;
-- a newer kit than the one this Mac runs.
+- a job that failed, and what it said.
 
 `kit nightly <job>` runs a failed job again, and `kit log` shows each run whole.
 
 ## Good to know
 
-- **You upgrade kit yourself.** Once a day, the hourly run asks GitHub for kit's newest
-  release. If that release is newer than yours, `kit status` says so, with the command
-  that installs it: `brew upgrade leeovery/tools/kit`. kit never upgrades itself.
-- **It runs the kit you run.** The launch runs the kit on kit's PATH, so the next run uses
-  the kit you upgraded to.
+- **You upgrade kit yourself.** If a newer kit is out, `kit status` says so, with the
+  command to run: `brew upgrade leeovery/tools/kit`.
+- **It runs the kit you run.** The launch runs the kit on kit's PATH, so a Homebrew upgrade
+  carries on.
 - **A Mac without the launch says so.** `kit status` flags a Mac that has never run on a
   schedule. `kit apply` puts the launch in place.
 

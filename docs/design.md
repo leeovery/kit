@@ -990,9 +990,10 @@ their apps are installed and closed and have their settings folders, opening non
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
 state (`nightly.json`). A whole run first asks GitHub for kit's newest release, at most once a
-day, as install.sh does (the tag `releases/latest` redirects to, read and not followed, no token,
-a 10-second limit), and keeps the answer in `release.json`; an ask that fails keeps the last one,
-fails nothing, and is asked again next run. Nothing upgrades kit by itself (the maintainer, 23 Nov
+day, at the URL install.sh asks (`releases/latest`; install.sh follows its redirect, kit reads the
+tag it redirects to without following it, no token, a 10-second limit), and keeps the answer in
+`release.json`; an ask that fails keeps the last one, fails nothing, and is asked again next run,
+and a record that won't read counts as none, the next answer replacing it. Nothing upgrades kit by itself (the maintainer, 23 Nov
 2026): `kit status` says a release is out, and the person upgrades. It installs and removes nothing. `--plan` says what's due; naming jobs
 runs those, now. Its runs notify no one (the maintainer, 12 Nov 2026: "record it so that you
 have access to the knowledge, but I don't want to be told"): what they find is in `kit status`,

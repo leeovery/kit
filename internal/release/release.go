@@ -6,10 +6,12 @@ package release
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/state"
 	"github.com/leeovery/kit/internal/steps"
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // StepName names the step checking this Mac runs kit's newest release.
@@ -43,28 +46,39 @@ type Record struct {
 }
 
 // Load reads the record in the state directory: an empty one when there's
-// none.
-func Load(stateDir string) (Record, error) {
-	return state.Load[Record](stateDir, file)
+// none, or one that won't read, as the next answer replaces it.
+func Load(stateDir string) Record {
+	rec, err := state.Load[Record](stateDir, file)
+	if err != nil {
+		return Record{}
+	}
+	return rec
 }
 
 // Ask asks GitHub, at site, for kit's newest release, and records it in
 // stateDir with now: unless it was asked in the day before now. A failed
 // ask records nothing, so the last answer stands, and the next run asks
-// again.
+// again. An answer replaces the record whole, never reading it, so one that
+// won't read goes.
 func Ask(ctx context.Context, client *http.Client, site, stateDir string, now time.Time) error {
-	rec, err := Load(stateDir)
-	if err != nil {
-		return err
-	}
-	if since := now.Sub(rec.Asked); since >= 0 && since < askEvery {
+	if since := now.Sub(Load(stateDir).Asked); since >= 0 && since < askEvery {
 		return nil
 	}
 	newest, err := latest(ctx, client, site)
 	if err != nil {
 		return fmt.Errorf("ask GitHub for kit's newest release: %w", err)
 	}
-	return state.Update(stateDir, file, func(r *Record) { *r = Record{Newest: newest, Asked: now} })
+	data, err := json.MarshalIndent(Record{Newest: newest, Asked: now}, "", "  ")
+	if err == nil {
+		err = os.MkdirAll(stateDir, 0o700)
+	}
+	if err == nil {
+		err = whole.Write(filepath.Join(stateDir, file), append(data, '\n'), 0o600)
+	}
+	if err != nil {
+		return fmt.Errorf("record kit's newest release: %w", err)
+	}
+	return nil
 }
 
 // latest is the version of kit's newest release, as the tag GitHub's latest
@@ -91,7 +105,7 @@ func latest(ctx context.Context, client *http.Client, site string) (string, erro
 	dir, tag := path.Split(loc.Path)
 	version := strings.TrimPrefix(tag, "v")
 	if !strings.HasSuffix(dir, "/releases/tag/") || !config.IsRelease(version) {
-		return "", errors.New("GitHub named no release's tag: " + loc.String())
+		return "", fmt.Errorf("GitHub named no release's tag: %s", loc)
 	}
 	return version, nil
 }
@@ -100,15 +114,12 @@ func latest(ctx context.Context, client *http.Client, site string) (string, erro
 // record in stateDir says, without asking: running older than the newest
 // needs the person to upgrade it, through formula, its Homebrew formula. A
 // kit that isn't a release's, as a build from source, or a Mac with no
-// record yet, claims nothing.
+// record yet, or one that won't read, claims nothing.
 func Check(running, formula, stateDir string) engine.Step {
 	return engine.Step{
-		Name: StepName, Title: "kit", Area: steps.AreaMac,
+		Name: StepName, Title: "kit version", Area: steps.AreaMac,
 		Check: func(context.Context) check.Result {
-			rec, err := Load(stateDir)
-			if err != nil {
-				return check.Result{State: check.Failed, Reason: err.Error()}
-			}
+			rec := Load(stateDir)
 			if !config.Older(running, rec.Newest) {
 				return check.Result{State: check.OK, Summary: running, Glance: running}
 			}
