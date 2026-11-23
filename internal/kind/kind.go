@@ -135,9 +135,32 @@ type Misser interface {
 // (LineHelp): kit brew install --cask firefox runs brew install --cask
 // firefox.
 type Liner interface {
-	// Line runs the program's verb with args, as given, in its turn to
-	// change things, watched for going quiet as an install is.
-	Line(ctx context.Context, verb string, args []string) error
+	// Line runs l, as given, in the program's turn to change things,
+	// watched for going quiet as an install is.
+	Line(ctx context.Context, l CopiedLine) error
+}
+
+// CopiedLine is a line copied for a kind's program, to run: the program's
+// verb, as words, then the arguments given after it; whether it installs;
+// and
+// the names in it kit found aren't installed yet, by the kind each
+// installs as, for what the program's own installs of them do, as
+// Homebrew's casks adopting an app already there.
+type CopiedLine struct {
+	Verb, Args []string
+	Installs   bool
+	New        map[string][]string
+}
+
+// HeldEnv is the environment an install of names, held as h says, runs
+// in, once what h waits for is there: an error saying what isn't, if it
+// isn't.
+func HeldEnv(ctx context.Context, h Held, names []string) ([]string, error) {
+	env, why, err := readyHeld(ctx, h, names)
+	if err == nil && why != "" {
+		err = errors.New(why)
+	}
+	return env, err
 }
 
 // Adoptable is a kind that can take over things put on the Mac by hand,

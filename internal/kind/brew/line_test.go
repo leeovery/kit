@@ -77,10 +77,10 @@ func TestALineRunsAsGiven(t *testing.T) {
 	fake.On("brew", "install", "--cask", "--force", "owner/tap/tool")
 	fake.On("brew", "uninstall", "--zap", "firefox")
 	liner := brew.New(fake).Formulae().(kind.Liner)
-	if err := liner.Line(context.Background(), "install", []string{"--cask", "--force", "owner/tap/tool"}); err != nil {
+	if err := liner.Line(context.Background(), kind.CopiedLine{Verb: []string{"install"}, Args: []string{"--cask", "--force", "owner/tap/tool"}, Installs: true, New: map[string][]string{"cask": {"owner/tap/tool"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := liner.Line(context.Background(), "uninstall", []string{"--zap", "firefox"}); err != nil {
+	if err := liner.Line(context.Background(), kind.CopiedLine{Verb: []string{"uninstall"}, Args: []string{"--zap", "firefox"}}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"brew update --quiet", "brew install --cask --force owner/tap/tool", "brew uninstall --zap firefox"}
@@ -100,8 +100,79 @@ func TestALineThatFails(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "update", "--quiet")
 	fake.On("brew", "install", "nosuch").Exits(1).PrintsToStderr(`Error: No available formula with the name "nosuch".`)
-	err := brew.New(fake).Formulae().(kind.Liner).Line(context.Background(), "install", []string{"nosuch"})
+	err := brew.New(fake).Formulae().(kind.Liner).Line(context.Background(), kind.CopiedLine{Verb: []string{"install"}, Args: []string{"nosuch"}, Installs: true})
 	if err == nil || !strings.Contains(err.Error(), `No available formula with the name "nosuch"`) {
 		t.Errorf("Line = %v, want brew's error", err)
+	}
+}
+
+// A verb of more than one word goes to the program as words of its own.
+func TestALinesVerbIsItsWords(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "extension", "remove", "owner/tool")
+	if err := brew.New(fake).Formulae().(kind.Liner).Line(t.Context(), kind.CopiedLine{Verb: []string{"extension", "remove"}, Args: []string{"owner/tool"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.Commands()[0].Args; !slices.Equal(got, []string{"extension", "remove", "owner/tool"}) {
+		t.Errorf("ran brew with %q, want each word apart", got)
+	}
+}
+
+// A line of casks the catalogue vets gets --adopt, as kit's own cask
+// installs do, its apps already there taken over; not one that says
+// --adopt or --force itself, nor one with a cask kit can't vet, a tap's,
+// which runs as given.
+func TestALineOfCasksAdopts(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		new  []string
+		want string
+	}{
+		{"vetted", []string{"--cask", "google-chrome", "jq"}, []string{"google-chrome"}, "brew install --adopt --cask google-chrome jq"},
+		{"--force given", []string{"--cask", "--force", "google-chrome"}, []string{"google-chrome"}, "brew install --cask --force google-chrome"},
+		{"--adopt given", []string{"--adopt", "google-chrome"}, []string{"google-chrome"}, "brew install --adopt google-chrome"},
+		{"a tap's among them", []string{"google-chrome", "owner/tap/tool"}, []string{"google-chrome", "owner/tap/tool"}, "brew install google-chrome owner/tap/tool"},
+		{"installed already", []string{"google-chrome"}, nil, "brew install google-chrome"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake, _, _ := adopting(t)
+			fake.On("brew", strings.Fields(tt.want)[1:]...)
+			line := kind.CopiedLine{Verb: []string{"install"}, Args: tt.args, Installs: true, New: map[string][]string{"cask": tt.new}}
+			if err := brew.Of(&kind.Deps{Run: fake, Home: "/Users/someone", AppDirs: []string{t.TempDir()}}).Formulae().(kind.Liner).Line(t.Context(), line); err != nil {
+				t.Fatal(err)
+			}
+			if got := installs(fake); !slices.Equal(got, []string{tt.want}) {
+				t.Errorf("ran %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Adopting, a cask whose app there differs from its download is replaced
+// as kit cask add replaces it, when it's an older copy of its major
+// version; one whose app there isn't its own refuses the line, nothing
+// run.
+func TestALineOfCasksReplacesOrRefuses(t *testing.T) {
+	fake, apps, _ := adopting(t)
+	h := withApps(fake, apps, t.TempDir())
+	installVersion(t, apps, "Example Editor.app", "com.example.editor", "3.1")
+	fake.On("brew", "install", "--adopt", "--cask", "example-editor").Exits(1).PrintsToStderr(notAdopted)
+	fake.On("brew", "install", "--cask", "--force", "example-editor")
+	fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("example-editor\n")
+	line := kind.CopiedLine{Verb: []string{"install"}, Args: []string{"--cask", "example-editor"}, Installs: true, New: map[string][]string{"cask": {"example-editor"}}}
+	if err := h.Formulae().(kind.Liner).Line(t.Context(), line); err != nil {
+		t.Errorf("Line = %v, want example-editor replaced", err)
+	}
+	if got, want := installs(fake), []string{"brew install --adopt --cask example-editor", "brew install --cask --force example-editor"}; !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+
+	fake, apps, _ = adopting(t)
+	installApp(t, apps, "Spaceman.app", "dev.fork.Spaceman")
+	line = kind.CopiedLine{Verb: []string{"install"}, Args: []string{"spaceman"}, Installs: true, New: map[string][]string{"cask": {"spaceman"}}}
+	err := withApps(fake, apps, t.TempDir()).Formulae().(kind.Liner).Line(t.Context(), line)
+	if err == nil || !strings.Contains(err.Error(), "Spaceman.app is already in "+apps+" and isn't the cask's (dev.fork.Spaceman)") || len(installs(fake)) != 0 {
+		t.Errorf("Line = %v, running %q; want it refused, nothing installed", err, installs(fake))
 	}
 }

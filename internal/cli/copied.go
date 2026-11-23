@@ -9,50 +9,71 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/leeovery/kit/internal/check"
-	"github.com/leeovery/kit/internal/engine"
-	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// A line copied for a kind's program, as a README gives it, with kit and
-// the kind's name in front: kit brew install --cask --force owner/tap/tool.
-// The program runs it as given, then kit-config records each name it
-// installed, or stops recording each it uninstalled: names alone, never
-// the line's flags.
-
-// newLineCommands are kit <kind> install and uninstall, for a kind whose
-// command takes a line copied for its program (kind.LineHelp).
-func newLineCommands(a *app, d kind.Descriptor) []*cobra.Command {
+// addLineCommands adds kit <kind> install and uninstall to cmd, for a kind
+// whose command takes a line copied for its program (kind.LineHelp), as a
+// README gives it, with kit and the kind's name in front: kit brew install
+// --cask --force owner/tap/tool. The program runs it as given, then
+// kit-config records each name it installed, or stops recording each it
+// uninstalled: names alone, never the line's flags. A verb of more than
+// one word has a command of kit's for each word before its last, as in kit
+// gh extension install.
+func addLineCommands(a *app, cmd *cobra.Command, d kind.Descriptor) {
 	l := d.Help.Line
-	program, install, uninstall := d.Name, l.Install, l.Uninstall
-	installs := a.lineCommand(d, install,
+	noun, program := d.Name, l.Program
+	install, uninstall := strings.Join(l.Install.Words, " "), strings.Join(l.Uninstall.Words, " ")
+	installs := a.lineCommand(d, l.Install, true,
 		fmt.Sprintf("Run a copied %s %s line, then declare what it installed", program, install),
 		paragraphs(
-			fmt.Sprintf("Run a line copied for %[1]s %[2]s, as a README gives it, with kit in front: kit %[1]s %[2]s %[3]s runs %[1]s %[2]s %[3]s, its output shown as it goes.", program, install, l.Example),
+			fmt.Sprintf("Run a line copied for %[1]s %[2]s, as a README gives it, with kit in front: kit %[3]s %[2]s %[4]s runs %[1]s %[2]s %[4]s, its output shown as it goes.", program, install, noun, l.Example),
 			fmt.Sprintf("Then each name it installed is declared for this Mac, or every Mac with --shared, %s. "+
 				"The line's flags are this install's alone: kit-config records the names. "+
-				"A name declared already stays as it is, and one that didn't install isn't declared. "+
-				"The change is committed and pushed to the config repository.", l.Declares),
+				"A name installed already is declared too, and one that didn't install isn't. "+
+				"With %s, nothing is declared. "+
+				"The change is committed and pushed to the config repository.", l.Declares, strings.Join(l.DryRun, " or ")),
+			fmt.Sprintf("Before anything runs, each name is checked as kit %[1]s add checks it, and the whole line is refused if one can't be declared, "+
+				"or needs an administrator's password with no terminal to ask at. %[2]s", noun, l.Install.More),
 			fmt.Sprintf("kit's own flags in the line are --shared, and --note, which records why after each name: %[1]s has neither. "+
-				"kit's other flags, such as --plain, go before %[1]s, never in the line. "+
-				"A file's path or an address, in place of a name, is refused before anything runs.", program),
+				"kit's other flags, such as --plain, go before %[2]s, never in the line. "+
+				"A file's path or an address, in place of a name, is refused before anything runs.", program, noun),
 		))
 	installs.Flags().Bool("shared", false, "declare for every Mac, not this one alone")
 	installs.Flags().String("note", "", "why it's declared, kept after each name")
-	uninstalls := a.lineCommand(d, uninstall,
+	uninstalls := a.lineCommand(d, l.Uninstall, false,
 		fmt.Sprintf("Run a copied %s %s line, then undeclare what it uninstalled", program, uninstall),
 		paragraphs(
-			fmt.Sprintf("Run a line copied for %[1]s %[2]s, with kit in front, as kit %[1]s %[3]s does, "+
-				"then take each name no longer installed out of this Mac's declarations file. "+
-				"One declared for every Mac needs --shared, which takes it out of the shared file, every Mac's list: without it, nothing runs. "+
-				"A name still installed stays declared. The change is committed and pushed to the config repository.", program, uninstall, install),
-			fmt.Sprintf("kit's own flag in the line is --shared; kit's other flags go before %s.", program),
+			fmt.Sprintf("Run a line copied for %[1]s %[2]s, with kit in front, as kit %[3]s %[4]s does, "+
+				"then take each name no longer installed out of this Mac's declarations file, by whichever name it's declared: "+
+				"the one given, its short name or its full one. "+
+				"A name still installed stays declared. The change is committed and pushed to the config repository.", program, uninstall, noun, install),
+			fmt.Sprintf("One declared for every Mac needs --shared, which takes it out of the shared file, every Mac's list: "+
+				"without it, the whole line is refused before anything runs. %s", l.Uninstall.More),
+			fmt.Sprintf("kit's own flag in the line is --shared; kit's other flags go before %s.", noun),
 		))
 	uninstalls.Flags().Bool("shared", false, "take it out of the shared file, every Mac's list")
-	return []*cobra.Command{installs, uninstalls}
+	parentOf(cmd, l.Install.Words, program).AddCommand(installs)
+	parentOf(cmd, l.Uninstall.Words, program).AddCommand(uninstalls)
+}
+
+// parentOf is the command under cmd that holds the command of a verb's
+// last word, of words: one for each word before it, made when it isn't
+// there yet.
+func parentOf(cmd *cobra.Command, words []string, program string) *cobra.Command {
+	for _, word := range words[:len(words)-1] {
+		i := slices.IndexFunc(cmd.Commands(), func(c *cobra.Command) bool { return c.Name() == word })
+		if i >= 0 {
+			cmd = cmd.Commands()[i]
+			continue
+		}
+		sub := &cobra.Command{Use: word, Short: fmt.Sprintf("Run a copied %s %s line", program, word)}
+		cmd.AddCommand(sub)
+		cmd = sub
+	}
+	return cmd
 }
 
 // paragraphs is a command's long help, of paragraphs, each wrapped to fit
@@ -65,36 +86,40 @@ func paragraphs(paras ...string) string {
 	return strings.Join(wrapped, "\n\n")
 }
 
-// lineCommand is kit <kind> <verb>, running a line copied for d's program's
-// verb. cobra reads none of its flags, as the line's are the program's:
-// kit's own in it are picked out by hand (readLine), and kit's other flags,
-// before its name, are read as it starts (lineAfter).
-func (a *app) lineCommand(d kind.Descriptor, verb, short, long string) *cobra.Command {
-	var line []string
+// lineCommand is kit <kind> <verb>, running a line copied for d's
+// program's verb v, which installs or uninstalls. cobra reads none of its
+// flags, as the line's are the program's: kit's own in it are picked out
+// by hand (readLine), and kit's other flags, before its name, are read as
+// it starts (lineAfter).
+func (a *app) lineCommand(d kind.Descriptor, v kind.LineVerb, installs bool, short, long string) *cobra.Command {
+	var given []string
+	h := d.Help.Line
 	return &cobra.Command{
-		Use:                verb + " <name>...",
+		Use:                v.Words[len(v.Words)-1] + " <name>...",
+		Aliases:            v.Aliases,
 		Short:              short,
 		Long:               long,
 		DisableFlagParsing: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) (err error) {
-			line, err = a.lineAfter(cmd)
+			given, err = a.lineAfter(cmd)
 			return err
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			l, err := readLine(line, verb == d.Help.Line.Install)
+			l, err := readLine(given, installs)
 			switch {
 			case err != nil:
 				return usageError{err}
 			case l.help:
 				return cmd.Help()
 			}
-			names, err := d.Help.Line.Names(l.args)
-			if err != nil {
+			if l.names, err = h.Names(l.args); err != nil {
 				return err
 			}
-			command := strings.Join(slices.Concat([]string{d.Name, verb}, l.args), " ")
-			return a.preparedAs(cmd.Context(), command, d.Name+"-"+verb, func(ctx context.Context, r *run) error {
-				return a.runLine(ctx, r, d, verb, l, once(names))
+			l.names, l.verb, l.installs = once(l.names), v.Words, installs
+			l.dryRun = slices.ContainsFunc(l.args, func(arg string) bool { return slices.Contains(h.DryRun, arg) })
+			command := strings.Join(slices.Concat([]string{d.Name}, v.Words, l.args), " ")
+			return a.preparedAs(cmd.Context(), command, d.Name+"-"+strings.Join(v.Words, "-"), func(ctx context.Context, r *run) error {
+				return a.runLine(ctx, r, d, l)
 			})
 		},
 	}
@@ -104,7 +129,8 @@ func (a *app) lineCommand(d kind.Descriptor, verb, short, long string) *cobra.Co
 // cmd being one that takes a line copied for a program, as kit starts, and
 // returns the line: what's after its name. cobra gives cmd both, run
 // together, and the line can hold flags of kit's names, as brew's
-// --verbose, which are the program's.
+// --verbose, which are the program's. kit's own take no values, so a word
+// that isn't a flag is a command's name.
 func (a *app) lineAfter(cmd *cobra.Command) ([]string, error) {
 	words := len(strings.Fields(cmd.CommandPath())) - 1
 	var before []string
@@ -125,19 +151,23 @@ func (a *app) lineAfter(cmd *cobra.Command) ([]string, error) {
 	return nil, fmt.Errorf("%s isn't in kit's command line", cmd.CommandPath())
 }
 
-// copiedLine is a line copied for a kind's program, kit's own flags taken
-// out of it: --shared; --note, for an install; and -h or --help, which
-// show kit's help.
+// copiedLine is a line copied for a kind's program: the program's verb, as
+// words, and whether it installs; the arguments after it, kit's own flags
+// taken out: --shared; --note, for an install; and -h or --help, which
+// show kit's help; the names in it; and whether it's a dry run.
 type copiedLine struct {
-	args   []string
-	shared bool
-	note   string
-	help   bool
+	verb, args, names []string
+	installs, dryRun  bool
+	shared, help      bool
+	note              string
 }
 
+// errNoteUninstalling is --note given to an uninstall.
+var errNoteUninstalling = errors.New("--note records why a name's declared: an uninstall declares nothing, so takes none")
+
 // readLine takes kit's own flags out of args, a line copied for a program,
-// --note among them when notes says so, its value after it or after an =.
-func readLine(args []string, notes bool) (copiedLine, error) {
+// --note among them for an install, its value after it or after an =.
+func readLine(args []string, installs bool) (copiedLine, error) {
 	var l copiedLine
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -147,12 +177,14 @@ func readLine(args []string, notes bool) (copiedLine, error) {
 			l.shared = true
 		case arg == "-h" || arg == "--help":
 			l.help = true
-		case notes && noted:
+		case (noted || arg == "--note") && !installs:
+			return l, errNoteUninstalling
+		case noted:
 			l.note = note
-		case notes && arg == "--note" && i+1 < len(args):
+		case arg == "--note" && i+1 < len(args):
 			i++
 			l.note = args[i]
-		case notes && arg == "--note":
+		case arg == "--note":
 			return l, errors.New("--note needs a value: why it's declared")
 		default:
 			l.args = append(l.args, arg)
@@ -161,65 +193,17 @@ func readLine(args []string, notes bool) (copiedLine, error) {
 	return l, nil
 }
 
-// runLine runs l through the program of d's kind, then has each of names
-// declared, installed, or undeclared, uninstalled, a step each, and one
-// commit and push of the config's changes. Uninstalling, a name declared
-// for every Mac is refused without --shared, before anything runs.
-func (a *app) runLine(ctx context.Context, r *run, d kind.Descriptor, verb string, l copiedLine, names []string) error {
-	liner, ks, err := copiedKinds(r, d, l.args)
-	if err != nil {
-		return err
-	}
-	installing := verb == d.Help.Line.Install
-	if !installing {
-		if err := sharedRefused(r, ks, names, l.shared); err != nil {
-			return err
-		}
-	}
-	ctx, _, stop := a.holdAdmin(ctx, r, adminWanted(ks, names))
-	defer stop()
-	words, doing := d.Installs(), "declaring"
-	if !installing {
-		words, doing = d.Removes(), "undeclaring"
-	}
-	program := liner.Program()
-	steps := []event.Step{{Name: program, Title: program}}
-	doings := map[string]string{program: words.Doing}
-	for _, name := range names {
-		steps = append(steps, event.Step{Name: name, Title: name})
-		doings[name] = doing
-	}
-	c := startChangesOf(r, steps, doings)
-	c.step(ctx, program, func(ctx context.Context) check.Result {
-		if err := liner.Line(event.WithChanging(ctx), verb, l.args); err != nil {
-			return check.Result{State: check.Failed, Reason: couldnt(words) + engine.Reason(err)}
-		}
-		return check.Result{State: check.OK, Summary: words.Done}
-	})
-	found := &lookup{kinds: ks, names: names, listed: map[string]listing{}}
-	for _, name := range names {
-		c.step(ctx, name, func(ctx context.Context) check.Result {
-			if installing {
-				return declareInstalled(ctx, r, c, found, name, l)
-			}
-			return undeclareUninstalled(ctx, c, found, name, l.shared, words)
-		})
-	}
-	c.sync(ctx, commitMessage(verb, d.Name, c.whoWrote(names), r.machine, l.note))
-	return c.finish()
-}
-
 // copiedKinds are the run's kind d describes, which runs a line, and the
 // kinds the things args, its line, names can be, in the order its program
 // takes a name more than one has.
-func copiedKinds(r *run, d kind.Descriptor, args []string) (lineRunner, []kind.Kind, error) {
+func copiedKinds(r *run, d kind.Descriptor, args []string) (kind.Liner, []kind.Kind, error) {
 	k, err := r.kindNamed(d.Name)
 	if err != nil {
 		return nil, nil, err
 	}
-	liner, ok := k.(lineRunner)
+	liner, ok := k.(kind.Liner)
 	if !ok {
-		return nil, nil, fmt.Errorf("kit %s runs no line of %s's", d.Name, k.Program())
+		return nil, nil, fmt.Errorf("kit %s runs no line of %s's", d.Name, d.Help.Line.Program)
 	}
 	var ks []kind.Kind
 	for _, name := range d.Help.Line.Kinds(args) {
@@ -232,100 +216,19 @@ func copiedKinds(r *run, d kind.Descriptor, args []string) (lineRunner, []kind.K
 	return liner, ks, nil
 }
 
-// adminWanted are names, as the things of each of ks that can need an
-// administrator's password to install or uninstall would be, for kit to
-// ask for it first, when one does (holdAdmin).
-func adminWanted(ks []kind.Kind, names []string) map[string][]string {
-	wanted := map[string][]string{}
-	for _, k := range ks {
-		if _, ok := k.(kind.Admin); ok {
-			wanted[k.Name()] = names
-		}
-	}
-	return wanted
-}
-
-// lineRunner is a kind that runs a line copied for its program.
-type lineRunner interface {
-	kind.Kind
-	kind.Liner
-}
-
-// sharedRefused says why uninstalling names, things of ks, is refused
-// without shared: one's declared for every Mac.
-func sharedRefused(r *run, ks []kind.Kind, names []string, shared bool) error {
-	if shared {
-		return nil
-	}
-	for _, name := range names {
-		for _, k := range ks {
-			inShared, err := declaredShared(r, k.Name(), name)
-			if err != nil {
-				return err
-			}
-			if inShared {
-				return fmt.Errorf("%s is %s; nothing was uninstalled", name, everyMac)
-			}
-		}
-	}
-	return nil
-}
-
-// declareInstalled declares name, a name in l, as the thing it's installed
-// as, found, as kit <kind> add declares a thing installed already; one
-// that isn't installed isn't declared.
-func declareInstalled(ctx context.Context, r *run, c *changes, found *lookup, name string, l copiedLine) check.Result {
-	k, err := found.as(ctx, name)
-	switch {
-	case err != nil:
-		return check.Result{State: check.Failed, Reason: "couldn't tell whether it's installed: " + err.Error()}
-	case k == nil:
-		return check.Result{State: check.Failed, Reason: "couldn't declare: it isn't installed"}
-	}
-	verb := descriptorOf(k).Installs().Done
-	if h := descriptorOf(k).Help; len(found.kinds) > 1 && h != nil && h.One != "" {
-		verb += " as " + h.One
-	}
-	mine, err := declaredFor(r, k.Name(), name, l.shared)
-	if err != nil {
-		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
-	}
-	opts := addOptions{shared: l.shared, note: l.note}
-	return declareAdding(ctx, r, c, k, r.scope(l.shared), name, opts, verb, adding{mine: mine})
-}
-
-// undeclareUninstalled takes name, a name in a line that uninstalled
-// things, said as words, out of this Mac's declarations, and the shared
-// ones with shared, of each kind found looks in, once it's installed as
-// none of them: one still installed stays declared.
-func undeclareUninstalled(ctx context.Context, c *changes, found *lookup, name string, shared bool, words kind.Words) check.Result {
-	k, err := found.as(ctx, name)
-	switch {
-	case err != nil:
-		return check.Result{State: check.Failed, Reason: "couldn't tell whether it's installed: " + err.Error()}
-	case k != nil:
-		return check.Result{State: check.Failed, Reason: "couldn't undeclare: it's still installed"}
-	}
-	var from []string
-	for _, k := range found.kinds {
-		out, err := c.undeclareHere(k.Name(), name, shared)
-		if err != nil {
-			return check.Result{State: check.Failed, Reason: words.Done + ", but couldn't undeclare: " + err.Error()}
-		}
-		from = append(from, out...)
-	}
-	if len(from) == 0 {
-		return check.Result{State: check.OK}.Saying(words.Done, "it wasn't declared")
-	}
-	return check.Result{State: check.OK}.Saying(words.Done, "out of "+strings.Join(once(from), " and "))
-}
-
 // lookup finds what a line's names are installed as, of kinds, the kinds
-// its things can be, each kind's things listed once.
+// its things can be, each kind's things listed once, and each name's full
+// name resolved once.
 type lookup struct {
 	kinds  []kind.Kind
 	names  []string
 	listed map[string]listing
+	full   map[string]string
+}
+
+// newLookup is a lookup of names, things of kinds, as they are now.
+func newLookup(kinds []kind.Kind, names []string) *lookup {
+	return &lookup{kinds: kinds, names: names, listed: map[string]listing{}, full: map[string]string{}}
 }
 
 // listing is what a kind has installed, as listed, or why it couldn't be.
@@ -335,31 +238,60 @@ type listing struct {
 }
 
 // as is the kind of kinds name is installed as: the first listing it by
-// the name given, else the first listing it by its full name, as that
-// kind resolves it, as an alias names a formula; nil for none.
+// the name given; else the first that knows it, when that one lists it by
+// its full name, as an alias names a formula; nil for none.
 func (l *lookup) as(ctx context.Context, name string) (kind.Kind, error) {
-	for _, resolve := range []bool{false, true} {
-		for _, k := range l.kinds {
-			if in, err := l.has(ctx, k, name, resolve); err != nil || in {
-				return k, err
-			}
+	for _, k := range l.kinds {
+		all, err := l.list(ctx, k)
+		if err != nil || listsName(all, name) {
+			return k, err
 		}
+	}
+	for _, k := range l.kinds {
+		full, err := l.resolved(ctx, k, name)
+		switch {
+		case err != nil:
+			return nil, err
+		case full == "":
+			continue
+		}
+		if all, _ := l.list(ctx, k); listsName(all, full) {
+			return k, nil
+		}
+		return nil, nil
 	}
 	return nil, nil
 }
 
-// has reports whether k lists name installed: by the name given, or, with
-// resolve, by its full name, as k resolves it.
-func (l *lookup) has(ctx context.Context, k kind.Kind, name string, resolve bool) (bool, error) {
-	all, err := l.list(ctx, k)
-	if err != nil || !resolve {
-		return listsName(all, name), err
+// settle is the kind of kinds name is, and whether it's installed: the
+// one it's installed as; else the first that knows it, as its program
+// installs a name more than one kind has; nil when none does.
+func (l *lookup) settle(ctx context.Context, name string) (kind.Kind, bool, error) {
+	if k, err := l.as(ctx, name); err != nil || k != nil {
+		return k, k != nil, err
+	}
+	for _, k := range l.kinds {
+		full, err := l.resolved(ctx, k, name)
+		if err != nil || full != "" {
+			return k, false, err
+		}
+	}
+	return nil, false, nil
+}
+
+// resolved is name's full name, as k resolves it, once: "" when k doesn't
+// know it.
+func (l *lookup) resolved(ctx context.Context, k kind.Kind, name string) (string, error) {
+	key := k.Name() + ":" + name
+	if full, ok := l.full[key]; ok {
+		return full, nil
 	}
 	full, err := kind.Resolve(ctx, k, []string{name})
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	return full[name] != "" && listsName(all, full[name]), nil
+	l.full[key] = full[name]
+	return full[name], nil
 }
 
 // list is what k has installed, listed the first time it's asked: nothing
@@ -380,4 +312,34 @@ func (l *lookup) list(ctx context.Context, k kind.Kind) ([]kind.Installed, error
 // name is taken.
 func listsName(all []kind.Installed, name string) bool {
 	return slices.ContainsFunc(all, func(it kind.Installed) bool { return strings.EqualFold(it.Name, name) })
+}
+
+// declaredAs are the names each of names, things of k, is declared by in
+// this Mac's list, shared or its own: as given, or a tap's thing by its
+// short name or its full one (sameThing); else, with resolve, by any that's
+// the same thing as k resolves them, as an alias, resolved all at once.
+func declaredAs(ctx context.Context, r *run, k kind.Kind, names []string, resolve bool) (map[string][]string, error) {
+	declared := r.lists[k.Name()].Names()
+	as := map[string][]string{}
+	var unmatched []string
+	for _, name := range names {
+		if i := slices.IndexFunc(declared, func(d string) bool { return sameThing(strings.ToLower(d), strings.ToLower(name)) }); i >= 0 {
+			as[name] = declared[i : i+1]
+		} else {
+			unmatched = append(unmatched, name)
+		}
+	}
+	if !resolve || len(unmatched) == 0 || len(declared) == 0 {
+		return as, nil
+	}
+	full, err := kind.Resolve(ctx, k, once(slices.Concat(unmatched, declared)))
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range unmatched {
+		if thing, ok := full[name]; ok {
+			as[name] = slices.DeleteFunc(slices.Clone(declared), func(d string) bool { return !strings.EqualFold(full[d], thing) })
+		}
+	}
+	return as, nil
 }

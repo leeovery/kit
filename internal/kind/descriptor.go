@@ -107,13 +107,19 @@ type Help struct {
 
 // LineHelp is how a kind's command takes a line copied for its program,
 // as a README gives it, with kit in front, as in kit brew install --cask
-// firefox: the program's verbs that install and uninstall, each a command
-// of kit's of the same name.
+// firefox: the program, as typed; and its verbs that install and
+// uninstall, each a command of kit's of the same words.
 type LineHelp struct {
-	Install, Uninstall string
+	Program            string
+	Install, Uninstall LineVerb
 	// Example is a line's arguments, as its help shows one; Declares says
 	// what each name the line installed is declared as.
 	Example, Declares string
+	// DryRun are the flags that have the program only say what it would
+	// do: a line with one declares nothing. Zap is the flag an uninstall
+	// removes what an app leaves with, as kit's --zap does: "" for none.
+	DryRun []string
+	Zap    string
 	// Names are the names in a line's arguments, its flags and their
 	// values left out: an error when there are none, or one is something
 	// kit-config can't declare, as a file's path or an address.
@@ -121,6 +127,15 @@ type LineHelp struct {
 	// Kinds are the kinds' names a line's things can be, as its arguments
 	// say, in the order the program takes a name more than one has.
 	Kinds func(args []string) []string
+}
+
+// LineVerb is a verb of a program's a line starts with: its words, as in
+// gh's extension install, each but the last a command of kit's holding
+// the next; the other words its last goes by, as npm's i for install; and
+// what else its command's help says, of what kit does for the program.
+type LineVerb struct {
+	Words, Aliases []string
+	More           string
 }
 
 // SwitchHelp is what kit <name> on and off do, for a kind whose things can

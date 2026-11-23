@@ -1,6 +1,7 @@
 package brew
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -14,28 +15,67 @@ import (
 // lineHelp is how kit brew takes a line copied for brew: kit brew install
 // --cask firefox.
 var lineHelp = &kind.LineHelp{
-	Install: "install", Uninstall: "uninstall",
+	Program: "brew",
+	Install: kind.LineVerb{Words: []string{"install"}, More: "kit adds --adopt to a line of casks it can vet, as its own cask installs do, " +
+		"so the app already there is taken over, or replaced when it's an older copy of the same major version; not to a line with --adopt or --force."},
+	Uninstall: kind.LineVerb{Words: []string{"uninstall"}, More: "With --zap, an app's settings kit prefs saved go too, as with kit cask remove --zap; " +
+		"without it, they're kept."},
 	Example:  "--cask --force owner/tap/tool",
 	Declares: "as a cask or a formula, whichever brew installed it as, a tap's named with its tap",
+	DryRun:   []string{"-n", "--dry-run"},
+	Zap:      "--zap",
 	Names:    lineNames, Kinds: lineKinds,
 }
 
-// Line runs brew's verb, install or uninstall, with args, a line copied
-// for brew, as given, in Homebrew's turn to change things, watched for
-// going quiet, its sudo asking kit for an administrator's password, as
-// kit's own installs and uninstalls run: an install after brew update, as
-// kit runs brew without updating itself.
-func (f formulae) Line(ctx context.Context, verb string, args []string) error {
-	words := kind.UninstallWords
-	cmd := runner.Command{Name: "brew", Args: slices.Concat([]string{verb}, args)}
-	if verb == lineHelp.Install {
-		words = kind.InstallWords
-		names, _ := lineNames(args)
-		cmd.Timeout = installTimeout(len(names))
-		f.updated(ctx)
+// Line runs l, a line copied for brew, as given, in Homebrew's turn to
+// change things, watched for going quiet, its sudo asking kit for an
+// administrator's password, as kit's own installs and uninstalls run. An
+// install runs after brew update, as kit runs brew without updating
+// itself, and adopts the apps already there of the casks it installs, as
+// kit's own cask installs do (lineAdoption).
+func (f formulae) Line(ctx context.Context, l kind.CopiedLine) error {
+	cmd := runner.Command{Name: "brew", Args: slices.Concat(l.Verb, l.Args)}
+	if !l.Installs {
+		defer f.take(ctx, f.Name())()
+		return f.watched(ctx, kind.UninstallWords.Doing, f.sudoed(ctx, f.batched(cmd)))
 	}
+	names, _ := lineNames(l.Args)
+	cmd.Timeout = installTimeout(len(names))
+	f.updated(ctx)
 	defer f.take(ctx, f.Name())()
-	return f.watched(ctx, words.Doing, f.sudoed(ctx, f.batched(cmd)))
+	c := casks(f)
+	a, adopting := c.lineAdoption(ctx, l)
+	if len(a.refused) > 0 {
+		return kind.Joined(a.refused)
+	}
+	if adopting {
+		cmd.Args = slices.Concat(l.Verb, []string{"--adopt"}, l.Args)
+	}
+	err := f.watched(ctx, kind.InstallWords.Doing, f.sudoed(ctx, f.batched(cmd)))
+	if err != nil && adopting {
+		return kind.Joined(c.replace(ctx, a, err))
+	}
+	return err
+}
+
+// lineAdoption is how the casks l installs, that aren't installed yet, go
+// in, each as kit's own install of it would (adoption), and whether l's to
+// adopt their apps already there: when it doesn't say how itself, with
+// --adopt or --force, which Homebrew refuses together, and every one is a
+// cask kit can vet; one kit can't, as a tap's, has the line run as given.
+func (c casks) lineAdoption(ctx context.Context, l kind.CopiedLine) (adoption, bool) {
+	if slices.ContainsFunc(l.Args, func(arg string) bool { return arg == "--adopt" || arg == "--force" || arg == "-f" }) {
+		return adoption{}, false
+	}
+	var all adoption
+	for _, name := range l.New[casksName] {
+		a := c.adoption(ctx, []string{name})
+		all.dir = cmp.Or(all.dir, a.dir)
+		all.adopt = append(all.adopt, a.adopt...)
+		all.plain = append(all.plain, a.plain...)
+		all.refused = append(all.refused, a.refused...)
+	}
+	return all, len(all.adopt) > 0 && len(all.plain) == 0
 }
 
 // lineNames are the names in args, a line for brew install or uninstall:

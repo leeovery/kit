@@ -170,7 +170,7 @@ on.`
 	}
 	cmd.AddCommand(add, remove)
 	if n.Line != nil {
-		cmd.AddCommand(newLineCommands(a, d)...)
+		addLineCommands(a, cmd, d)
 	}
 	if n.Switch != nil {
 		cmd.AddCommand(switchCommands(a, d)...)
