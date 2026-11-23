@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-23
+
+Run a copied install line through kit, and keep apps you installed by hand in step with Homebrew.
+
+✨ Added
+- Put kit in front of a copied install or uninstall line, as in `kit brew install jq`, `kit npm install -g typescript`, `kit mas install <id>`, `kit gh extension install owner/gh-tool` or `kit composer global require vendor/pkg` — the program runs it, then kit declares or undeclares what changed and commits and pushes once.
+- Apps installed by hand that a Homebrew cask installs now show up as drift — adopt them (`kit reconcile cask:<name> --adopt`), or use `--leave` to keep one by hand and stop being asked about it.
+- `kit setup` asks which apps installed by hand Homebrew should take over, with `--adopt <cask>` and `--no-adopt` — chosen casks are declared and the following apply takes the apps over, and the rest are left by hand.
+- Installing a cask now takes over an app already in /Applications that is the cask's, or replaces an older copy of the same major version — a clear reason is given when it won't.
+- Settings kit prefs saved are restored for each app a line installs, naming the app when several are installed at once.
+
+🔧 Changed
+- Homebrew's folders are now added to kit's and the shell's PATH automatically, after the folders you declare — new configs no longer write them into a shared declarations file.
+- A new kit-config no longer starts with a shared folder — it is created with the first `--shared` declaration.
+- Finding which apps casks installed is faster, read from Homebrew's install receipts rather than `brew info`.
+- Credentials in npm settings and passwords or tokens in addresses are now hidden in kit's output.
+
+🐛 Fixed
+- Failed installs no longer skip restoring saved settings for apps that did get installed.
+
 ## [0.4.3] - 2026-11-22
 
 🐛 Fixed
