@@ -289,6 +289,50 @@ its line out.
 If you keep yours, the app stays as it is. If the cask is in the shared file, add `--shared`.
 That takes the cask off every Mac: no answer keeps a shared cask off one Mac only.
 
+## kit refuses a copied line
+
+```text
+kit: dash isn't a repository: give gh one, as owner/gh-dash; nothing was installed
+```
+
+**Cause:** kit refuses a [copied line](glossary.md) if it can't declare every name in it, or
+can't ask for a password the line needs. It refuses the whole line before anything runs.
+
+**Fix:** change the line as the message says, then run it again:
+
+| If kit says | Fix |
+|---|---|
+| `isn't a repository` | Give gh `owner/gh-name` |
+| `isn't global` | Add `-g` to the npm line |
+| `is a file or an address` | Give the package's name |
+| `isn't an App Store app's id` | Give mas the app's id |
+| `declared for every Mac` | Add `--shared` to the uninstall |
+| `needs an administrator's password` | Run the line at a terminal |
+
+## kit npm add -g fails with "unknown shorthand flag"
+
+```text
+kit: unknown shorthand flag: 'g' in -g
+```
+
+**Cause:** `kit npm add` and `kit npm remove` are kit commands of their own. A line with npm's
+`add`, `remove` or `rm` reaches them, and they take no `-g`.
+
+**Fix:** use `install` and `uninstall` in the line: `kit npm install -g <name>` or
+`kit npm uninstall -g <name>`. Or drop the `-g`, and use `kit npm add <name>`.
+
+## kit mas uninstall says "no App Store app has the id"
+
+```text
+kit: no App Store app has the id 123456789; nothing was uninstalled
+```
+
+**Cause:** `kit mas uninstall` looks each id up in the App Store first, to know the app. An app
+the App Store no longer has fails that lookup.
+
+**Fix:** uninstall it with `kit mas remove`, which takes the app as kit-config declares it.
+`kit list mas` shows that name.
+
 ## kit.app needs Full Disk Access again
 
 `kit status` shows the step `kit-app-access` as `not given to this build of kit.app`.

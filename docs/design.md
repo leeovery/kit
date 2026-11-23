@@ -618,6 +618,9 @@ kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--t
 kit <kind> remove <name>...  Uninstall, and undeclare            [--shared] [--zap] [--keep] (apps)
     (brew, cask, mas, npm, composer, gh, claude-mcp, claude-skill, login-item,
      defaults, power, git-config, backup-exclusion, spotlight-exclusion)
+kit <kind> <verb> <line>...  A line copied for the kind's program, run as given, then what it installed declared   [--shared] [--note]
+    (brew install|uninstall, npm install|uninstall -g, mas install|uninstall,
+     gh extension install|remove, composer global require|remove)
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
 kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
 kit backup add|remove <tool> The backup tools this Mac uses, each checked   [--after] [--before] [--shared]
@@ -857,6 +860,50 @@ about; `--zap` on one not installed says it had nothing to remove. The kind know
 core never knows Homebrew's zap. Adding and removing both handle each name on its own (one
 failing leaves the others), then commit the config's changed files, with a message saying what, for which Mac and why, and push to
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
+
+**A copied line** (the maintainer, 23 Nov 2026: "copy and paste the command from someone's
+GitHub … and then I could just append a kit to the front and it will just work"). `kit brew
+install --cask owner/tap/tool` runs `brew install --cask owner/tap/tool` as given, through the
+runner, in the program's turn to change things, watched for going quiet, its output live, then
+declares each name it installed as `kit <kind> add` would, and commits and pushes once; its
+uninstall runs the program's, then undeclares what's gone. A kind takes a line by implementing
+`kind.Liner` (`Line` runs a `kind.CopiedLine`: the verb as typed, the arguments, whether it
+installs or is a dry run, and the names not yet installed by kind; `Refuses` judges an install
+line before anything runs) and describing it in its descriptor's `Help.Line`, a `kind.LineHelp`:
+the program, its install and uninstall `kind.LineVerb`s (words, each a command of kit's holding
+the next, as gh's `extension install`; the program's aliases for each word; its dry-run flags;
+what else the help says), how to find a line's names (`Names`) and which kinds they can be
+(`Kinds`: brew's names are formulae or casks, formulae first, as brew takes a name both have).
+`internal/cli` builds the commands from it (`addLineCommands`) and runs every line one way
+(`runLine`): brew, npm, mas, gh and Composer take one today. The rules, and why:
+- The line's flags are the program's and this install's alone; kit-config records names, as
+  kit's own add does: npm's version and Composer's constraint as typed, a tap's thing with its
+  tap, a cask declared as one when brew installed it so. A file's path or an address can't be
+  declared, so it's refused.
+- kit's own flags in the line are `--shared` and `--note` (none of these programs has either);
+  every other word goes to the program, kit's names included, as brew's `--verbose`, so kit's
+  global flags go before the kind's name (`lineAfter`). cobra parses none of the line
+  (`DisableFlagParsing`).
+- Every name is judged before anything runs, as `kit <kind> add` judges it, the
+  program's own refusals with them (`Refuses`: a cask whose app there isn't the cask's; gh's
+  extension without its owner), and the administrator's password asked for first: one refusal
+  refuses the whole line ("…; nothing was installed"), as a line half-declared would leave
+  kit-config differing from what the person meant. A name installed already is declared;
+  one that didn't install isn't; a dry run, per verb, declares nothing.
+- A plain cask line (`plainFlags` alone: `--cask`, `--casks` and those changing only brew's
+  output) gets `--adopt` added, and a replace when Homebrew won't adopt, as every kit cask
+  install has (the maintainer's yes, 23 Nov 2026); any other flag may change where or how it
+  installs, so the line runs exactly as given.
+- An uninstall finds each name by whichever form it's declared (`declaredAs`: brew's short or
+  full name, npm's and Composer's with or without the version, an App Store app by id, gh's by
+  its command), undeclares only what its own kind no longer has, and needs `--shared` for one
+  declared for every Mac, refusing the line whole without it. An app's kept settings go as
+  `kit cask remove` handles them: `--zap` in a brew line removes them, a mas line keeps them.
+- Known limits: npm's `add`, `remove` and `rm` are kit's own commands' names, so such a line
+  reaches `kit npm add` and fails on `-g`; `kit mas uninstall` finds each id in the App Store
+  first (`Finder`), so an app it no longer has needs `kit mas remove`.
+`kit <kind> add` and `remove` stay as they are: the line is for a command copied, add for kit's
+own way. No command's name clashes with kit's (`TestNoCommandsNamesClash`).
 
 **Moving a line.** Every command declaring for every Mac takes the name out of each Mac's own
 file in the same edit, the line moving as written, all judged before anything's stored,

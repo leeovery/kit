@@ -104,7 +104,7 @@ kit reconcile
   the one store today.
   [Secrets](docs/secrets.md)
 - **I install things with brew myself.** They show up as drift after a day, for you to keep or
-  remove.
+  remove. Put kit in front, as in `kit brew install jq`, and it declares them too.
   [Drift](docs/drift.md)
 - **Can an agent break my Mac?** kit's guide tells it to ask you before it removes anything.
   Installs that need your password wait for you at a terminal, and sign-ins are yours. [Agents](docs/agents.md)

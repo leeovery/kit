@@ -35,6 +35,10 @@ its casks once `TOKEN` has synced.
 Each kind has its own section, `add` and `remove` commands, and step. `kit --help` lists the
 kinds under Packages and Settings, and secrets under Files, secrets and features.
 
+**Copied line.** An install command copied from a README, such as `brew install jq`, run with
+kit in front: `kit brew install jq`. The program runs it as given, then kit declares each name
+it installed. A copied uninstall line, such as `kit brew uninstall jq`, undeclares instead.
+
 **Secret.** A value kept in a password manager, such as 1Password, and put in place on each Mac:
 an environment variable, or a file. kit-config holds where the value is kept, never the value.
 

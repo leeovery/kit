@@ -49,6 +49,22 @@ Claude Code has already.
 `kit claude-mcp` also has `on` and `off`. `on` installs a declared server. `off` removes a
 server from Claude Code, and keeps its line.
 
+Five of these also run a [copied line](glossary.md): an install command from a README, with kit
+in front. The program runs the line as given, then kit declares what it installed. An uninstall
+line undeclares what it took off.
+
+| Copied install | Copied uninstall |
+|---|---|
+| `kit brew install` | `kit brew uninstall` |
+| `kit npm install -g` | `kit npm uninstall -g` |
+| `kit mas install` | `kit mas uninstall` |
+| `kit gh extension install` | `kit gh extension remove` |
+| `kit composer global require` | `kit composer global remove` |
+
+In the line, only `--shared` and `--note` are kit's flags. kit's other flags go before the kind,
+as in `kit --plain brew install jq`. Each line takes the short words its program takes, such as
+`kit npm i -g`. [Packages](packages.md) covers when to use which.
+
 ## Settings
 
 Each of these has `add` and `remove`. For the first three, `add` declares a setting with the

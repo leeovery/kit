@@ -34,10 +34,66 @@ and `--zap` removes them, without asking.
 What's installed but not declared, or declared but not installed, is drift:
 `kit status` lists it, quiet for its first day, and `kit reconcile` settles
 it, as in `kit reconcile brew:jq --adopt`. Installing with brew, npm or the
-App Store by hand leaves drift, and a new Mac without it: use kit's add.
+App Store by hand leaves drift, and a new Mac without it: use kit's add, or
+kit in front of the line (below).
 
 `kit why <name>` says where a package is declared, whether it's installed,
 and what needs it; `kit list` lists everything declared for this Mac.
+
+## A copied line
+
+An install command copied for the package's own program, as a README gives
+it, runs with kit and the kind in front; its uninstall undoes it:
+
+| Line | Its uninstall's verb | Names |
+| --- | --- | --- |
+| `kit brew install` | `uninstall` | formulae and casks |
+| `kit npm install -g` | `uninstall -g` | packages |
+| `kit mas install` | `uninstall` | App Store ids |
+| `kit gh extension install` | `remove` | owner/gh-name |
+| `kit composer global require` | `remove` | packages |
+
+The program runs the line as given, its output shown; Homebrew's and mas's
+sudo ask kit for the password, as kit's own installs do. Then kit declares
+each name the line installed, as the kind's add would (`kit brew add`), for
+this Mac or with `--shared` every Mac, and commits and pushes once:
+
+- kit-config records names, never the line's flags: the force of
+  `brew install --force jq` is this install's alone. A version or
+  constraint is kept as typed, as add keeps it (`typescript@5`,
+  `vendor/pkg:^2`); a tap's name with its tap. A name brew installs as a
+  cask is declared as one, even from `brew install <name>`.
+- kit's own flags in the line are `--shared` and, for an install,
+  `--note "<why>"`; its others, as `--json`, go before the kind's name,
+  never in the line, which passes them to the program.
+- Before anything runs, each name is judged as add judges it, and one kit
+  can't declare refuses the whole line: a file's path or an address, npm
+  without `-g`, gh's extension without its owner, mas given anything but
+  ids, a cask or an App Store app needing the password with no terminal to
+  ask at.
+- A name already installed is declared, "already installed"; one the line
+  didn't install isn't. A dry run (brew's `-n` or `--dry-run`, npm's and
+  Composer's `--dry-run`, mas uninstall's `--dry-run`) declares nothing.
+- A plain cask line (`brew install --cask <name>`, with no other flags but
+  those changing only brew's output) gets `--adopt`, as kit's own cask
+  installs do: an app there that's the cask's is taken over, or an older
+  copy of its major version replaced. With any other flag the line runs as
+  given.
+- An uninstall undeclares only what's no longer installed, by whichever
+  form it's declared: brew's short or full name, npm's and Composer's with
+  or without the version, mas by id, gh by the repository or the command.
+  One declared for every Mac needs `--shared`, else the whole line is
+  refused. Brew's zap flag in the line (`brew uninstall --zap <name>`)
+  removes an app's saved settings too, as `kit cask remove --zap` does; a
+  mas line keeps them.
+
+Which to use: when the person gives you a line from a README, put kit in
+front of it; when you're choosing the package yourself, use the kind's
+add, as `kit brew add`. Known limits: npm's `add`, `remove` and `rm` reach kit's
+own `kit npm add` and `kit npm remove`, which refuse `-g`: use `install -g`
+and `uninstall -g`, or `kit npm add` without `-g`. `kit mas uninstall`
+looks each id up in the App Store first, so an app it no longer has needs
+`kit mas remove` by its declared name.
 
 ## Apps installed by hand
 
