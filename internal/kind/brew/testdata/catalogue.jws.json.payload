@@ -317,6 +317,13 @@
         [":app", ["Board.app"]]
       ]
     },
+    "google-chrome@beta": {
+      "auto_updates": true, "names": ["Google Chrome Beta"], "tap_string": "homebrew/cask", "version": "159.0.8190.4",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.google.Chrome.beta"}],
+        [":app", ["Google Chrome Beta.app"]]
+      ]
+    },
     "spaceman@classic": {
       "auto_updates": true, "names": ["Spaceman Classic"], "tap_string": "homebrew/cask", "version": "latest",
       "raw_artifacts": [

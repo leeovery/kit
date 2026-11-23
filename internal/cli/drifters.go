@@ -152,7 +152,7 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		// Never removed: kit deletes nothing it didn't install.
 		// One set of words for both: "everywhere", after the label, tells
 		// them apart, and longer words would run past a terminal's width.
-		takes := does(takingOver, "declare it; "+d.tool+" takes it over, replacing an older copy")
+		takes := does(takingOver, "declare it; "+d.tool+" takes it over as it is, or updates an older copy")
 		all = []choice{
 			{action: adopt, words: takes},
 			{action: adopt, words: takes, shared: true},
@@ -217,7 +217,7 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared, nil)
 	case install:
 		if err := kind.InstallDeclared(event.WithChanging(ctx), d.k, d.list, d.held(), []string{dec.item.Name}); err != nil {
-			return check.Result{State: check.Failed, Reason: engine.Reason(err)}
+			return check.Result{State: check.Failed, Reason: saysCouldnt(d.installing, engine.Reason(err))}
 		}
 		return check.Result{State: check.OK, Summary: d.installing.Done}
 	}

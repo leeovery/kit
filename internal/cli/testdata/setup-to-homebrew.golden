@@ -20,8 +20,8 @@
   [0;38;2;255;79;154m●[0m [0;1;38;2;244;244;246mApps' settings[0m  [0;38;2;156;163;180mevery night[0m
   [0;38;2;255;79;154m●[0m [0;1;38;2;244;244;246mLinked files[0m  [0;38;2;156;163;180m1[0m
   [0;38;2;255;162;76m▲[0m [0;1;38;2;244;244;246mTo Homebrew[0m  [0;38;2;255;162;76mwhich apps should Homebrew take over, so a new Mac gets them?[0m
-  [0;38;2;89;97;115m│[0m [0;38;2;156;163;180mHomebrew takes each over, replacing an older copy; the rest stay as they[0m
-  [0;38;2;89;97;115m│[0m [0;38;2;156;163;180mare, and kit won't ask about them again[0m
+  [0;38;2;89;97;115m│[0m [0;38;2;156;163;180mHomebrew takes each over as it is, or updates an older copy; the rest stay[0m
+  [0;38;2;89;97;115m│[0m [0;38;2;156;163;180mas they are, and kit won't ask about them again[0m
   [0;38;2;89;97;115m│[0m [0;1;38;2;255;79;154m❯[0m [0;38;2;156;163;180m□[0m [0;1;38;2;27;29;36;48;2;255;79;154m Tally [0m
 
   [0;38;2;244;244;246m↑↓[0m [0;38;2;156;163;180mchoose[0;38;2;89;97;115m · [0;38;2;244;244;246mspace[0m [0;38;2;156;163;180mticks[0;38;2;89;97;115m · [0;38;2;244;244;246menter[0m [0;38;2;156;163;180mkeeps these[0;38;2;89;97;115m · [0;38;2;244;244;246mesc[0m [0;38;2;156;163;180mstop[0m

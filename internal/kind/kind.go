@@ -142,7 +142,8 @@ type Adoptable interface {
 
 // HandFound is what an Adoptable kind finds installed by hand: the things
 // it could take over, by name; and the bundle ids of every app installed
-// by hand, those or not, as one whose version no cask takes over now.
+// by hand, those or not, including those whose version no cask takes over
+// now.
 type HandFound struct {
 	Things map[string]HandInstalled
 	Apps   []string

@@ -319,12 +319,17 @@ func TestAPackageInstallsOverItsAppOnlyAsKitWouldReplaceIt(t *testing.T) {
 // Homebrew adopts an app there unchecked for a cask that updates itself,
 // recording it as the cask's version, so such a cask goes in only as kit
 // would offer it the app: a copy of its major version or later, by the
-// version the app shows, or its build. An app of an earlier major version,
-// or whose version can't be told, isn't adopted, saying so, and naming its
-// line when there's one. A cask of the latest takes over any version only
-// when no line shares its place.
+// version the app shows, or its build, a build at or above the cask's. An
+// app of an earlier major version, or whose version can't be told, isn't
+// adopted, saying so, and naming its line when there's one. A prerelease,
+// with a channel at its place, goes in only by its channel nearest it at
+// its major version, never by the cask of releases. A cask of the latest
+// takes over any version only when no line shares its place.
 func TestACaskThatUpdatesItselfAdoptsOnlyItsMajorVersionOrLater(t *testing.T) {
-	const why = ": kit takes over only a copy of the cask's major version or later"
+	const (
+		why       = ": kit takes over only a copy of the cask's major version or later"
+		byChannel = ": kit takes over a prerelease only by its channel's cask"
+	)
 	for _, tt := range []struct {
 		name, cask, app, id, version, build, refused string
 	}{
@@ -339,6 +344,13 @@ func TestACaskThatUpdatesItselfAdoptsOnlyItsMajorVersionOrLater(t *testing.T) {
 		{"shown as a build, with none", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "", "Sublime Text.app is Build 4215 and the cask's is 4215" + why + ", and can't tell whether this one is"},
 		{"a cask of the latest, with no line", "stream", "Stream.app", "com.example.stream", "1.0", "", ""},
 		{"a cask of the latest, with a line", "board", "Board.app", "com.example.board", "2.4", "", "Board.app is 2.4 and the cask's is latest" + why + ", and can't tell whether this one is"},
+		{"a later build than the cask's", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4300", "4300", ""},
+		{"an earlier build than the cask's", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4200", "4200", "Sublime Text.app is 4200 and the cask's is 4215" + why + ", and can't tell whether this one is"},
+		{"a prerelease, beside its channel", "thaw", "Thaw.app", "com.example.thaw", "3.0.0-beta.7", "", "Thaw.app is 3.0.0-beta.7 and the cask's is 2.1.0" + byChannel + ", and thaw@beta is this one's"},
+		{"a prerelease, by its channel, nearest it", "thaw@beta", "Thaw.app", "com.example.thaw", "3.0.0-beta.8", "", ""},
+		{"a prerelease, with no channel at its major version", "firefox", "Firefox.app", "org.mozilla.firefox", "162.0a1", "", "Firefox.app is 162.0a1 and the cask's is 160.0.1" + byChannel + ", and none here is at its major version"},
+		{"a prerelease, by its channel, a week ahead of it", "1password@beta", "1Password.app", "com.1password.1password", "8.12.50-10.BETA", "", ""},
+		{"a prerelease, with no channel at its place", "bbedit", "BBEdit.app", "com.barebones.bbedit", "16.1b2", "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			installsOrRefuses(t, tt.cask, tt.refused, func(apps string) {

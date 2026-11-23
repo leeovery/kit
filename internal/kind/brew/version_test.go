@@ -8,11 +8,12 @@ import (
 	"github.com/leeovery/kit/internal/kind/brew"
 )
 
-// A version's major version is the number it starts with, whatever
-// follows; none when it starts otherwise.
+// A version's major version is the number it starts with before a dot,
+// whatever follows; none when it starts otherwise, or is a number alone, as
+// a build's.
 func TestAVersionsMajorVersion(t *testing.T) {
 	for version, want := range map[string]int{
-		"Build 4215": -1, "1.0 (123)": 1, "5.2a": 5, "3.0b2": 3, "02.09.01.70": 2, "2024.1": 2024,
+		"4215": -1, "11": -1, "Build 4215": -1, "1.0 (123)": 1, "5.2a": 5, "3.0b2": 3, "02.09.01.70": 2, "2024.1": 2024,
 		"10.0": 10, "1.2.3,456": 1, "1.2.3:abc": 1, "153.7.0esr": 153, "latest": -1, "": -1,
 	} {
 		if got := brew.Major(version); got != want {

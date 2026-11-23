@@ -50,6 +50,17 @@ func notAdopting(at, have, version, line string) error {
 	return errors.New(said)
 }
 
+// notChannel is why the app at at, a prerelease of version have, isn't
+// adopted by its cask, of version, as a channel shares its place: channel,
+// unless "", is the one whose app it is.
+func notChannel(at, have, version, channel string) error {
+	said := fmt.Sprintf("%s and the cask's is %s: kit takes over a prerelease only by its channel's cask", versionOf(at, have), version)
+	if channel != "" {
+		return errors.New(said + ", and " + channel + " is this one's")
+	}
+	return errors.New(said + ", and none here is at its major version")
+}
+
 // versionOf says the app at at is of version have.
 func versionOf(at, have string) string {
 	if have == "" {
@@ -115,13 +126,22 @@ func leading(version string) []int {
 	return dotted(leadingNumbers.FindString(version))
 }
 
-// major is version's major version, the number it starts with, as 153 of
-// 153.7.0esr: -1 when it starts otherwise.
+// major is version's major version, the number it starts with before a
+// dot, as 153 of 153.7.0esr: -1 when it starts otherwise, and for a number
+// alone, as a build's, 4215, which says no major version.
 func major(version string) int {
-	if numbers := leading(version); numbers != nil {
+	if numbers := leading(version); len(numbers) > 1 {
 		return numbers[0]
 	}
 	return -1
+}
+
+// atOrAbove reports whether have, an app's version, is version, a cask's,
+// or later, by the numbers each starts with: false when either starts with
+// none.
+func atOrAbove(have, version string) bool {
+	mine, theirs := leading(have), leading(version)
+	return mine != nil && theirs != nil && compare(mine, theirs) >= 0
 }
 
 // dottedNumbers is a version of numbers alone, as in 4.6.8.

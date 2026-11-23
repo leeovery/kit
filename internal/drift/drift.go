@@ -241,8 +241,8 @@ const handFile = "by-hand.json"
 // snooze ends, by its kind and app (handKey); and when each app was left
 // installed by hand, for good, by its bundle id, lower case. Going by the
 // app, each outlasts the cask it's matched with being renamed, or matching
-// it no more for a while, as on the app's version; a leave outlasts its
-// kind not being looked after too.
+// it no more for a while, as the app's version moves past it; a leave
+// outlasts its kind not being looked after too.
 type Hand struct {
 	FirstSeen map[string]time.Time `json:"first_seen,omitempty"`
 	Snoozed   map[string]time.Time `json:"snoozed_until,omitempty"`

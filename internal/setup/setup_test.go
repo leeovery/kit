@@ -1071,7 +1071,7 @@ func TestTheSnapshotsQuestions(t *testing.T) {
 		{"apps, given twice", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally", "tally"}}, false, nil, "ok 1 app · kit apply takes it over", ""},
 		{"apps, none", AdoptStep, nil, false, Answers{Adopt: &[]string{}}, false, nil, "ok none", ""},
 		{"apps, asked", AdoptStep, nil, false, Answers{}, true, nil, "ok 2 apps · kit apply takes them over",
-			"adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over, replacing an older copy; the rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"},
+			"adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over as it is, or updates an older copy; the rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"},
 		{"apps, no terminal", AdoptStep, nil, false, Answers{}, false, nil,
 			"failed no terminal to ask at: --adopt <cask> for each app installed by hand that Homebrew takes over, so a new Mac gets it (editor for Editor, tally for Tally, all suggested), or --no-adopt leaves them as they are, for good", ""},
 		{"apps, a cask offered for none", AdoptStep, nil, false, Answers{Adopt: &[]string{"tally", "kubius"}}, false, nil,
@@ -1261,7 +1261,7 @@ func TestSetupAdoptsTheAppsTicked(t *testing.T) {
 	if _, err := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over, replacing an older copy; the rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"}; !slices.Equal(ask.asked, want) {
+	if want := []string{"adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over as it is, or updates an older copy; the rest stay as they are, and kit won't ask about them again: Editor (ticked), Tally (ticked)"}; !slices.Equal(ask.asked, want) {
 		t.Errorf("asked %q, want %q", ask.asked, want)
 	}
 	if err := s.update(func(r *record) { r.Restore, r.Link, r.Adopt = &[]string{}, &[]string{}, &[]string{"tally"} }); err != nil {
@@ -1348,7 +1348,7 @@ func TestSetupOffersEachCaskOnce(t *testing.T) {
 	if got := said(report, AdoptStep)[0]; got != "adopt ok 4 apps · kit apply takes them over" {
 		t.Errorf("stood %q", got)
 	}
-	want := "adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over, replacing an older copy; the rest stay as they are, and kit won't ask about them again: Word and Excel office (ticked), Spark Desktop readdle-spark (ticked), Google Chrome (ticked)"
+	want := "adopt: which apps should Homebrew take over, so a new Mac gets them?\nHomebrew takes each over as it is, or updates an older copy; the rest stay as they are, and kit won't ask about them again: Word and Excel office (ticked), Spark Desktop readdle-spark (ticked), Google Chrome (ticked)"
 	if !slices.Equal(ask.asked, []string{want}) {
 		t.Errorf("asked %q\nwant %q", ask.asked, want)
 	}
