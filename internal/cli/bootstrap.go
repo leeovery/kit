@@ -31,7 +31,7 @@ import (
 
 // bootPath is the PATH a new Mac's boot runs with, before kit-config gives
 // it one: Homebrew's, once it's there, then the system's.
-var bootPath = []string{"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+var bootPath = slices.Concat(config.HomebrewPaths, []string{"/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"})
 
 func newBootstrapCommand(a *app) *cobra.Command {
 	var mac, repo string

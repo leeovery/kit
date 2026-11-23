@@ -36,9 +36,11 @@ func PathFile(dirs []string, file string) engine.Step {
 		Check: func(context.Context) check.Result {
 			data, err := os.ReadFile(file)
 			it := check.Item{ID: "path:shell", Name: "the shell's PATH", Action: ActionWrite}
+			summary := "not as [paths] says"
 			switch {
 			case errors.Is(err, fs.ErrNotExist):
 				it.State, it.Detail = "missing", "kit hasn't written it"
+				summary = it.Detail
 			case err != nil:
 				return failed(err)
 			case string(data) == want:
@@ -46,7 +48,7 @@ func PathFile(dirs []string, file string) engine.Step {
 			default:
 				it.State, it.Detail = "changed", "[paths] has changed since kit wrote it"
 			}
-			return check.Result{State: check.Attention, Summary: "not as [paths] says", Items: []check.Item{it}}
+			return check.Result{State: check.Attention, Summary: summary, Items: []check.Item{it}}
 		},
 		Apply: func(context.Context, check.Result) error {
 			return writeWhole(file, []byte(want), 0o700)

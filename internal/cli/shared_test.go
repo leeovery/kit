@@ -30,6 +30,26 @@ func (w *world) noShared(t *testing.T) {
 	}
 }
 
+// A new kit-config declares no [paths], and the shell's PATH is to write
+// all the same, as kit hasn't written it: the first kit apply writes
+// Homebrew's folders into it.
+func TestTheFirstApplyWritesHomebrewsFoldersForTheShell(t *testing.T) {
+	w := soloWorld(t)
+	if err := os.Remove(filepath.Join(w.home, ".local", "state", "kit", "path")); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "path ok kit hasn't written it\n") || !strings.Contains(out, "path missing:new the shell's PATH (kit hasn't written it) (to write)\n") {
+		t.Errorf("kit status, the shell's PATH never written, printed\n%s", out)
+	}
+	w.fake.On("brew", "uninstall", "--formula", "ffmpeg")
+	if out, errOut, code := w.run(t, "apply"); code != 0 || !strings.Contains(out, "path wrote the shell's PATH\n") {
+		t.Errorf("kit apply printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got, want := w.read(t, filepath.Join(".local", "state", "kit", "path")), "/opt/homebrew/bin:/opt/homebrew/sbin\n"; got != want {
+		t.Errorf("the shell's PATH = %q, want %q", got, want)
+	}
+}
+
 // A kit-config with no shared folder is read as one whose shared file
 // declares nothing: kit status, kit apply and kit machine add, with and
 // without --from, work as ever, and none of them makes the folder.

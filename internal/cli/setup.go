@@ -262,8 +262,8 @@ func (a *app) applyAfterSetup(ctx context.Context, doc *built) error {
 // offPath are the folders off kit's PATH setup's snapshot looks along for
 // a kind's program kit's PATH doesn't find, in order: the PATH setup was
 // run with, the person's shell's, as it finds the program they use; then
-// the boot's, for a shell without /usr/local/bin, Homebrew's and the
-// system's being on kit's PATH already.
+// the boot's, for /usr/local/bin: Homebrew's and the system's are on kit's
+// PATH already.
 func offPath(getenv func(string) string) []string {
 	return slices.Concat(filepath.SplitList(getenv("PATH")), bootPath)
 }

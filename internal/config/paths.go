@@ -76,9 +76,7 @@ func (c *Config) PathLists(home, mac string) (PathLists, error) {
 	return PathLists{Own: own, Shared: shared}, nil
 }
 
-// Shell is the shell's PATH p makes (ShellPath): the Mac's directories,
-// then the shared ones, then Homebrew's, each once, in the place it first
-// appears.
+// Shell is the shell's PATH p makes, in ShellPath's order.
 func (p PathLists) Shell() []string {
 	var out []string
 	for _, dir := range slices.Concat(p.Own, p.Shared, HomebrewPaths) {

@@ -80,6 +80,17 @@ func TestRemovePathSharedOfARaisedFolder(t *testing.T) {
 	}
 }
 
+// One of Homebrew's, removed with --shared while another Mac's own line
+// raises it, says where that Mac keeps it, as any folder does.
+func TestRemovePathSharedOfARaisedHomebrewFolder(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "studio", "paths", "/opt/homebrew/bin\n")
+	w.expectSync(t, []string{"shared/declarations"}, "kit path remove /opt/homebrew/bin (laptop)")
+	if out, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin", "--shared"); code != 0 || !strings.Contains(out, "/opt/homebrew/bin ok out of shared; still on the PATH of studio, from studio/declarations:5\n") {
+		t.Errorf("kit path remove --shared of a raised Homebrew folder printed\n%s exit %d", out, code)
+	}
+}
+
 // --shared of a folder shared has, which this Mac raises, is refused as
 // any thing shared has already is; of one only this Mac declares, it moves
 // to the end of shared's list, behind this Mac's own.
@@ -133,7 +144,7 @@ func TestRemovePathOnEveryMacNeedsShared(t *testing.T) {
 		t.Errorf("kit path remove printed\n%s exit %d", out, code)
 	}
 	w.expectSync(t, []string{"shared/declarations"}, "kit path remove /opt/homebrew/bin (laptop)")
-	if out, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin", "--shared"); code != 0 || !strings.Contains(out, "/opt/homebrew/bin ok out of shared; still on every Mac's PATH: kit puts Homebrew's folders there\n") {
+	if out, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin", "--shared"); code != 0 || !strings.Contains(out, "/opt/homebrew/bin ok out of shared; still on every Mac's PATH, after the folders declared: kit adds Homebrew's\n") {
 		t.Errorf("kit path remove --shared printed\n%s exit %d", out, code)
 	}
 	if got, want := w.read(t, ".local/state/kit/path"), filepath.Join(w.home, ".local/bin")+":/opt/homebrew/bin:/opt/homebrew/sbin\n"; got != want {
