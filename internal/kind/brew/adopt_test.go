@@ -319,16 +319,21 @@ func TestAPackageInstallsOverItsAppOnlyAsKitWouldReplaceIt(t *testing.T) {
 // Homebrew adopts an app there unchecked for a cask that updates itself,
 // recording it as the cask's version, so such a cask goes in only as kit
 // would offer it the app: a copy of its major version or later, by the
-// version the app shows, or its build, a build at or above the cask's. An
-// app of an earlier major version, or whose version can't be told, isn't
-// adopted, saying so, and naming its line when there's one. A prerelease,
-// with a channel at its place, goes in only by its channel nearest it at
-// its major version, never by the cask of releases. A cask of the latest
-// takes over any version only when no line shares its place.
+// version the app shows, or its build, a build at or above the cask's,
+// never beside a cask's dotted version. An app of an earlier major
+// version, or whose version can't be told, isn't adopted, saying so, and
+// naming its line when there's one. A line takes over only the app kit
+// would offer it, never a later major version's, naming whose that is; a
+// channel, a release of its major version or later. A prerelease, with a
+// channel at its place, goes in only by its channel nearest it at its
+// major version, never by the cask of releases, nor when two are as near,
+// naming them. A cask of the latest takes over any version only when no
+// line shares its place.
 func TestACaskThatUpdatesItselfAdoptsOnlyItsMajorVersionOrLater(t *testing.T) {
 	const (
 		why       = ": kit takes over only a copy of the cask's major version or later"
 		byChannel = ": kit takes over a prerelease only by its channel's cask"
+		byLine    = ": kit takes over by a line only a copy of that line"
 	)
 	for _, tt := range []struct {
 		name, cask, app, id, version, build, refused string
@@ -339,6 +344,10 @@ func TestACaskThatUpdatesItselfAdoptsOnlyItsMajorVersionOrLater(t *testing.T) {
 		{"an earlier major version, of no line", "bbedit", "BBEdit.app", "com.barebones.bbedit", "15.0.3", "", "BBEdit.app is 15.0.3 and the cask's is 16.1" + why},
 		{"an ESR", "firefox", "Firefox.app", "org.mozilla.firefox", "153.7.0", "", "Firefox.app is 153.7.0 and the cask's is 160.0.1" + why + ", and firefox@esr is this one's line"},
 		{"the line's own", "bbedit@14", "BBEdit.app", "com.barebones.bbedit", "14.6.2", "", ""},
+		{"a line, a later major version", "bbedit@14", "BBEdit.app", "com.barebones.bbedit", "16.1", "", "BBEdit.app is 16.1 and the cask's is 14.6.9" + byLine + ", and bbedit is this one's"},
+		{"an ESR, a later major version", "firefox@esr", "Firefox.app", "org.mozilla.firefox", "160.0", "", "Firefox.app is 160.0 and the cask's is 153.7.0" + byLine + ", and firefox is this one's"},
+		{"a line, a later major version of no line", "bbedit@14", "BBEdit.app", "com.barebones.bbedit", "15.0.3", "", "BBEdit.app is 15.0.3 and the cask's is 14.6.9" + byLine + ", and no cask here is this one's"},
+		{"a channel, a release at its major version", "dropbox@beta", "Dropbox.app", "com.getdropbox.dropbox", "281.4.0", "", ""},
 		{"no version", "bbedit", "BBEdit.app", "com.barebones.bbedit", "", "", "BBEdit.app says no version and the cask's is 16.1" + why + ", and can't tell whether this one is"},
 		{"shown as a build, by its build", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "4215", ""},
 		{"shown as a build, with none", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "", "Sublime Text.app is Build 4215 and the cask's is 4215" + why + ", and can't tell whether this one is"},
@@ -346,11 +355,16 @@ func TestACaskThatUpdatesItselfAdoptsOnlyItsMajorVersionOrLater(t *testing.T) {
 		{"a cask of the latest, with a line", "board", "Board.app", "com.example.board", "2.4", "", "Board.app is 2.4 and the cask's is latest" + why + ", and can't tell whether this one is"},
 		{"a later build than the cask's", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4300", "4300", ""},
 		{"an earlier build than the cask's", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "Build 4200", "4200", "Sublime Text.app is 4200 and the cask's is 4215" + why + ", and can't tell whether this one is"},
+		{"a build, beside a cask of dotted numbers", "ghostty", "Ghostty.app", "com.mitchellh.ghostty", "9999", "", "Ghostty.app is 9999 and the cask's is 1.4.0" + why + ", and can't tell whether this one is"},
+		{"dotted numbers, beside a cask of a build", "sublime-text", "Sublime Text.app", "com.sublimetext.4", "4300.1", "", "Sublime Text.app is 4300.1 and the cask's is 4215" + why + ", and can't tell whether this one is"},
 		{"a prerelease, beside its channel", "thaw", "Thaw.app", "com.example.thaw", "3.0.0-beta.7", "", "Thaw.app is 3.0.0-beta.7 and the cask's is 2.1.0" + byChannel + ", and thaw@beta is this one's"},
 		{"a prerelease, by its channel, nearest it", "thaw@beta", "Thaw.app", "com.example.thaw", "3.0.0-beta.8", "", ""},
 		{"a prerelease, with no channel at its major version", "firefox", "Firefox.app", "org.mozilla.firefox", "162.0a1", "", "Firefox.app is 162.0a1 and the cask's is 160.0.1" + byChannel + ", and none here is at its major version"},
 		{"a prerelease, by its channel, a week ahead of it", "1password@beta", "1Password.app", "com.1password.1password", "8.12.50-10.BETA", "", ""},
 		{"a prerelease, with no channel at its place", "bbedit", "BBEdit.app", "com.barebones.bbedit", "16.1b2", "", ""},
+		{"a prerelease marked as a tip, with no channel at its major version", "ghostty", "Ghostty.app", "com.mitchellh.ghostty", "1.5.0-tip", "", "Ghostty.app is 1.5.0-tip and the cask's is 1.4.0" + byChannel + ", and none here is at its major version"},
+		{"a prerelease, two channels as near it", "lamp", "Lamp.app", "com.example.lamp", "3.0b2", "", "Lamp.app is 3.0b2 and the cask's is 2.0" + byChannel + ", and lamp@beta and lamp@nightly are as near it"},
+		{"a prerelease, by a channel no nearer it than another", "lamp@beta", "Lamp.app", "com.example.lamp", "3.0b2", "", "Lamp.app is 3.0b2 and the cask's is 3.0b4" + byChannel + ", and lamp@beta and lamp@nightly are as near it"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			installsOrRefuses(t, tt.cask, tt.refused, func(apps string) {

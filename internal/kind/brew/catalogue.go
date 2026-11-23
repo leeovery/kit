@@ -252,15 +252,23 @@ func (c *catalogue) takesOver(k catalogued, at, id, have string) error {
 // adopts is why the cask, which updates itself, doesn't adopt the app at
 // at, whose bundle id is id and version have: nil when it's the cask the
 // app is, as pick has it: a prerelease's channel, with a channel at its
-// place (prereleaseOf); else the line at the app's major version, itself
-// when that's its own or later (lineOf).
+// place (prereleaseOf); for a line (bbedit@14, firefox@esr), the one pick
+// gives, so it never takes a later major version as its own; else, as
+// for a channel, the line at the app's major version, itself when that's
+// its own or later (lineOf).
 func (c *catalogue) adopts(k catalogued, at, id, have string) error {
 	tokens := c.stating(at, id)
-	if channel, decided := c.prereleaseOf(tokens, have); decided {
-		if channel == k.token {
+	if nearest, decided := c.prereleaseOf(tokens, have); decided {
+		if len(nearest) == 1 && nearest[0] == k.token {
 			return nil
 		}
-		return notChannel(at, have, k.version, channel)
+		return notChannel(at, have, k.version, nearest)
+	}
+	if lineToken(k.token) {
+		if token, _ := c.pick(tokens, have); token != k.token {
+			return notLine(at, have, k.version, token)
+		}
+		return nil
 	}
 	if line, ok := c.lineOf(k.token, tokens, have); !ok || line != k.token {
 		return notAdopting(at, have, k.version, line)
@@ -276,8 +284,11 @@ func (c *catalogue) adopts(k catalogued, at, id, have string) error {
 // for Blender's LTS, a tie going to the one without @. None when more than
 // one is without @.
 func (c *catalogue) pick(tokens []string, have string) (string, bool) {
-	if channel, decided := c.prereleaseOf(tokens, have); decided {
-		return channel, channel != ""
+	if nearest, decided := c.prereleaseOf(tokens, have); decided {
+		if len(nearest) == 1 {
+			return nearest[0], true
+		}
+		return "", false
 	}
 	plain := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return strings.Contains(token, "@") })
 	switch {
@@ -296,24 +307,24 @@ func (c *catalogue) pick(tokens []string, have string) (string, bool) {
 	return "", false
 }
 
-// prereleaseOf is the channel of tokens (channels) that's the app's, of
+// prereleaseOf are the channels of tokens (channels) nearest the app's
 // version have, a prerelease's, with a channel at its place: of those at
-// its major version, the nearest (nearness), its own version most of all;
-// none, when no channel is at its major version or two are as near, never
-// the cask of releases, as an app of a beta is the beta's whichever week's
-// it is (thaw@beta for Thaw 3.0.0-beta.8). decided is false, with no
-// channel at its place, or when have isn't a prerelease's.
-func (c *catalogue) prereleaseOf(tokens []string, have string) (token string, decided bool) {
+// its major version, by nearness, its own version most of all, in token
+// order. One is the app's; none, when no channel is at its major version,
+// or two are as near, is no cask's, never the cask of releases, as an app
+// of a beta is the beta's whichever week's it is (thaw@beta for Thaw
+// 3.0.0-beta.8). decided is false, with no channel at its place, or when
+// have isn't a prerelease's.
+func (c *catalogue) prereleaseOf(tokens []string, have string) (nearest []string, decided bool) {
 	channels := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool { return !channel(token) })
 	if len(channels) == 0 || !prerelease.MatchString(have) {
-		return "", false
+		return nil, false
 	}
 	mine := major(have)
 	channels = slices.DeleteFunc(channels, func(token string) bool { return mine < 0 || major(c.casks[token].version) != mine })
-	if nearest := c.nearest(channels, have); len(nearest) == 1 {
-		return nearest[0], true
-	}
-	return "", true
+	nearest = c.nearest(channels, have)
+	slices.Sort(nearest)
+	return nearest, true
 }
 
 // lineOf is the one of tokens that's the app's, of version have, beside
@@ -326,13 +337,14 @@ func (c *catalogue) prereleaseOf(tokens []string, have string) (token string, de
 // for. Plain's version can't be told (latest): plain, whatever the app's,
 // with no line at the place; with one, none, as which can't be told. A
 // version that says no major version, a build's as Sublime Text's 4215,
-// is plain's at or above plain's version, as it's updated itself; below,
-// or of no number at all, none's.
+// is plain's at or above plain's build, as it's updated itself; below,
+// beside a dotted version, which it can't be told against (atOrAbove), or
+// of no number at all, none's.
 func (c *catalogue) lineOf(plain string, tokens []string, have string) (string, bool) {
 	version := c.casks[plain].version
 	mine, theirs := major(have), major(version)
 	lines := slices.DeleteFunc(slices.Clone(tokens), func(token string) bool {
-		return token == plain || !strings.Contains(token, "@") || channel(token)
+		return token == plain || !lineToken(token)
 	})
 	switch {
 	case leading(version) == nil && len(lines) == 0:
@@ -381,6 +393,12 @@ var channels = []string{
 func channel(token string) bool {
 	_, suffix, _ := strings.Cut(token, "@")
 	return slices.Contains(channels, suffix)
+}
+
+// lineToken reports whether token is a line's of versions, numbered
+// (bbedit@14), an LTS or an ESR: with @, and not a channel's (channels).
+func lineToken(token string) bool {
+	return strings.Contains(token, "@") && !channel(token)
 }
 
 // states reports whether the cask states the bundle id id, in any case.

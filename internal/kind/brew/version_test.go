@@ -22,6 +22,24 @@ func TestAVersionsMajorVersion(t *testing.T) {
 	}
 }
 
+// A prerelease's version carries a channel's name, but latest, or pre or
+// insider, as a word of its own, in any case: a word that only holds one,
+// as testing or latest, marks none, nor does hotfix.
+func TestAPrereleasesVersion(t *testing.T) {
+	for version, want := range map[string]bool{
+		"2.8.0-beta1": true, "1.0-rc.2": true, "3.0b2": true, "3.0a9": true, "1.5.0-tip": true,
+		"2.0-SNAPSHOT": true, "3.14.31833+next.a165b2eb0a": true, "2026.12.0-daily-209": true,
+		"4.0-eap": true, "1.0-test": true, "0.1-pre": true, "2.0-insider": true, "1.2-staging": true,
+		"0.9 twilight": true, "1.0-early-adopter": true, "1.0.0-alpha.10": true, "4.0.0-canary.5": true,
+		"2024.10.1-hotfix": false, "1.0-testing": false, "1.0-tipsy": false, "latest": false,
+		"2.0": false, "153.7.0esr": false, "4215": false, "1.0 (123)": false, "": false,
+	} {
+		if got := brew.IsPrerelease(version); got != want {
+			t.Errorf("IsPrerelease(%q) = %v, want %v", version, got, want)
+		}
+	}
+}
+
 // A version of dotted numbers alone is its numbers, leading zeros aside;
 // any other is none.
 func TestAVersionOfDottedNumbers(t *testing.T) {

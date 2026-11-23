@@ -317,6 +317,41 @@
         [":app", ["Board.app"]]
       ]
     },
+    "ghostty": {
+      "auto_updates": true, "names": ["Ghostty"], "tap_string": "homebrew/cask", "version": "1.4.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.mitchellh.ghostty"}],
+        [":app", ["Ghostty.app"]]
+      ]
+    },
+    "ghostty@tip": {
+      "auto_updates": true, "names": ["Ghostty"], "tap_string": "homebrew/cask", "version": "18872,6d244209978e599277904ff3ced7b8a2ebcc528d",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.mitchellh.ghostty"}],
+        [":app", ["Ghostty.app"]]
+      ]
+    },
+    "lamp": {
+      "auto_updates": true, "names": ["Lamp"], "tap_string": "homebrew/cask", "version": "2.0",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.lamp"}],
+        [":app", ["Lamp.app"]]
+      ]
+    },
+    "lamp@beta": {
+      "auto_updates": true, "names": ["Lamp Beta"], "tap_string": "homebrew/cask", "version": "3.0b4",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.lamp"}],
+        [":app", ["Lamp.app"]]
+      ]
+    },
+    "lamp@nightly": {
+      "auto_updates": true, "names": ["Lamp Nightly"], "tap_string": "homebrew/cask", "version": "3.0a9",
+      "raw_artifacts": [
+        [":uninstall", {":quit": "com.example.lamp"}],
+        [":app", ["Lamp.app"]]
+      ]
+    },
     "google-chrome@beta": {
       "auto_updates": true, "names": ["Google Chrome Beta"], "tap_string": "homebrew/cask", "version": "159.0.8190.4",
       "raw_artifacts": [

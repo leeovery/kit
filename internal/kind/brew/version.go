@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -51,14 +52,29 @@ func notAdopting(at, have, version, line string) error {
 }
 
 // notChannel is why the app at at, a prerelease of version have, isn't
-// adopted by its cask, of version, as a channel shares its place: channel,
-// unless "", is the one whose app it is.
-func notChannel(at, have, version, channel string) error {
+// adopted by its cask, of version, as a channel shares its place: nearest
+// are the channels nearest it at its major version, one the one whose app
+// it is.
+func notChannel(at, have, version string, nearest []string) error {
 	said := fmt.Sprintf("%s and the cask's is %s: kit takes over a prerelease only by its channel's cask", versionOf(at, have), version)
-	if channel != "" {
-		return errors.New(said + ", and " + channel + " is this one's")
+	switch len(nearest) {
+	case 0:
+		return errors.New(said + ", and none here is at its major version")
+	case 1:
+		return errors.New(said + ", and " + nearest[0] + " is this one's")
 	}
-	return errors.New(said + ", and none here is at its major version")
+	return errors.New(said + ", and " + strings.Join(nearest, " and ") + " are as near it")
+}
+
+// notLine is why the app at at, of version have, isn't adopted by its
+// cask, of version, a line of versions: owner, unless "", is the cask
+// whose app it is.
+func notLine(at, have, version, owner string) error {
+	said := fmt.Sprintf("%s and the cask's is %s: kit takes over by a line only a copy of that line", versionOf(at, have), version)
+	if owner != "" {
+		return errors.New(said + ", and " + owner + " is this one's")
+	}
+	return errors.New(said + ", and no cask here is this one's")
 }
 
 // versionOf says the app at at is of version have.
@@ -89,9 +105,17 @@ func whyNot(have, version string) string {
 	return ""
 }
 
-// prerelease is a prerelease's version, as in 2.8.0-beta1, 1.0-rc.2 or
-// 3.0b2.
-var prerelease = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:alpha|beta|preview|pre|rc|dev|nightly|canary|insiders?)(?:[^a-z]|$)|^\d+(?:\.\d+)*[ab]\d+$`)
+// prerelease is a prerelease's version, as in 2.8.0-beta1, 1.0-rc.2,
+// 1.5.0-tip or 3.0b2: one with a mark (marks) as a word of its own, so
+// 2024.10.1-hotfix is a release.
+var prerelease = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:` + strings.Join(marks(), "|") + `)(?:[^a-z]|$)|^\d+(?:\.\d+)*[ab]\d+$`)
+
+// marks are the words that mark a prerelease's version: the channels'
+// (channels), but latest, which says no version, and pre and insider.
+func marks() []string {
+	words := slices.DeleteFunc(slices.Clone(channels), func(word string) bool { return word == "latest" })
+	return append(words, "pre", "insider")
+}
 
 // sameVersion reports whether have, an app's version, is version, a
 // cask's: as written, or as dotted numbers, 4.2 being 4.2.0.
@@ -137,11 +161,11 @@ func major(version string) int {
 }
 
 // atOrAbove reports whether have, an app's version, is version, a cask's,
-// or later, by the numbers each starts with: false when either starts with
-// none.
+// or later, both a build's number, as 4215, alone: false when either is
+// otherwise, as a build's beside a dotted version can't be told apart.
 func atOrAbove(have, version string) bool {
 	mine, theirs := leading(have), leading(version)
-	return mine != nil && theirs != nil && compare(mine, theirs) >= 0
+	return len(mine) == 1 && len(theirs) == 1 && mine[0] >= theirs[0]
 }
 
 // dottedNumbers is a version of numbers alone, as in 4.6.8.

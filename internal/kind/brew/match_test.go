@@ -59,15 +59,15 @@ var byWhere = []matching{
 // byVersion: of the casks putting an app where it is, a prerelease's is
 // its channel's, with a channel at its place: the one at its major version
 // nearest its version, never the cask of releases; none, with none at its
-// major version. Else the one without @ is the one when it updates itself
-// and the app's major version is its or later, as an app that updates
-// itself runs ahead of the catalogue: Homebrew adopts it as it is. An app
-// of an earlier major version is the line's at that major version, never a
-// channel's, and none's with no such line, as the one without @ would
-// declare a major version the person may not own. Else the one whose
-// version shares the most of the app's numbers it starts with is: the
-// app's own version most of all, its build after a comma aside, as an
-// older line's, an LTS or a beta; a tie going to the one without @. And
+// major version, or two as near it. Else the one without @ is the one when
+// it updates itself and the app's major version is its or later, as an app
+// that updates itself runs ahead of the catalogue: Homebrew adopts it as
+// it is. An app of an earlier major version is the line's at that major
+// version, never a channel's, and none's with no such line, as the one
+// without @ would declare a major version the person may not own. Else the
+// one whose version shares the most of the app's numbers it starts with
+// is: the app's own version most of all, its build after a comma aside, as
+// an older line's, an LTS or a beta; a tie going to the one without @. And
 // only if installing it would take the app over: the app is its version,
 // or an older copy of the same major version, which kit replaces, as a
 // package's installer runs over it whether it updates itself or not.
@@ -99,8 +99,13 @@ var byVersion = []matching{
 	{"a prerelease, the channel at its major version", "", "Firefox.app", "org.mozilla.firefox", "161.0b4", "", "firefox@beta"},
 	{"a prerelease, no channel at its major version", "", "Firefox.app", "org.mozilla.firefox", "162.0a1", "", ""},
 	{"a prerelease, no channel at its place", "", "BBEdit.app", "com.barebones.bbedit", "16.1b2", "", "bbedit"},
+	{"a prerelease, two channels as near it", "", "Lamp.app", "com.example.lamp", "3.0b2", "", ""},
+	{"a prerelease, the one of two channels at its version", "", "Lamp.app", "com.example.lamp", "3.0b4", "", "lamp@beta"},
+	{"a release, beside two channels", "", "Lamp.app", "com.example.lamp", "2.0", "", "lamp"},
+	{"a prerelease marked as a tip, no channel at its major version", "", "Ghostty.app", "com.mitchellh.ghostty", "1.5.0-tip", "", ""},
 	{"its own version, beside a channel", "", "Thaw.app", "com.example.thaw", "2.1.0", "", "thaw"},
 	{"a cask that updates itself, a version kit can't read, though a line of no version shares its place", "", "Spaceman.app", "dev.original.Spaceman", "Build 7", "", ""},
+	{"a cask that updates itself, its own major version beside a line", "", "BBEdit.app", "com.barebones.bbedit", "16.1", "", "bbedit"},
 	{"a cask that updates itself, an earlier major version, its line's", "", "BBEdit.app", "com.barebones.bbedit", "14.6.2", "", "bbedit@14"},
 	{"a cask that updates itself, an earlier major version of no line", "", "BBEdit.app", "com.barebones.bbedit", "15.0.3", "", ""},
 	{"a cask that updates itself, an ESR", "", "Firefox.app", "org.mozilla.firefox", "153.7.0", "", "firefox@esr"},
@@ -122,16 +127,19 @@ var byVersion = []matching{
 
 // byHardVersion: an app's version is the one it shows, or its build's when
 // only that starts with a number, as Sublime Text shows Build 4215. A
-// build's says no major version: at or above the cask's, as it's updated
-// itself, it's the cask's; below, it's none's. One that still can't be told
-// gets no cask that updates itself, as which major version it is can't be
-// told. A cask that updates itself whose own version can't be told
-// (latest) is the app's only when no line shares its place.
+// build's says no major version: at or above the cask's build, as it's
+// updated itself, it's the cask's; below, or beside a cask's dotted
+// version, which it can't be told against, none's. One that still can't be
+// told gets no cask that updates itself, as which major version it is
+// can't be told. A cask that updates itself whose own version can't be
+// told (latest) is the app's only when no line shares its place.
 var byHardVersion = []matching{
 	{"shown as a build, its build the cask's", "", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "4215", "sublime-text"},
 	{"shown as a build, a later build than the cask's", "", "Sublime Text.app", "com.sublimetext.4", "Build 4300", "4300", "sublime-text"},
 	{"shown as a build, an earlier build than the cask's", "", "Sublime Text.app", "com.sublimetext.4", "Build 4200", "4200", ""},
 	{"shown as a build, of an earlier major version", "", "Sublime Text.app", "com.sublimetext.3", "Build 3211", "3211", ""},
+	{"shown as a build, beside a cask of dotted numbers", "", "Ghostty.app", "com.mitchellh.ghostty", "9999", "", ""},
+	{"dotted numbers, beside a cask of a build", "", "Sublime Text.app", "com.sublimetext.4", "4300.1", "", ""},
 	{"shown as a build, with none", "", "Sublime Text.app", "com.sublimetext.4", "Build 4215", "", ""},
 	{"no version", "", "BBEdit.app", "com.barebones.bbedit", "", "", ""},
 	{"a cask of the latest, with no line", "", "Stream.app", "com.example.stream", "1.0", "", "stream"},
@@ -203,6 +211,33 @@ func TestWhatIsOfferedIsTakenOver(t *testing.T) {
 	}
 }
 
+// A line that updates itself, declared, takes over only an app it's
+// offered: never one of a later major version, as bbedit@14 never takes
+// over BBEdit 16.1, nor one whose version can't be told. Homebrew adopts
+// such a cask's app unchecked.
+func TestALineTakesOverOnlyWhatIsOfferedIt(t *testing.T) {
+	casks := catalogueOf(t)
+	for _, tt := range slices.Concat(byVersion, byHardVersion) {
+		for token, k := range casks {
+			if !k.updatingLine(token) || !k.puts(tt.app) {
+				continue
+			}
+			t.Run(tt.name+", by "+token, func(t *testing.T) {
+				fake, apps, kind := adopting(t)
+				tt.installIn(t, apps, t.TempDir())
+				fake.On("brew", "install", "--cask", "--adopt", token)
+				fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(token + "\n")
+				switch err := kind.Install(t.Context(), []string{token}); {
+				case token == tt.want && err != nil:
+					t.Errorf("offered %s, whose install failed: %v", token, err)
+				case token != tt.want && err == nil:
+					t.Errorf("%s took over an app offered %q", token, tt.want)
+				}
+			})
+		}
+	}
+}
+
 // fixtureCask is a cask in the catalogue in testdata, as far as faking
 // Homebrew's adopt needs it: its version, its build after a comma aside;
 // whether it updates itself; and whether it installs a package.
@@ -211,6 +246,24 @@ type fixtureCask struct {
 	AutoUpdates bool    `json:"auto_updates"`
 	Artifacts   [][]any `json:"raw_artifacts"`
 	pkg         bool
+}
+
+// updatingLine reports whether the cask, of token, is a line of versions
+// (bbedit@14, firefox@esr), not a channel, that updates itself and
+// installs no package.
+func (k fixtureCask) updatingLine(token string) bool {
+	return brew.IsLine(token) && k.AutoUpdates && !k.pkg
+}
+
+// puts reports whether the cask puts app in place.
+func (k fixtureCask) puts(app string) bool {
+	return slices.ContainsFunc(k.Artifacts, func(a []any) bool {
+		if len(a) != 2 || a[0] != ":app" {
+			return false
+		}
+		names, _ := a[1].([]any)
+		return slices.Contains(names, any(app))
+	})
 }
 
 // catalogueOf is the casks of the catalogue in testdata, each by its token.
