@@ -208,6 +208,41 @@ func TestOpGetsKitsOwnVariablesOfOps(t *testing.T) {
 	}
 }
 
+// Signed in with a password's session, op runs with the app's approval
+// off, as op otherwise asks the locked app and ignores the session; a value
+// the person set wins, and without a session op gets none.
+func TestOpWithASessionRunsWithTheAppsApprovalOff(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"session alone", map[string]string{"OP_SESSION_my": "token"}, "false"},
+		{"session, approval on", map[string]string{"OP_SESSION_my": "token", "OP_BIOMETRIC_UNLOCK_ENABLED": "true"}, "true"},
+		{"no session", nil, ""},
+		{"approval off alone", map[string]string{"OP_BIOMETRIC_UNLOCK_ENABLED": "false"}, "false"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			for k, v := range c.env {
+				t.Setenv(k, v)
+			}
+			run := runnertest.New(t)
+			run.On("op", "whoami")
+			onepassword.Driver{}.Session(t.Context(), run)
+			for _, cmd := range run.Commands() {
+				got := slices.DeleteFunc(slices.Clone(cmd.Env), func(kv string) bool { return !strings.HasPrefix(kv, "OP_BIOMETRIC_UNLOCK_ENABLED=") })
+				want := []string{}
+				if c.want != "" {
+					want = []string{"OP_BIOMETRIC_UNLOCK_ENABLED=" + c.want}
+				}
+				if !slices.Equal(got, want) {
+					t.Errorf("%s ran with %q, want %q", cmd, got, want)
+				}
+			}
+		})
+	}
+}
+
 // A read that fails names its reference, as store.Unread, when op quotes it
 // in its errors, with the line it quotes it in. A failure that quotes it
 // about the person's approval or the session, or quotes nothing, or where

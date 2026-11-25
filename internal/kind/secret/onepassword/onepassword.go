@@ -51,7 +51,9 @@ const approvalTimeout = 10 * time.Minute
 // a password, there's no approval to share, and op, its session over, might
 // ask for the password at the terminal: it runs without it. op alone gets
 // kit's own variables of op's, a password's session or a service account's
-// token among them: kit runs every other program without them.
+// token among them: kit runs every other program without them. A session's
+// variable alone turns the app's approval off, else op asks the app and
+// ignores the session.
 func opRun(ctx context.Context, run runner.Runner, c runner.Command) (runner.Result, error) {
 	c.Name = program
 	c.SharesSession = !passworded()
@@ -59,16 +61,27 @@ func opRun(ctx context.Context, run runner.Runner, c runner.Command) (runner.Res
 	return run.Run(ctx, c)
 }
 
+// biometric turns 1Password's app approval on or off for op.
+const biometric = "OP_BIOMETRIC_UNLOCK_ENABLED"
+
 // opEnv are kit's own variables of op's, each as name=value.
 func opEnv() []string {
-	return slices.DeleteFunc(os.Environ(), func(kv string) bool { return !strings.HasPrefix(kv, "OP_") })
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return !strings.HasPrefix(kv, "OP_") })
+	if _, set := os.LookupEnv(biometric); !set && inSession() {
+		env = append(env, biometric+"=false")
+	}
+	return env
 }
 
 // passworded is whether op is signed in with a password, as over a remote
 // connection: the app's approval turned off, or a session's variable set.
 func passworded() bool {
-	return os.Getenv("OP_BIOMETRIC_UNLOCK_ENABLED") == "false" ||
-		slices.ContainsFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "OP_SESSION_") })
+	return os.Getenv(biometric) == "false" || inSession()
+}
+
+// inSession is whether a password's session variable is set.
+func inSession() bool {
+	return slices.ContainsFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "OP_SESSION_") })
 }
 
 // about is what kit knows of 1Password.
