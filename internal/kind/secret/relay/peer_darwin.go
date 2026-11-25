@@ -8,7 +8,8 @@ import (
 
 // peerCred is the socket option naming the credentials of the process at a
 // Unix socket's other end: LOCAL_PEERCRED in <sys/un.h>, at level
-// SOL_LOCAL.
+// SOL_LOCAL. Written out, as askpass's LOCAL_PEERPID is: x/sys's name, after
+// its package's, reads to kit's personal-data scan as a .local host name.
 const peerCred = 0x1
 
 // peerUID is the user the process at the other end of c runs as.

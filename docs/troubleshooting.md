@@ -112,7 +112,8 @@ screen is locked, as when you're away, nobody can give it. kit fails at once rat
 
 1Password accepts the sign-in only in the terminal you signed in from. So `kit secret signin`
 stays open there and runs 1Password's commands for every other kit command, an agent's
-included. kit keeps the sign-in in memory, never in a file.
+included. kit keeps the sign-in in memory, never in a file. While it's open, anything running
+as you can use it.
 
 These end the sign-in, and kit signs you out of 1Password:
 

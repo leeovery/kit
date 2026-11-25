@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
+	"github.com/leeovery/kit/internal/kind/secret/relay"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/screen/screentest"
 )
@@ -99,13 +100,18 @@ func flat(out string) string {
 // signingIn runs kit secret signin at a terminal in w, its state in state,
 // op signing the person in, till ctx ends, or the test does, or it ends by
 // itself: what it printed, once it has. It's waited for till its socket's
-// there.
+// there, which mustn't be while op asks for the password, as every other
+// kit would wait on it.
 func signingIn(t *testing.T, ctx context.Context, w *world, state string) <-chan printed {
 	t.Helper()
 	w.terminal = true
 	w.stateIn(t, state)
 	w.ctx = ctx
-	w.fake.On("op", "signin").Prints(signedIn)
+	w.fake.On("op", "signin").Prints(signedIn).Does(func() {
+		if _, err := os.Stat(socketIn(state)); err == nil {
+			t.Error("kit secret signin listened while op asked for the password")
+		}
+	})
 	w.fake.On("op", "whoami")
 	w.fake.On("op", "signout")
 	done, finished := make(chan printed, 1), make(chan struct{})
@@ -191,10 +197,8 @@ func TestSecretSignInRelaysOtherKitsCommands(t *testing.T) {
 	if code != 0 || !strings.Contains(again, "kit secret signin isn't open: nothing to sign out of") {
 		t.Errorf("kit secret signout, none open, printed\n%s exit %d", again, code)
 	}
-	for _, kept := range []string{socketIn(state), filepath.Join(state, "kit", "secret-sessions.json")} {
-		if _, err := os.Stat(kept); !os.IsNotExist(err) {
-			t.Errorf("%s is there: %v; want nothing kept of the sign-in", kept, err)
-		}
+	if _, err := os.Stat(socketIn(state)); !os.IsNotExist(err) {
+		t.Errorf("the socket's still there: %v", err)
 	}
 	relayed.leaks(t, r.out, r.errOut)
 	agent.leaks(t, syncOut, syncErr, outOut, outErr, again)
@@ -233,6 +237,32 @@ func TestSecretSignInOneAtATime(t *testing.T) {
 	}
 	if calls := second.fake.Calls(); slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "op ") }) {
 		t.Errorf("ran %q: want no sign-in", calls)
+	}
+}
+
+// Another kit secret signin opening while the person types the password
+// leaves this one's sign-in unused: it signs out of it at once, and says the
+// other's open.
+func TestSecretSignInOpenedMeanwhileSignsOut(t *testing.T) {
+	state := shortState(t)
+	w := secretsWorld(t)
+	w.terminal = true
+	w.stateIn(t, state)
+	w.fake.On("op", "signin").Prints(signedIn).Does(func() {
+		other, err := relay.Listen(socketIn(state))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		t.Cleanup(func() { _ = other.Close() })
+	})
+	w.fake.On("op", "signout")
+	out, errOut, code := w.run(t, "secret", "signin")
+	if code != 0 || !strings.Contains(flat(out), "kit secret signin is open already, in another terminal") {
+		t.Errorf("kit secret signin printed\n%s%s exit %d", out, errOut, code)
+	}
+	if session, _ := runner.LookupEnv(opRan(t, w, "signout").Env, "OP_SESSION_ABC123"); session != token {
+		t.Errorf("op signout ran in the session %q", session)
 	}
 }
 

@@ -15,9 +15,10 @@ import (
 // secrets are in that has such a sign-in, then relays those stores'
 // commands for every other kit while it runs, as a run of one step (relay):
 // each store's program asks for the password at the terminal, the face
-// stepped aside meanwhile, and the sessions are held in memory alone.
+// stepped aside meanwhile, and the sessions are held in memory alone. It
+// listens once they're signed in, so no other kit waits on it meanwhile.
 // Without a terminal, there's no one to ask; with kit secret signin open
-// already, in another terminal, there's no need.
+// already, in another terminal, there's no need, and no one's asked.
 func (a *app) secretsSignIn(ctx context.Context, r *run) error {
 	k, err := r.secrets()
 	if err != nil {
@@ -30,19 +31,25 @@ func (a *app) secretsSignIn(ctx context.Context, r *run) error {
 	if !a.Terminal(a.Stdin) {
 		return errors.New("kit secret signin asks for a password at a terminal: have the person run it in a terminal of their own")
 	}
+	socket := relay.Socket(r.stateDir)
 	return a.oneStep(ctx, r, secretsStep, "signing in", func(ctx context.Context) check.Result {
-		l, err := relay.Listen(relay.Socket(r.stateDir))
-		switch {
-		case errors.Is(err, relay.ErrOpen):
-			return check.Result{State: check.OK, Summary: err.Error()}
-		case err != nil:
-			return check.Result{State: check.Failed, Reason: err.Error()}
+		open := check.Result{State: check.OK, Summary: relay.ErrOpen.Error()}
+		if relay.Answers(ctx, socket) {
+			return open
 		}
-		defer func() { _ = l.Close() }()
 		held, err := signIn(ctx, r, stores)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
+		l, err := relay.Listen(socket)
+		if err != nil {
+			relay.SignOut(context.WithoutCancel(ctx), r.run, held)
+			if errors.Is(err, relay.ErrOpen) {
+				return open
+			}
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+		defer func() { _ = l.Close() }()
 		names := storeNames(stores)
 		event.Say(ctx, event.Doing{Says: "signed in to " + names, Todo: "kit's commands elsewhere use your sign-in to " + names + " while this stays open: ctrl-C ends it"})
 		why := l.Serve(ctx, r.run, held)

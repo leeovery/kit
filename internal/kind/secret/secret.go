@@ -33,6 +33,7 @@ import (
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/secret/relay"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/tilde"
@@ -69,10 +70,10 @@ type Secrets struct {
 	// secret signin's relay listens.
 	home, stateDir string
 	declared       []Secret
-	// mu guards relayed: whether that relay holds each store's sign-in, by
-	// the store's ID, as this run found.
+	// mu guards relayed: the line to that relay, when it holds a store's
+	// sign-in, by the store's ID, as this run found: nil when it doesn't.
 	mu      sync.Mutex
-	relayed map[string]bool
+	relayed map[string]*relay.Line
 }
 
 // kindName names the kind.
@@ -94,7 +95,7 @@ var Descriptor = kind.Descriptor{
 // New returns the secrets of the user whose home is home, in the stores kit
 // knows (Stores), kit's state in stateDir.
 func New(run runner.Runner, home, stateDir string) *Secrets {
-	return &Secrets{run: run, home: home, stateDir: stateDir, relayed: map[string]bool{}}
+	return &Secrets{run: run, home: home, stateDir: stateDir, relayed: map[string]*relay.Line{}}
 }
 
 func (s *Secrets) Name() string { return kindName }

@@ -141,6 +141,12 @@ func (s *served) signedOut(t *testing.T) {
 	}
 }
 
+// toRelay is here, its commands sent to the relay at socket, for the store
+// whose ID is store, along a line of their own.
+func toRelay(here runner.Runner, socket, store string) runner.Runner {
+	return relay.Via(relay.Client(here), relay.NewLine(socket, store))
+}
+
 // ranHere fails the test when anything ran here, rather than at the relay.
 func ranHere(t *testing.T, here *runnertest.Fake) {
 	t.Helper()
@@ -181,7 +187,7 @@ func TestARelayRunsAClientsCommandInTheSession(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := serve(t, func(run *runnertest.Fake) { c.script(run.On("vault", c.args...)) })
-			run := relay.Via(relay.Client(here), s.socket, "vault")
+			run := toRelay(here, s.socket, "vault")
 			cmd := runner.Command{Name: "vault", Args: c.args, Input: "given", Timeout: time.Minute, Secret: true, Env: []string{"VAULT_OWN=1"}}
 			res, err := run.Run(t.Context(), cmd)
 			switch {
@@ -219,7 +225,7 @@ func TestARelayRefusesWhatsNotTheStores(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			here := runnertest.New(t)
-			_, err := relay.Via(relay.Client(here), s.socket, c.store).Run(t.Context(), runner.Command{Name: c.program, Args: []string{"-c", "true"}})
+			_, err := toRelay(here, s.socket, c.store).Run(t.Context(), runner.Command{Name: c.program, Args: []string{"-c", "true"}})
 			if err == nil || err.Error() != c.says {
 				t.Errorf("Run() error = %v, want %q", err, c.says)
 			}
@@ -235,7 +241,7 @@ func TestARelayRefusesWhatsNotTheStores(t *testing.T) {
 // holds that lasts, as the store says, and not for another.
 func TestARelaySaysWhichSignInsItHolds(t *testing.T) {
 	s := serve(t, nil)
-	if !relay.Holds(t.Context(), s.socket, "vault") || relay.Holds(t.Context(), s.socket, "other") {
+	if relay.Holds(t.Context(), s.socket, "vault") == nil || relay.Holds(t.Context(), s.socket, "other") != nil {
 		t.Error("Holds(): want the vault's sign-in held, and no other")
 	}
 	if ran := s.run.Commands(); len(ran) != 1 || ran[0].String() != "vault whoami" || !slices.Contains(ran[0].Env, "VAULT_SESSION="+session) {
@@ -249,7 +255,7 @@ func TestARelayAnswersItsUserAlone(t *testing.T) {
 	s := listen(t, nil)
 	relay.SetOwner(s.relay, os.Getuid()+1)
 	s.start(t)
-	if relay.Holds(t.Context(), s.socket, "vault") {
+	if relay.Holds(t.Context(), s.socket, "vault") != nil {
 		t.Error("Holds(), another user's = true")
 	}
 	if _, err := relay.Stop(t.Context(), s.socket); err == nil || errors.Is(err, relay.ErrNone) {
@@ -311,13 +317,13 @@ func TestASessionOverEndsTheRelay(t *testing.T) {
 		ask  func(t *testing.T, socket string)
 	}{
 		{"asked", func(t *testing.T, socket string) {
-			if relay.Holds(t.Context(), socket, "vault") {
+			if relay.Holds(t.Context(), socket, "vault") != nil {
 				t.Error("Holds(), the session over = true")
 			}
 		}},
 		{"as a command fails", func(t *testing.T, socket string) {
 			here := runnertest.New(t)
-			_, err := relay.Via(relay.Client(here), socket, "vault").Run(t.Context(), runner.Command{Name: "vault", Args: []string{"read", "a"}})
+			_, err := toRelay(here, socket, "vault").Run(t.Context(), runner.Command{Name: "vault", Args: []string{"read", "a"}})
 			if _, exited := errors.AsType[*runner.ExitError](err); !exited {
 				t.Errorf("Run() error = %v, want the command's exit", err)
 			}
@@ -349,32 +355,163 @@ func staleSocket(t *testing.T, path string) {
 	_ = ln.Close()
 }
 
-// A socket nothing answers is stale: a client removes it, going on as
-// with no relay, and a relay listens in its place.
-func TestAStaleSocketIsRemoved(t *testing.T) {
+// A socket nothing answers is stale: a client goes on as with no relay,
+// leaving it, and a relay listens in its place, whatever's left there, a
+// socket or not.
+func TestAStaleSocketIsReplaced(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		leave func(t *testing.T, path string)
+	}{
+		{"a socket", staleSocket},
+		{"a file", func(t *testing.T, path string) {
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			socket := filepath.Join(shortDir(t), "relay.sock")
+			c.leave(t, socket)
+			if relay.Holds(t.Context(), socket, "vault") != nil {
+				t.Error("Holds(), stale = a line")
+			}
+			if _, err := relay.Stop(t.Context(), socket); !errors.Is(err, relay.ErrNone) {
+				t.Errorf("Stop(), stale = %v, want %v", err, relay.ErrNone)
+			}
+			if _, err := os.Lstat(socket); err != nil {
+				t.Errorf("a client took away what was left: %v", err)
+			}
+			l, err := relay.Listen(socket)
+			if err != nil {
+				t.Fatalf("Listen(), stale = %v", err)
+			}
+			if !relay.Answers(t.Context(), socket) {
+				t.Error("Answers(): want the new relay")
+			}
+			_ = l.Close()
+		})
+	}
+}
+
+// frozen stands in for a relay whose process is stopped, as by ctrl-Z in
+// its terminal: it takes connections, as the system does for it, and
+// answers nothing, or only takes requests up (acks), then answers nothing.
+// The count of connections it took, as it goes.
+func frozen(t *testing.T, acks bool) (string, *atomic.Int32) {
+	t.Helper()
 	socket := filepath.Join(shortDir(t), "relay.sock")
-	gone := func(what string) {
-		if _, err := os.Stat(socket); !os.IsNotExist(err) {
-			t.Errorf("%s: the stale socket's still there: %v", what, err)
-		}
-	}
-	staleSocket(t, socket)
-	if relay.Holds(t.Context(), socket, "vault") {
-		t.Error("Holds(), stale = true")
-	}
-	gone("Holds")
-	staleSocket(t, socket)
-	if _, err := relay.Stop(t.Context(), socket); !errors.Is(err, relay.ErrNone) {
-		t.Errorf("Stop(), stale = %v, want %v", err, relay.ErrNone)
-	}
-	gone("Stop")
-	staleSocket(t, socket)
-	l, err := relay.Listen(socket)
+	ln, err := net.Listen("unix", socket)
 	if err != nil {
-		t.Fatalf("Listen(), stale = %v", err)
+		t.Fatal(err)
 	}
-	_ = l.Close()
-	gone("Close")
+	var took atomic.Int32
+	var held sync.WaitGroup
+	conns := make(chan net.Conn, 16)
+	held.Go(func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			took.Add(1)
+			conns <- c
+			if acks {
+				_ = relay.WriteAck(c)
+			}
+		}
+	})
+	t.Cleanup(func() {
+		_ = ln.Close()
+		held.Wait()
+		close(conns)
+		for c := range conns {
+			_ = c.Close()
+		}
+	})
+	return socket, &took
+}
+
+// A relay that's stopped costs its clients a wait once: one that doesn't
+// take a request up, or doesn't answer one it took up, has that request
+// fail, saying so, and every command after for its store fail at once,
+// never sent, rather than each waiting. Asked whether it holds a sign-in,
+// it holds none; asked to stop, it fails, saying so.
+func TestAStoppedRelayCostsAWaitOnce(t *testing.T) {
+	relay.SetWaits(t, 50*time.Millisecond, 50*time.Millisecond, time.Second)
+	for _, c := range []struct {
+		name string
+		acks bool
+		says string
+	}{
+		{"takes nothing up", false, "kit secret signin didn't take the request up: it may be stopped, as by ctrl-Z in its terminal"},
+		{"answers nothing", true, "kit secret signin didn't answer in time"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			socket, took := frozen(t, c.acks)
+			here := runnertest.New(t)
+			run := relay.Via(relay.Client(here), relay.NewLine(socket, "vault"))
+			for range 3 {
+				if _, err := run.Run(t.Context(), runner.Command{Name: "vault", Args: []string{"read", "a"}, Timeout: time.Hour}); err == nil || err.Error() != "vault read a: "+c.says {
+					t.Errorf("Run() = %v, want %q", err, c.says)
+				}
+			}
+			if took.Load() != 1 {
+				t.Errorf("sent %d requests, want the first alone", took.Load())
+			}
+			ranHere(t, here)
+			if relay.Holds(t.Context(), socket, "vault") != nil {
+				t.Error("Holds(), stopped = a line")
+			}
+			if _, err := relay.Stop(t.Context(), socket); err == nil || err.Error() != c.says {
+				t.Errorf("Stop(), stopped = %v, want %q", err, c.says)
+			}
+		})
+	}
+}
+
+// Asked whether it holds a sign-in while a command runs, which may take
+// longer than the client waits, the relay says it does, at once, the
+// command's running saying the sign-in held as it began.
+func TestARelayBusySaysItHolds(t *testing.T) {
+	s := serve(t, func(run *runnertest.Fake) { run.On("vault", "read", "slow").Hangs() })
+	ctx, hangUp := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		_, _ = toRelay(runnertest.New(t), s.socket, "vault").Run(ctx, runner.Command{Name: "vault", Args: []string{"read", "slow"}})
+		close(done)
+	}()
+	waitFor(t, s.run, "vault read slow")
+	if relay.Holds(t.Context(), s.socket, "vault") == nil {
+		t.Error("Holds(), a command running = none")
+	}
+	if slices.Contains(s.run.Calls(), "vault whoami") {
+		t.Errorf("ran %q: want no wait for the turn", s.run.Calls())
+	}
+	hangUp()
+	<-done
+}
+
+// A client that connects and sends nothing is closed on in time: the relay
+// still ends, signing out, rather than wait for it.
+func TestASilentClientDoesntHoldTheRelayUp(t *testing.T) {
+	relay.SetWaits(t, time.Second, time.Second, 50*time.Millisecond)
+	s := serve(t, nil)
+	c, err := net.Dial("unix", s.socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	// The relay takes connections in turn: answered after, the silent one's
+	// been taken, and waits for its request.
+	if relay.Holds(t.Context(), s.socket, "vault") == nil {
+		t.Fatal("Holds() = none")
+	}
+	s.stop()
+	if why := s.ended(t); why != relay.Stopped {
+		t.Errorf("ended as %q", why)
+	}
+	s.signedOut(t)
 }
 
 // One relay at a time: another finding one answering at its socket
@@ -384,7 +521,7 @@ func TestOneRelayAtATime(t *testing.T) {
 	if _, err := relay.Listen(s.socket); !errors.Is(err, relay.ErrOpen) {
 		t.Errorf("Listen(), one answering = %v, want %v", err, relay.ErrOpen)
 	}
-	if !relay.Holds(t.Context(), s.socket, "vault") {
+	if relay.Holds(t.Context(), s.socket, "vault") == nil {
 		t.Error("Holds(): want the first relay serving still")
 	}
 }
@@ -396,7 +533,7 @@ func TestASocketPathTooLong(t *testing.T) {
 	if _, err := relay.Listen(socket); err == nil || !strings.Contains(err.Error(), "longer than the 103 bytes macOS allows a socket's path") {
 		t.Errorf("Listen() = %v", err)
 	}
-	if relay.Holds(t.Context(), socket, "vault") {
+	if relay.Holds(t.Context(), socket, "vault") != nil {
 		t.Error("Holds() = true")
 	}
 	if _, err := relay.Stop(t.Context(), socket); !errors.Is(err, relay.ErrNone) {
@@ -419,7 +556,7 @@ func TestARelayRunsOneCommandAtATime(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
-			run := relay.Via(relay.Client(runnertest.New(t)), s.socket, "vault")
+			run := toRelay(runnertest.New(t), s.socket, "vault")
 			if _, err := run.Run(context.Background(), runner.Command{Name: "vault", Args: []string{"read", "a"}}); err != nil {
 				t.Error(err)
 			}
@@ -438,7 +575,7 @@ func TestAClientHangingUpGivesItsCommandUp(t *testing.T) {
 		run.On("vault", "read", "slow").Hangs()
 		run.On("vault", "read", "next").Prints("next")
 	})
-	run := relay.Via(relay.Client(runnertest.New(t)), s.socket, "vault")
+	run := toRelay(runnertest.New(t), s.socket, "vault")
 	ctx, hangUp := context.WithCancel(t.Context())
 	given := make(chan error, 1)
 	go func() {
@@ -462,7 +599,7 @@ func TestTheRelayEndingFailsAClientsCommand(t *testing.T) {
 	here := runnertest.New(t)
 	given := make(chan error, 1)
 	go func() {
-		_, err := relay.Via(relay.Client(here), s.socket, "vault").Run(t.Context(), runner.Command{Name: "vault", Args: []string{"read", "slow"}})
+		_, err := toRelay(here, s.socket, "vault").Run(t.Context(), runner.Command{Name: "vault", Args: []string{"read", "slow"}})
 		given <- err
 	}()
 	waitFor(t, s.run, "vault read slow")
@@ -474,7 +611,7 @@ func TestTheRelayEndingFailsAClientsCommand(t *testing.T) {
 		t.Errorf("ended as %q", why)
 	}
 	ranHere(t, here)
-	if _, err := relay.Via(relay.Client(here), s.socket, "vault").Run(t.Context(), runner.Command{Name: "vault", Args: []string{"read", "a"}}); !errors.Is(err, relay.ErrNone) {
+	if _, err := toRelay(here, s.socket, "vault").Run(t.Context(), runner.Command{Name: "vault", Args: []string{"read", "a"}}); !errors.Is(err, relay.ErrNone) {
 		t.Errorf("Run(), ended = %v, want %v", err, relay.ErrNone)
 	}
 	ranHere(t, here)

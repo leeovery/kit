@@ -57,7 +57,8 @@ with `kit secret signin` and leave it open. Then:
 3. Run `kit secret signout` once the work that needed secrets is done. The
    person closing that terminal, or pressing ctrl-C there, ends it too.
 
-kit keeps the sign-in in memory alone, never in a file. The store ends it
+kit keeps the sign-in in memory alone, never in a file, but while it's
+open, anything running as the person can use it. The store ends it
 by itself once it's unused a while, as 1Password does after 30 minutes:
 the next command that needs a secret finds it over, ends
 `kit secret signin`, and fails at once, saying to sign in again.

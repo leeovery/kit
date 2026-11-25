@@ -139,10 +139,11 @@ program asks for your password, at this terminal: kit never sees it.
 
 The sign-in holds only for what runs in this terminal, so kit stays open
 here, keeping it in memory, and runs the stores' commands for every other
-kit command, in any shell, an agent's included. Leave it open while that
-work goes on. ctrl-C, closing the terminal, or kit secret signout ends it,
-signing out; so does the store, once the sign-in's left unused a while.
-Run it in a terminal of your own.`,
+kit command, in any shell, an agent's included. While it's open, anything
+running as you can use the sign-in. Leave it open while that work goes
+on. ctrl-C, closing the terminal, or kit secret signout ends it, signing
+out; so does the store, once the sign-in's left unused a while. Run it in
+a terminal of your own.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.prepared(cmd, secretKind+" signin", a.secretsSignIn)

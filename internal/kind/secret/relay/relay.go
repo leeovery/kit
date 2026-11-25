@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -50,7 +51,9 @@ type Relay struct {
 
 // Listen listens at socket, only the person's user able to connect:
 // ErrOpen when a relay answers there already. A socket there that nothing
-// answers was left by a relay that didn't end, and is replaced.
+// answers was left by a relay that didn't end, and is replaced. Relays
+// look and listen in turn, under a lock beside the socket, so that one
+// never takes another's for one left.
 func Listen(socket string) (*Relay, error) {
 	if len(socket) > maxPath {
 		return nil, fmt.Errorf("%s is longer than the %d bytes macOS allows a socket's path", socket, maxPath)
@@ -58,11 +61,18 @@ func Listen(socket string) (*Relay, error) {
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 		return nil, fmt.Errorf("make kit's state folder: %w", err)
 	}
+	unlock, err := lock(socket + ".lock")
+	if err != nil {
+		return nil, fmt.Errorf("lock kit secret signin's socket: %w", err)
+	}
+	defer unlock()
 	ln, err := net.Listen("unix", socket)
 	if errors.Is(err, syscall.EADDRINUSE) {
-		if c, answered := connect(context.Background(), socket); answered == nil {
-			_ = c.Close()
+		if Answers(context.Background(), socket) {
 			return nil, ErrOpen
+		}
+		if err := os.Remove(socket); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("remove the socket left at %s: %w", socket, err)
 		}
 		ln, err = net.Listen("unix", socket)
 	}
@@ -74,6 +84,19 @@ func Listen(socket string) (*Relay, error) {
 		return nil, fmt.Errorf("keep the socket to you alone: %w", err)
 	}
 	return &Relay{ln: ln, owner: os.Getuid()}, nil
+}
+
+// lock takes the lock of the file at path, made for it: what gives it up.
+func lock(path string) (unlock func(), err error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() { _ = f.Close() }, nil
 }
 
 // Close stops listening, and removes the socket.
@@ -193,15 +216,28 @@ func (s *serving) names() []string {
 	return names
 }
 
+// requestWait is how long a relay waits for a client's request, which it
+// sends as it connects: a client that sends none is closed on, rather than
+// keep the relay from ending.
+var requestWait = 5 * time.Second
+
 // answer answers what's asked at c, one request, from a process of the
-// person's user alone, each other closed on unanswered.
+// person's user alone, each other closed on unanswered. It takes the
+// request up at once (response's Ack), for the client to know it's not
+// stopped, then answers it.
 func (s *serving) answer(ctx context.Context, c net.Conn) {
 	defer func() { _ = c.Close() }()
 	if !s.relay.owners(c) {
 		return
 	}
+	_ = c.SetReadDeadline(time.Now().Add(requestWait))
 	var req request
 	if err := json.NewDecoder(c).Decode(&req); err != nil {
+		return
+	}
+	_ = c.SetReadDeadline(time.Time{})
+	out := json.NewEncoder(c)
+	if err := out.Encode(response{Ack: true}); err != nil {
 		return
 	}
 	var res response
@@ -218,7 +254,7 @@ func (s *serving) answer(ctx context.Context, c net.Conn) {
 			return
 		}
 	}
-	_ = json.NewEncoder(c).Encode(res)
+	_ = out.Encode(res)
 }
 
 // owners reports whether the process at c's other end runs as the relay's
@@ -234,11 +270,18 @@ func (r *Relay) owners(c net.Conn) bool {
 
 // holds reports whether the relay holds a sign-in to the store whose ID is
 // id that lasts, as the store says: one that doesn't answer is taken to,
-// and one it says is over ends the relay.
+// and one it says is over ends the relay. It doesn't wait for a command
+// running, which can take longer than a client waits: that the command's
+// running says the sign-in held as it began.
 func (s *serving) holds(ctx context.Context, id string) bool {
 	h, ok := s.heldFor(id)
-	if !ok || !s.take(ctx) {
+	if !ok || ctx.Err() != nil {
 		return false
+	}
+	select {
+	case s.turn <- struct{}{}:
+	default:
+		return true
 	}
 	defer s.give()
 	if lasts, err := h.Store.Lasts(ctx, s.run, h.Session); err == nil && !lasts {
@@ -328,6 +371,8 @@ func (c command) runner() runner.Command {
 
 // response is a relay's answer.
 type response struct {
+	// Ack is the relay taking a request up, before its answer.
+	Ack bool `json:",omitempty"`
 	// Stdout, Stderr, Exit and Duration are what a command did, as
 	// runner.Result has it; Err, why it didn't run, or finish, when it
 	// didn't exit by itself.

@@ -12,38 +12,38 @@ import (
 )
 
 // standing is how d stands: open when kit secret signin, open in another
-// terminal, holds d's sign-in (isRelayed); else as d says.
+// terminal, holds d's sign-in (relayOf); else as d says.
 func (s *Secrets) standing(ctx context.Context, d store.Driver) store.Session {
-	if s.isRelayed(ctx, d) {
+	if s.relayOf(ctx, d) != nil {
 		return store.Open
 	}
 	return d.Session(ctx, s.run)
 }
 
-// isRelayed reports whether d's commands go to the relay of kit secret
-// signin, open in another terminal, which holds a sign-in to d that lasts:
-// asked once a run, d's commands going there or staying here for the rest
-// of it.
-func (s *Secrets) isRelayed(ctx context.Context, d store.Driver) bool {
+// relayOf is the line to the relay of kit secret signin, open in another
+// terminal, when it holds a sign-in to d that lasts: asked once a run, d's
+// commands going there, or staying here, for the rest of it. Nil when none
+// does.
+func (s *Secrets) relayOf(ctx context.Context, d store.Driver) *relay.Line {
 	if _, ok := d.(store.Passworded); !ok {
-		return false
+		return nil
 	}
 	id := d.About().ID
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	held, asked := s.relayed[id]
+	line, asked := s.relayed[id]
 	if !asked {
-		held = relay.Holds(ctx, relay.Socket(s.stateDir), id)
-		s.relayed[id] = held
+		line = relay.Holds(ctx, relay.Socket(s.stateDir), id)
+		s.relayed[id] = line
 	}
-	return held
+	return line
 }
 
 // through is the runner d's commands go through: to the relay holding d's
-// sign-in, when one does (isRelayed).
+// sign-in, when one does (relayOf).
 func (s *Secrets) through(ctx context.Context, d store.Driver) runner.Runner {
-	if s.isRelayed(ctx, d) {
-		return relay.Via(s.run, relay.Socket(s.stateDir), d.About().ID)
+	if line := s.relayOf(ctx, d); line != nil {
+		return relay.Via(s.run, line)
 	}
 	return s.run
 }
