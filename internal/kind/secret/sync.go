@@ -111,8 +111,9 @@ type reader func(ctx context.Context, run runner.Runner, ref string) (string, er
 // the next sync to read again, as reading on would ask the person again.
 func (s *Secrets) readEach(ctx context.Context, d store.Driver, refs []string, read reader) (got, unread map[string]string, err error) {
 	got, unread = map[string]string{}, map[string]string{}
+	run := s.through(ctx, d)
 	for _, ref := range refs {
-		v, err := read(ctx, s.run, ref)
+		v, err := read(ctx, run, ref)
 		named, isUnread := errors.AsType[store.Unread](err)
 		switch {
 		case err == nil:
@@ -146,10 +147,11 @@ func (s *Secrets) refs(d store.Driver, files bool) []string {
 
 // Sync reads every declared secret from its store and puts each in place:
 // first the secrets of the stores ready now, signed in with their programs
-// on kit's PATH, each in the session kit keeps for it while that lasts
-// (standing); then, waiting for the rest together, each other's as soon
-// as what it waits for has come, in a run that applies: its program, and
-// its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written
+// on kit's PATH, each through kit secret signin, open in another terminal,
+// while that holds its sign-in (standing); then, waiting for the rest
+// together, each other's as soon as what it waits for has come, in a run
+// that applies: its program, and its sign-in, raised at a terminal
+// (Cards). ~/.secrets.zsh is written
 // whole each time, each value without the newlines it ends with (a
 // variable not read keeps its line, so a partial read never shrinks it, but
 // for a line cut short by a value of many lines kit once wrote); a
@@ -175,10 +177,7 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 			later = append(later, d)
 			continue
 		}
-		d, session, err := s.standing(ctx, d)
-		switch {
-		case err != nil:
-			sy.down[d.About().ID] = err.Error()
+		switch session := s.standing(ctx, d); {
 		case session != store.SignedOut:
 			sy.read(ctx, d, session)
 		case engine.Takes(ctx, signInName(d)):
@@ -346,11 +345,7 @@ func (sy *syncing) heldBack(d store.Driver) string {
 // settle reads store d's secrets and puts them in place, now it's settled:
 // held back when it's still signed out.
 func (sy *syncing) settle(ctx context.Context, d store.Driver) error {
-	d, session, err := sy.s.standing(ctx, d)
-	if err != nil {
-		sy.down[d.About().ID] = err.Error()
-		return nil
-	}
+	session := sy.s.standing(ctx, d)
 	if session == store.SignedOut {
 		sy.down[d.About().ID] = d.About().SignedOut
 		return nil

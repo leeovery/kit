@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/colorprofile"
@@ -188,10 +189,19 @@ type app struct {
 	args []string
 }
 
-// NewRootCommand builds the kit command tree. A command is known by the
-// start of its name, when no other starts so: kit rec is kit reconcile.
-func NewRootCommand(deps Deps) *cobra.Command {
+// cobraSettings sets cobra's settings, which are its whole process's, once,
+// before any command tree's read: a command is known by the start of its
+// name, when no other starts so, as kit rec is kit reconcile; and commands
+// show in the order they're added, the whole Mac's by use, then what kit
+// manages, by group.
+var cobraSettings = sync.OnceFunc(func() {
 	cobra.EnablePrefixMatching = true
+	cobra.EnableCommandSorting = false
+})
+
+// NewRootCommand builds the kit command tree.
+func NewRootCommand(deps Deps) *cobra.Command {
+	cobraSettings()
 	a := &app{Deps: deps}
 	root := &cobra.Command{
 		Use:   "kit",
@@ -225,9 +235,6 @@ status is the report, every check.`,
 	flags.BoolVar(&a.underHome, underHome, false, "run from kit's home, under its wordmark")
 	_ = flags.MarkHidden(underHome)
 	root.Flags().BoolVarP(&a.version, "version", "v", false, "version for kit")
-	// Commands show in the order they're added: the whole Mac's by use,
-	// then what kit manages, by group.
-	cobra.EnableCommandSorting = false
 	root.AddGroup(groups...)
 	for _, cmd := range []*cobra.Command{newStatusCommand(a), newApplyCommand(a), newReconcileCommand(a), newNightlyCommand(a), newListCommand(a), newWhyCommand(a), newLogCommand(a), newMachineCommand(a), newTerminalCommand(a), newBootstrapCommand(a), newSetupCommand(a), newAgentCommand(a)} {
 		cmd.GroupID = groupMac

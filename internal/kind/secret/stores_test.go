@@ -42,8 +42,6 @@ type fakeStore struct {
 	// unlocks counts the times it was asked to open a session.
 	atScreen bool
 	unlocks  int
-	// readWith is the session each read ran in, "" for none.
-	readWith []string
 }
 
 func (f *fakeStore) About() store.About {
@@ -102,13 +100,7 @@ func (f *fakeStore) Unlock(context.Context, runner.Runner) error {
 }
 
 func (f *fakeStore) Read(_ context.Context, _ runner.Runner, ref string) (string, error) {
-	return f.readIn("", ref)
-}
-
-// readIn reads ref in session, "" for none.
-func (f *fakeStore) readIn(session, ref string) (string, error) {
 	f.reads = append(f.reads, []string{ref})
-	f.readWith = append(f.readWith, session)
 	if f.locked {
 		return "", errors.New("not approved")
 	}
@@ -148,75 +140,43 @@ func (f *fakeStore) Delete(context.Context, runner.Runner, string, string) error
 	return errors.New("not kept here")
 }
 
-// passwordStore is fake signing in with a password too: each sign-in gives
-// the next of gives, a session live till it's ended or expired; refused,
-// it signs no one in; failsSignOut has a sign-out fail, the session ended
-// none the less; silent has it never answer whether a session lasts. ended
-// are the sessions signed out of.
-type passwordStore struct {
-	*fakeStore
-	gives        []string
-	live         map[string]bool
-	ended        []string
-	refused      bool
-	failsSignOut bool
-	silent       bool
+// passwordStore is fake signing in with a password too, driven through its
+// program, fakevault, run by the runner it's given, as a real store's
+// driver is: a read is fakevault read <ref>, printing the value; a session
+// applies to a command as FAKE_SESSION; whether one lasts is fakevault
+// whoami's to say, run in it; signing out runs fakevault signout in it.
+type passwordStore struct{ *fakeStore }
+
+func (p *passwordStore) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
+	p.reads = append(p.reads, []string{ref})
+	res, err := run.Run(ctx, runner.Command{Name: "fakevault", Args: []string{"read", ref}, Secret: true})
+	return string(res.Stdout), err
+}
+
+func (p *passwordStore) ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error) {
+	return p.Read(ctx, run, ref)
 }
 
 func (p *passwordStore) SignIn(context.Context, runner.Runner) (string, error) {
-	if p.refused || len(p.gives) == 0 {
-		return "", errors.New("wrong password")
+	return "", errors.New("signing in is kit secret signin's")
+}
+
+func (p *passwordStore) Apply(session string, c runner.Command) runner.Command {
+	c.Env = append(slices.Clone(c.Env), "FAKE_SESSION="+session)
+	return c
+}
+
+func (p *passwordStore) Lasts(ctx context.Context, run runner.Runner, session string) (bool, error) {
+	_, err := run.Run(ctx, p.Apply(session, runner.Command{Name: "fakevault", Args: []string{"whoami"}}))
+	if _, over := errors.AsType[*runner.ExitError](err); over {
+		return false, nil
 	}
-	session := p.gives[0]
-	p.gives = p.gives[1:]
-	if p.live == nil {
-		p.live = map[string]bool{}
-	}
-	p.live[session] = true
-	return session, nil
+	return err == nil, err
 }
 
-func (p *passwordStore) Using(session string) store.Driver { return inSession{p, session} }
-
-func (p *passwordStore) SignOut(_ context.Context, _ runner.Runner, session string) error {
-	p.ended = append(p.ended, session)
-	delete(p.live, session)
-	if p.failsSignOut {
-		return errors.New("no answer")
-	}
-	return nil
-}
-
-// Lasts says whether session is live: no answer at all while silent.
-func (p *passwordStore) Lasts(_ context.Context, _ runner.Runner, session string) (bool, error) {
-	if p.silent {
-		return false, errors.New("timed out")
-	}
-	return p.live[session], nil
-}
-
-// expire has session end, as a store ends one left unused.
-func (p *passwordStore) expire(session string) { delete(p.live, session) }
-
-// inSession is a passwordStore using a session: open while it's live.
-type inSession struct {
-	*passwordStore
-	session string
-}
-
-func (s inSession) Session(ctx context.Context, run runner.Runner) store.Session {
-	if s.live[s.session] {
-		return store.Open
-	}
-	return s.passwordStore.Session(ctx, run)
-}
-
-func (s inSession) Read(_ context.Context, _ runner.Runner, ref string) (string, error) {
-	return s.readIn(s.session, ref)
-}
-
-func (s inSession) ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error) {
-	return s.Read(ctx, run, ref)
+func (p *passwordStore) SignOut(ctx context.Context, run runner.Runner, session string) error {
+	_, err := run.Run(ctx, p.Apply(session, runner.Command{Name: "fakevault", Args: []string{"signout"}}))
+	return err
 }
 
 var _ store.Passworded = (*passwordStore)(nil)

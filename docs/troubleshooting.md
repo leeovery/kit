@@ -107,11 +107,18 @@ screen is locked, as when you're away, nobody can give it. kit fails at once rat
 
 1. In a terminal of your own, such as over SSH, run `kit secret signin`.
 2. Type your 1Password password when 1Password asks for it.
-3. Run the command again.
+3. Leave that terminal open.
+4. Run the command again, from any terminal.
 
-Every kit command uses that session, an agent's included. 1Password ends it after 30 minutes
-unused, and kit then asks you to sign in again. To end it sooner, run `kit secret signout`
-when the work is done.
+1Password accepts the sign-in only in the terminal you signed in from. So `kit secret signin`
+stays open there and runs 1Password's commands for every other kit command, an agent's
+included. kit keeps the sign-in in memory, never in a file.
+
+These end the sign-in, and kit signs you out of 1Password:
+
+- `kit secret signout`, from any terminal, when the work is done.
+- Pressing ctrl-C in that terminal, or closing it.
+- 1Password itself, after 30 minutes unused. kit then asks you to sign in again.
 
 ## App Store apps don't install
 

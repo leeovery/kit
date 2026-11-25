@@ -46,17 +46,21 @@ answer it.
 
 While the Mac's screen is locked, as with the person away, kit asks for no
 approval there: a command that needs one fails at once, saying to sign in
-with `kit secret signin`. Then:
+with `kit secret signin` and leave it open. Then:
 
-1. Ask the person to run `kit secret signin` in a terminal of their own.
-   Their store asks for their password there; never ask for it yourself.
-2. Carry on once they say it's done: every kit command after uses the
-   session kit keeps, in any shell, yours included.
-3. Run `kit secret signout` once the work that needed secrets is done.
+1. Ask the person to run `kit secret signin` in a terminal of their own,
+   and leave it open. Their store asks for their password there; never ask
+   for it yourself.
+2. Carry on once they say it's done. The sign-in holds only in their
+   terminal, so kit stays open there and runs the store's commands for
+   every other kit command, in any shell, yours included.
+3. Run `kit secret signout` once the work that needed secrets is done. The
+   person closing that terminal, or pressing ctrl-C there, ends it too.
 
-The store ends the session by itself once it's unused a while, as
-1Password does after 30 minutes. kit then drops its copy, and the next
-command that needs a secret says to sign in again.
+kit keeps the sign-in in memory alone, never in a file. The store ends it
+by itself once it's unused a while, as 1Password does after 30 minutes:
+the next command that needs a secret finds it over, ends
+`kit secret signin`, and fails at once, saying to sign in again.
 
 ## How they're declared
 

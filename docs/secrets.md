@@ -84,8 +84,8 @@ waits until the token has synced.
 ## Good to know
 
 - **1Password may ask for your approval,** such as a fingerprint, before a value is read,
-  kept or deleted. kit waits for it. If the screen is locked, kit fails at once and says to
-  run `kit secret signin`: see [Troubleshooting](troubleshooting.md).
+  kept or deleted. kit waits for it. If the screen is locked, kit fails at once: see
+  [Troubleshooting](troubleshooting.md) for `kit secret signin`.
 - **1Password is the one store today.** The reference picks it: `op://` means 1Password.
 - **A new Mac syncs after you sign in.** Signing in to 1Password is a card partway through the
   run. What needs a secret waits until then.
@@ -105,7 +105,7 @@ waits until the token has synced.
 | `kit secret places` | Lists the blocks |
 | `kit secret sync` | Puts every secret in place again |
 | `kit secret remove <name>...` | Takes it off, and undeclares it |
-| `kit secret signin`, `signout` | A session for away from the Mac |
+| `kit secret signin`, `signout` | A sign-in for away from the Mac |
 
 ## Related
 
