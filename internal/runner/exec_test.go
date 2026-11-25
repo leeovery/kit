@@ -817,10 +817,20 @@ func TestExecRunsAnUnlimitedCommandAsLongAsItTakes(t *testing.T) {
 // itself, runs in kit's own process group, the terminal's foreground, and
 // what it prints on its output is kept; ended, it's ended alone.
 func TestExecRunsAProgramAtKitsTerminal(t *testing.T) {
-	e, _ := programs(t, map[string]string{"says": "echo kept", "waits": `echo $$ > "$1"; exec /bin/sleep 10`})
+	e, _ := programs(t, map[string]string{"says": `read typed; echo "kept $typed"`, "waits": `echo $$ > "$1"; exec /bin/sleep 10`})
+	typed := filepath.Join(t.TempDir(), "typed")
+	if err := os.WriteFile(typed, []byte("this\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, err := os.Open(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close() }()
+	e.In = in
 	res, err := e.Run(t.Context(), runner.Command{Name: "says", Terminal: true})
-	if err != nil || string(res.Stdout) != "kept\n" || res.Group != 0 {
-		t.Errorf("Run() = %+v, %v; want its output kept, no group of its own", res, err)
+	if err != nil || string(res.Stdout) != "kept this\n" || res.Group != 0 {
+		t.Errorf("Run() = %+v, %v; want what's typed at the terminal read, its output kept, no group of its own", res, err)
 	}
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	ctx, cancel := context.WithCancel(t.Context())

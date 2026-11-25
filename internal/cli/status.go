@@ -794,15 +794,22 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 		if asked > 0 {
 			about.Says = look.Orange("that wasn't it: try again")
 		}
-		if f, ok := face.(interface{ StepAside() func() }); ok {
-			defer f.StepAside()()
-		}
+		defer stepAside(face)()
 		return a.ReadSecret(ctx, about)
 	})
 	if err != nil {
 		return nil
 	}
 	return s
+}
+
+// stepAside has face's live part step aside, for what asks at the terminal
+// in its place, kit's field or a program's own prompt: what puts it back.
+func stepAside(face render.Face) (back func()) {
+	if f, ok := face.(interface{ StepAside() func() }); ok {
+		return f.StepAside()
+	}
+	return func() {}
 }
 
 // commands is the runner a run's commands go through: on path, with env;

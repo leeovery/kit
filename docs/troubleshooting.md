@@ -109,8 +109,9 @@ screen is locked, as when you're away, nobody can give it. kit fails at once rat
 2. Type your 1Password password when 1Password asks for it.
 3. Run the command again.
 
-Every kit command uses that session, an agent's included. Run `kit secret signout` when the
-work is done.
+Every kit command uses that session, an agent's included. 1Password ends it after 30 minutes
+unused, and kit then asks you to sign in again. To end it sooner, run `kit secret signout`
+when the work is done.
 
 ## App Store apps don't install
 

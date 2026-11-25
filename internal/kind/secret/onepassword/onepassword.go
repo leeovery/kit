@@ -108,8 +108,8 @@ var about = store.About{
 	NoAnswer:  "unlock its app, with Settings › Developer › Integrate with 1Password CLI on; away from the Mac, as over a remote connection, " + withPassword,
 	SignedOut: "1Password isn't signed in, or its CLI isn't turned on: sign in to its app, then turn on Settings › Developer › Integrate with 1Password CLI; if kit still waits with both done, quit 1Password and open it again",
 	// The app's prompt takes a fingerprint, on the Mac alone.
-	AtScreen: true,
-	Locked:   withPassword,
+	AtScreen:   true,
+	WhenLocked: withPassword,
 	SignIn: store.SignIn{
 		Title: "Sign in to 1Password",
 		Steps: []string{
@@ -133,9 +133,14 @@ func (Driver) About() store.About { return about }
 
 // SignIn signs in with the person's password, op asking for it at kit's
 // terminal, the app's approval off: the session's variable op prints for a
-// shell to set, which names the account it's for, as kit keeps it.
+// shell to set, which names the account it's for, as kit keeps it. op
+// prints it in the shell's own words, as fish's set -x, so it's told the
+// shell is sh; and it prints none while a session it's given is open, so
+// it's given none.
 func (Driver) SignIn(ctx context.Context, run runner.Runner) (string, error) {
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"signin"}, Env: append(opVars(), biometric+"=false"), Terminal: true, Secret: true, Timeout: approvalTimeout})
+	env := slices.DeleteFunc(opVars(), func(kv string) bool { return strings.HasPrefix(kv, "OP_SESSION_") })
+	env = append(env, biometric+"=false", "SHELL=/bin/sh")
+	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"signin"}, Env: env, Terminal: true, Secret: true, Timeout: approvalTimeout})
 	if err != nil {
 		return "", fmt.Errorf("1Password didn't sign you in: %w", err)
 	}
@@ -162,6 +167,17 @@ func sessionOf(out []byte) (string, bool) {
 
 // Using is 1Password with op run in session, as SignIn gave it.
 func (Driver) Using(session string) store.Driver { return Driver{session: session} }
+
+// Lasts reports whether session is open, as op whoami, run in it, says:
+// op exiting otherwise than 0 says it's over, as with the app's approval
+// off it asks nothing else; op not finishing says nothing.
+func (Driver) Lasts(ctx context.Context, run runner.Runner, session string) (bool, error) {
+	_, err := (Driver{session: session}).op(ctx, run, runner.Command{Args: []string{"whoami"}, Timeout: opTimeout})
+	if _, over := errors.AsType[*runner.ExitError](err); err != nil && !over {
+		return false, fmt.Errorf("op didn't answer: %w", err)
+	}
+	return err == nil, nil
+}
 
 // SignOut ends session with op signout, run in it.
 func (Driver) SignOut(ctx context.Context, run runner.Runner, session string) error {

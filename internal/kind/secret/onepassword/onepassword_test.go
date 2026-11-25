@@ -250,6 +250,7 @@ func TestOpWithASessionRunsWithTheAppsApprovalOff(t *testing.T) {
 // shell to set, as NAME=token. A sign-in op refuses, or that prints none,
 // fails, never saying what op printed.
 func TestSignInWithAPassword(t *testing.T) {
+	t.Setenv("OP_SESSION_OLD", "still-open")
 	for _, c := range []struct {
 		name, prints string
 		exits        int
@@ -270,6 +271,37 @@ func TestSignInWithAPassword(t *testing.T) {
 			if biometric, _ := runner.LookupEnv(cmd.Env, "OP_BIOMETRIC_UNLOCK_ENABLED"); !cmd.Terminal || !cmd.Secret || cmd.SharesSession || biometric != "false" {
 				t.Errorf("%s: at the terminal %v, its output a secret %v, sharing kit's session %v, the app's approval %q; want op at the terminal, the app's approval off, its output kept from reports",
 					cmd, cmd.Terminal, cmd.Secret, cmd.SharesSession, biometric)
+			}
+			shell, _ := runner.LookupEnv(cmd.Env, "SHELL")
+			if _, old := runner.LookupEnv(cmd.Env, "OP_SESSION_OLD"); shell != "/bin/sh" || old {
+				t.Errorf("%s ran with SHELL %q, given kit's session %v; want sh's words, and no session to keep it from printing one", cmd, shell, old)
+			}
+		})
+	}
+}
+
+// Whether a session lasts is op whoami's to say, run in it: done, it's
+// open; exiting otherwise, it's over; not finishing, op hasn't answered.
+func TestASessionLasts(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		script func(*runnertest.Script)
+		lasts  bool
+		fails  bool
+	}{
+		{"open", func(*runnertest.Script) {}, true, false},
+		{"over", func(s *runnertest.Script) { s.Exits(1).PrintsToStderr("[ERROR] You are not currently signed in.") }, false, false},
+		{"no answer", func(s *runnertest.Script) { s.Fails(fmt.Errorf("op whoami: %w", context.DeadlineExceeded)) }, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := runnertest.New(t)
+			c.script(run.On("op", "whoami"))
+			lasts, err := onepassword.Driver{}.Lasts(t.Context(), run, "OP_SESSION_ABC123=tok-en")
+			if lasts != c.lasts || (err != nil) != c.fails {
+				t.Errorf("Lasts() = %v, %v; want %v, failing %v", lasts, err, c.lasts, c.fails)
+			}
+			if session, _ := runner.LookupEnv(run.Commands()[0].Env, "OP_SESSION_ABC123"); session != "tok-en" {
+				t.Errorf("op whoami ran in the session %q", session)
 			}
 		})
 	}

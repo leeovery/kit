@@ -14,9 +14,13 @@ import (
 // session open already, kit's own from d's password sign-in among them, or
 // one it opens, the person approving it (store.Driver.Unlock); not yet,
 // signed out; or why not, in d's words, at once when the person can't
-// approve it (cantAsk).
+// approve it (cantAsk), or d doesn't say whether kit's session lasts
+// (standing).
 func (s *Secrets) Ready(ctx context.Context, d store.Driver) error {
-	d, session := s.standing(ctx, d)
+	d, session, err := s.standing(ctx, d)
+	if err != nil {
+		return err
+	}
 	switch session {
 	case store.Open:
 		return nil
@@ -70,12 +74,8 @@ func (s *Secrets) Attach(ctx context.Context, d store.Driver, item, name, path s
 	return s.driver(d).Attach(ctx, s.run, item, name, path)
 }
 
-// Delete deletes the value short names from d's item, once d answers
-// (Ready).
+// Delete deletes the value short names from d's item, d ready (Ready).
 func (s *Secrets) Delete(ctx context.Context, d store.Driver, item, short string) error {
-	if err := s.Ready(ctx, d); err != nil {
-		return err
-	}
 	return s.driver(d).Delete(ctx, s.run, item, short)
 }
 

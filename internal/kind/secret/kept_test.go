@@ -132,8 +132,8 @@ func TestAnExpiredSessionIsDropped(t *testing.T) {
 }
 
 // Signing in keeps the session the store gives in kit's state, in a file
-// the person alone can read, in place of one kept before; one the store
-// refuses keeps nothing. Signing out ends the session at the store and
+// the person alone can read, in place of one kept before, which is ended
+// first; one the store refuses keeps nothing. Signing out ends the session at the store and
 // deletes kit's copy, even when the store doesn't answer.
 func TestSignInAndOut(t *testing.T) {
 	p := passwordFake("session-1", "session-2", "session-3")
@@ -152,10 +152,10 @@ func TestSignInAndOut(t *testing.T) {
 			t.Fatalf("signed in: the record is %v, %v, holding %s %v; want it the person's alone", info, err, session, holds(session))
 		}
 	}
-	if holds("session-1") || !slices.Equal(s.Kept(), []store.Passworded{p}) {
-		t.Errorf("signed in again: the record holds session-1 %v, kept %v; want the new session alone", holds("session-1"), s.Kept())
+	if holds("session-1") || !slices.Equal(s.Kept(), []store.Passworded{p}) || !slices.Equal(p.ended, []string{"session-1"}) {
+		t.Errorf("signed in again: the record holds session-1 %v, kept %v, ended %q; want the old session ended, the new one alone kept", holds("session-1"), s.Kept(), p.ended)
 	}
-	if err := s.SignOut(t.Context(), p); err != nil || !slices.Equal(p.ended, []string{"session-2"}) || holds("session-2") || len(s.Kept()) != 0 {
+	if err := s.SignOut(t.Context(), p); err != nil || !slices.Equal(p.ended, []string{"session-1", "session-2"}) || holds("session-2") || len(s.Kept()) != 0 {
 		t.Errorf("SignOut() = %v, ended %q, kept %v; want session-2 ended and deleted", err, p.ended, s.Kept())
 	}
 
@@ -187,5 +187,56 @@ func TestPassworded(t *testing.T) {
 	}
 	if _, err := secret.New(runnertest.New(t), t.TempDir(), t.TempDir()).Passworded(); err == nil || err.Error() != "no secrets are declared: kit-config's [secrets] declares them" {
 		t.Errorf("Passworded(), no secrets = %v", err)
+	}
+}
+
+// A store that doesn't answer whether the session kit keeps lasts, as when
+// it times out, says nothing of the session: kit keeps it, and the store
+// can't be used now, saying so, nothing asked of the person; the next try,
+// answered, uses it.
+func TestASessionUnansweredIsKept(t *testing.T) {
+	p := passwordFake("session-1")
+	s, _, _ := oneStore(t, p)
+	if err := s.SignIn(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	p.silent = true
+	const says = "Fake Vault didn't answer: timed out; kit keeps your sign-in for the next try"
+	if err := s.Ready(t.Context(), p); err == nil || err.Error() != says || p.unlocks != 0 || len(s.Kept()) != 1 {
+		t.Errorf("Ready() = %v, unlocked %d times, keeping %d; want %q, the session kept", err, p.unlocks, len(s.Kept()), says)
+	}
+	if _, err := s.Sync(t.Context()); !engine.IsNotYet(err) || err.Error() != says || len(p.reads) > 0 || len(s.Kept()) != 1 {
+		t.Errorf("Sync() = %v, read %q, keeping %d; want not yet, %q, the session kept", err, p.reads, len(s.Kept()), says)
+	}
+	p.silent = false
+	if err := s.Ready(t.Context(), p); err != nil || p.unlocks != 0 {
+		t.Errorf("Ready(), answered = %v, unlocked %d times; want the session used", err, p.unlocks)
+	}
+}
+
+// A run that finds the session it read over drops that session alone: one
+// a sign-in kept meanwhile, as from another terminal, stays.
+func TestAStaleSessionDropsNoNewerOne(t *testing.T) {
+	p := passwordFake("session-1", "session-2")
+	s, run, stateDir := oneStore(t, p)
+	screentest.Shows(run, false)
+	if err := s.SignIn(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Kept()) != 1 {
+		t.Fatal("session-1 isn't kept")
+	}
+	meanwhile := secret.New(run, t.TempDir(), stateDir)
+	if _, err := meanwhile.Values(config.List{Kind: "secret", Declared: true, Entries: []config.Entry{{Name: "B", Value: "vault:keys/b", Section: "secrets"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := meanwhile.SignIn(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ready(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(stateDir, "secret-sessions.json")); !strings.Contains(string(data), "session-2") {
+		t.Errorf("the record = %s; want session-2, kept meanwhile, still there", data)
 	}
 }

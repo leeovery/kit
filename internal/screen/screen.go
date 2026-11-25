@@ -18,9 +18,10 @@ func Query() runner.Command {
 	return runner.Command{Name: "ioreg", Args: []string{"-n", "Root", "-d1", "-a"}, Timeout: 10 * time.Second}
 }
 
-// Locked reports whether the screen of the session kit's user has at the
-// Mac is locked, as IOConsoleUsers says: false when it doesn't say, or
-// can't be read.
+// Locked reports whether the screen of kit's user is locked, as
+// IOConsoleUsers says: their session at the Mac locked, or not on the
+// screen at all, as with another user's switched to, or the login window.
+// False when the registry doesn't list the sessions, or can't be read.
 func Locked(ctx context.Context, run runner.Runner) bool {
 	res, err := run.Run(ctx, Query())
 	if err != nil {
@@ -30,18 +31,24 @@ func Locked(ctx context.Context, run runner.Runner) bool {
 	if err != nil {
 		return false
 	}
+	users := consoleUsers(root)
+	if users == nil {
+		return false
+	}
 	uid := int64(os.Getuid())
-	for _, user := range consoleUsers(root) {
+	for _, user := range users {
 		session, _ := user.(map[string]any)
-		if id, _ := session["kCGSSessionUserIDKey"].(int64); id == uid && session["CGSSessionScreenIsLocked"] == true {
-			return true
+		id, _ := session["kCGSSessionUserIDKey"].(int64)
+		onScreen := session["kCGSSessionOnConsoleKey"] != false
+		if id == uid && onScreen && session["CGSSessionScreenIsLocked"] != true {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // consoleUsers are the sessions IOConsoleUsers lists, wherever v, what
-// ioreg printed, holds it: none when it doesn't.
+// ioreg printed, holds it: nil when it doesn't.
 func consoleUsers(v any) []any {
 	switch v := v.(type) {
 	case map[string]any:

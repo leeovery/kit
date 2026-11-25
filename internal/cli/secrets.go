@@ -139,8 +139,8 @@ program asks for your password, at this terminal: kit never sees it.
 
 kit keeps the session the store gives back in its state, readable by you
 alone, and every kit command after uses it, in any shell, an agent's
-included, till kit secret signout, or till the store ends it. Run it in a
-terminal of your own.`,
+included, till the store ends it, once it's left unused a while, or till
+kit secret signout. Run it in a terminal of your own.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.prepared(cmd, secretKind+" signin", a.secretsSignIn)

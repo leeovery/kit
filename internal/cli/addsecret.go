@@ -438,6 +438,7 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 		return errors.New("say what becomes of their values in " + where + ": --keep-value or --delete-value")
 	}
 	c := startChanges(r, names)
+	ready := readyOnce(k)
 	for _, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
 			res := removeOne(ctx, r, c, k, name, shared, nil)
@@ -453,6 +454,9 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 			}
 			d, err := secret.ItemStore(e.Item)
 			if err == nil {
+				err = ready(ctx, d)
+			}
+			if err == nil {
 				err = k.Delete(ctx, d, e.Item, e.Value)
 			}
 			if err != nil {
@@ -463,6 +467,20 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 	}
 	c.sync(ctx, commitMessage("remove", secretKind, names, r.machine, ""))
 	return c.finish()
+}
+
+// readyOnce is k's Ready asked of each store once, its answer given again
+// for the rest of the store's values: a run's steps take turns.
+func readyOnce(k *secret.Secrets) func(ctx context.Context, d store.Driver) error {
+	asked := map[string]error{}
+	return func(ctx context.Context, d store.Driver) error {
+		id := d.About().ID
+		if err, ok := asked[id]; ok {
+			return err
+		}
+		asked[id] = k.Ready(ctx, d)
+		return asked[id]
+	}
 }
 
 // storesSaid names the stores keeping the values of the secrets declared

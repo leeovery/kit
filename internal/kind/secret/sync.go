@@ -175,7 +175,10 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 			later = append(later, d)
 			continue
 		}
-		switch d, session := s.standing(ctx, d); {
+		d, session, err := s.standing(ctx, d)
+		switch {
+		case err != nil:
+			sy.down[d.About().ID] = err.Error()
 		case session != store.SignedOut:
 			sy.read(ctx, d, session)
 		case engine.Takes(ctx, signInName(d)):
@@ -343,7 +346,11 @@ func (sy *syncing) heldBack(d store.Driver) string {
 // settle reads store d's secrets and puts them in place, now it's settled:
 // held back when it's still signed out.
 func (sy *syncing) settle(ctx context.Context, d store.Driver) error {
-	d, session := sy.s.standing(ctx, d)
+	d, session, err := sy.s.standing(ctx, d)
+	if err != nil {
+		sy.down[d.About().ID] = err.Error()
+		return nil
+	}
 	if session == store.SignedOut {
 		sy.down[d.About().ID] = d.About().SignedOut
 		return nil

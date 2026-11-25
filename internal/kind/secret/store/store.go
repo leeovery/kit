@@ -83,6 +83,10 @@ type Passworded interface {
 	// Using is the store using session in all it runs: its Session is Open
 	// while the session lasts.
 	Using(session string) Driver
+	// Lasts reports whether session is open still: false, with no error,
+	// once the store says it's over; an error when the store doesn't
+	// answer, so it can't say.
+	Lasts(ctx context.Context, run runner.Runner, session string) (bool, error)
 	// SignOut ends session at the store.
 	SignOut(ctx context.Context, run runner.Runner, session string) error
 }
@@ -129,10 +133,10 @@ type About struct {
 	NoAnswer, SignedOut string
 	// AtScreen is whether its approval needs the person at the Mac's
 	// screen, as a prompt only a fingerprint there answers: kit doesn't ask
-	// for it while that screen's locked, and says Locked instead, what to
-	// do then.
-	AtScreen bool
-	Locked   string
+	// for it while that screen's locked, and says WhenLocked instead, what
+	// to do then.
+	AtScreen   bool
+	WhenLocked string
 	// SignIn is signing in to it, as kit raises it at a terminal.
 	SignIn SignIn
 }

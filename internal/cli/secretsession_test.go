@@ -59,7 +59,7 @@ func TestSecretSignInAndOut(t *testing.T) {
 	w.terminal = true
 	w.fake.On("op", "signin").Prints("export OP_SESSION_ABC123=\"" + token + "\"\n# This command is meant to be used with your shell's eval function.\n")
 	out, errOut, code := w.run(t, "secret", "signin")
-	if code != 0 || !strings.Contains(ansi.Strip(out), "signed in to 1Password, till kit secret signout") {
+	if code != 0 || !strings.Contains(ansi.Strip(out), "signed in to 1Password, till left unused or kit secret signout") {
 		t.Errorf("kit secret signin printed\n%s%s exit %d", out, errOut, code)
 	}
 	if signin := opRan(t, w, "signin"); !signin.Terminal || !signin.Secret {
@@ -97,7 +97,8 @@ func TestSecretSignInAndOut(t *testing.T) {
 func TestSecretSignInWithoutATerminal(t *testing.T) {
 	w := secretsWorld(t)
 	_, errOut, code := w.run(t, "secret", "signin")
-	if code == 0 || !strings.Contains(errOut, "kit secret signin asks for a password at a terminal: have the person run it in a terminal of their own") || len(w.fake.Calls()) > 0 && slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "op ") }) {
+	ranOp := slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "op ") })
+	if code == 0 || !strings.Contains(errOut, "kit secret signin asks for a password at a terminal: have the person run it in a terminal of their own") || ranOp {
 		t.Errorf("printed %q, exit %d, ran %q", errOut, code, w.fake.Calls())
 	}
 }

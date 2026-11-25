@@ -7,7 +7,6 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/kind/secret/store"
-	"github.com/leeovery/kit/internal/render"
 )
 
 // secretsSignIn signs the person in with their password to each store the
@@ -29,11 +28,14 @@ func (a *app) secretsSignIn(ctx context.Context, r *run) error {
 	}
 	return a.oneStep(ctx, r, secretsStep, "signing in", func(ctx context.Context) check.Result {
 		for _, d := range stores {
-			if err := asideFor(r.face, func() error { return k.SignIn(ctx, d) }); err != nil {
+			back := stepAside(r.face)
+			err := k.SignIn(ctx, d)
+			back()
+			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
 		}
-		return check.Result{State: check.OK, Summary: "signed in to " + storeNames(stores) + ", till kit secret signout"}
+		return check.Result{State: check.OK, Summary: "signed in to " + storeNames(stores) + ", till left unused or kit secret signout"}
 	})
 }
 
@@ -58,15 +60,6 @@ func (a *app) secretsSignOut(ctx context.Context, r *run) error {
 		}
 		return check.Result{State: check.OK, Summary: "signed out of " + storeNames(kept) + ", kit's copy deleted"}
 	})
-}
-
-// asideFor runs do with face stepped aside, for a program asking at the
-// terminal itself.
-func asideFor(face render.Face, do func() error) error {
-	if f, ok := face.(interface{ StepAside() func() }); ok {
-		defer f.StepAside()()
-	}
-	return do()
 }
 
 // storeNames names stores, as in 1Password, or 1Password and another.

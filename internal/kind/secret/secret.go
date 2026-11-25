@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
@@ -68,6 +69,10 @@ type Secrets struct {
 	// keeps the stores' sessions (sessionsName).
 	home, stateDir string
 	declared       []Secret
+	// mu guards sessions, the record of them as this run read it: nil till
+	// it's read, and again once kit changes it.
+	mu       sync.Mutex
+	sessions map[string]string
 }
 
 // kindName names the kind.

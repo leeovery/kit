@@ -61,7 +61,7 @@ func (f *fakeStore) About() store.About {
 		}
 	}
 	if f.atScreen {
-		a.AtScreen, a.Locked = true, "sign in with its password"
+		a.AtScreen, a.WhenLocked = true, "sign in with its password"
 	}
 	return a
 }
@@ -151,7 +151,8 @@ func (f *fakeStore) Delete(context.Context, runner.Runner, string, string) error
 // passwordStore is fake signing in with a password too: each sign-in gives
 // the next of gives, a session live till it's ended or expired; refused,
 // it signs no one in; failsSignOut has a sign-out fail, the session ended
-// none the less. ended are the sessions signed out of.
+// none the less; silent has it never answer whether a session lasts. ended
+// are the sessions signed out of.
 type passwordStore struct {
 	*fakeStore
 	gives        []string
@@ -159,6 +160,7 @@ type passwordStore struct {
 	ended        []string
 	refused      bool
 	failsSignOut bool
+	silent       bool
 }
 
 func (p *passwordStore) SignIn(context.Context, runner.Runner) (string, error) {
@@ -183,6 +185,14 @@ func (p *passwordStore) SignOut(_ context.Context, _ runner.Runner, session stri
 		return errors.New("no answer")
 	}
 	return nil
+}
+
+// Lasts says whether session is live: no answer at all while silent.
+func (p *passwordStore) Lasts(_ context.Context, _ runner.Runner, session string) (bool, error) {
+	if p.silent {
+		return false, errors.New("timed out")
+	}
+	return p.live[session], nil
 }
 
 // expire has session end, as a store ends one left unused.

@@ -3,6 +3,7 @@ package secret
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 
 	"github.com/leeovery/kit/internal/kind/secret/store"
@@ -15,45 +16,70 @@ import (
 // secret, never shown or logged, in a file the person alone can read.
 const sessionsName = "secret-sessions.json"
 
-// sessions are the sessions kit keeps, each store's by its ID: none when
-// the record doesn't read, as a sign-in makes it again.
-func (s *Secrets) sessions() map[string]string {
-	kept, err := state.Load[map[string]string](s.stateDir, sessionsName)
-	if err != nil {
-		return nil
+// kept are the sessions kit keeps, each store's by its ID, read once a
+// run: none when the record doesn't read, as a sign-in makes it again.
+func (s *Secrets) kept() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions == nil {
+		read, err := state.Load[map[string]string](s.stateDir, sessionsName)
+		if err != nil || read == nil {
+			read = map[string]string{}
+		}
+		s.sessions = read
 	}
-	return kept
+	return maps.Clone(s.sessions)
 }
 
-// kept is d using the session kit keeps for it, and whether it keeps one:
-// d as it is when it doesn't, or d has no password sign-in.
-func (s *Secrets) kept(d store.Driver) (store.Driver, bool) {
+// change changes the record of sessions, under its lock, the run reading
+// it again after.
+func (s *Secrets) change(edit func(kept map[string]string)) error {
+	defer func() {
+		s.mu.Lock()
+		s.sessions = nil
+		s.mu.Unlock()
+	}()
+	return state.Update(s.stateDir, sessionsName, func(kept *map[string]string) {
+		if *kept == nil {
+			*kept = map[string]string{}
+		}
+		edit(*kept)
+	})
+}
+
+// session is the session kit keeps for d, and d's password sign-in: false
+// when there's none, or d has no such sign-in.
+func (s *Secrets) session(d store.Driver) (store.Passworded, string, bool) {
 	p, ok := d.(store.Passworded)
-	session, kept := s.sessions()[d.About().ID]
-	if !ok || !kept {
-		return d, false
-	}
-	return p.Using(session), true
+	session, kept := s.kept()[d.About().ID]
+	return p, session, ok && kept
 }
 
 // driver is d as kit drives it: using the session kit keeps for it, if any.
 func (s *Secrets) driver(d store.Driver) store.Driver {
-	d, _ = s.kept(d)
+	if p, session, ok := s.session(d); ok {
+		return p.Using(session)
+	}
 	return d
 }
 
-// standing is how d stands, and d as kit drives it: using the session kit
-// keeps for it while that's open; one d says is over is dropped, and d
-// asked again without it.
-func (s *Secrets) standing(ctx context.Context, d store.Driver) (store.Driver, store.Session) {
-	if using, kept := s.kept(d); kept {
-		if session := using.Session(ctx, s.run); session == store.Open {
-			return using, session
+// standing is how d stands, and d as kit drives it: open, in the session
+// kit keeps for it, while d says that lasts; one d says is over is dropped,
+// and d asked again without it. When d doesn't answer whether it lasts,
+// the session's kept, and that is why d can't be used now.
+func (s *Secrets) standing(ctx context.Context, d store.Driver) (store.Driver, store.Session, error) {
+	if p, session, ok := s.session(d); ok {
+		lasts, err := p.Lasts(ctx, s.run, session)
+		switch {
+		case err != nil:
+			return d, store.SignedOut, errors.New(d.About().Name + " didn't answer: " + err.Error() + "; kit keeps your sign-in for the next try")
+		case lasts:
+			return p.Using(session), store.Open, nil
 		}
 		// A copy not dropped is found over and dropped again next time.
-		_ = s.drop(d)
+		_ = s.drop(d, session)
 	}
-	return d, d.Session(ctx, s.run)
+	return d, d.Session(ctx, s.run), nil
 }
 
 // cantAsk is why d can't ask the person for its approval now: it needs them
@@ -64,7 +90,7 @@ func (s *Secrets) cantAsk(ctx context.Context, d store.Driver) error {
 	if !a.AtScreen || !screen.Locked(ctx, s.run) {
 		return nil
 	}
-	return errors.New(a.Name + " asks for your approval on the Mac's screen, which is locked; " + a.Locked)
+	return errors.New(a.Name + " asks for your approval on the Mac's screen, which is locked; " + a.WhenLocked)
 }
 
 // Passworded are the stores the secrets declared are in that the person
@@ -90,25 +116,23 @@ func (s *Secrets) Passworded() ([]store.Passworded, error) {
 }
 
 // SignIn signs the person in to d with their password, d's program asking
-// for it at kit's terminal, and keeps the session d gives back, in place of
-// any kept before.
+// for it at kit's terminal, and keeps the session d gives back. A session
+// kept before is ended first, whether or not d answers.
 func (s *Secrets) SignIn(ctx context.Context, d store.Passworded) error {
+	if _, old, ok := s.session(d); ok {
+		_ = d.SignOut(ctx, s.run, old)
+	}
 	session, err := d.SignIn(ctx, s.run)
 	if err != nil {
 		return err
 	}
-	return state.Update(s.stateDir, sessionsName, func(kept *map[string]string) {
-		if *kept == nil {
-			*kept = map[string]string{}
-		}
-		(*kept)[d.About().ID] = session
-	})
+	return s.change(func(kept map[string]string) { kept[d.About().ID] = session })
 }
 
 // Kept are the stores kit keeps a session for, of those kit knows, in
 // turn, whatever the secrets declared now.
 func (s *Secrets) Kept() []store.Passworded {
-	kept := s.sessions()
+	kept := s.kept()
 	var out []store.Passworded
 	for _, d := range stores() {
 		if p, ok := d.(store.Passworded); ok && kept[d.About().ID] != "" {
@@ -121,15 +145,20 @@ func (s *Secrets) Kept() []store.Passworded {
 // SignOut ends the session kit keeps for d at d, and deletes kit's copy,
 // whether or not d ended it.
 func (s *Secrets) SignOut(ctx context.Context, d store.Passworded) error {
-	session, ok := s.sessions()[d.About().ID]
+	_, session, ok := s.session(d)
 	if !ok {
 		return nil
 	}
 	ended := d.SignOut(ctx, s.run, session)
-	return errors.Join(ended, s.drop(d))
+	return errors.Join(ended, s.drop(d, session))
 }
 
-// drop deletes the session kit keeps for d.
-func (s *Secrets) drop(d store.Driver) error {
-	return state.Update(s.stateDir, sessionsName, func(kept *map[string]string) { delete(*kept, d.About().ID) })
+// drop deletes session, kept for d, unless it's been replaced since, as by
+// a sign-in meanwhile.
+func (s *Secrets) drop(d store.Driver, session string) error {
+	return s.change(func(kept map[string]string) {
+		if kept[d.About().ID] == session {
+			delete(kept, d.About().ID)
+		}
+	})
 }
