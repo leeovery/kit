@@ -3,8 +3,9 @@
 // reference, so one config can keep secrets in several stores, and asks the
 // driver for everything that's the store's own: reading, keeping and
 // deleting values, whether it's signed in, its sign-in, a sign-in with a
-// password when it has one (Passworded), its program and the environment
-// that needs, and its words.
+// password when it has one (Passworded), and a command of its own run in
+// that sign-in's session, its program and the environment that needs, and
+// its words.
 package store
 
 import (
@@ -71,18 +72,20 @@ type Driver interface {
 }
 
 // Passworded is a store the person can sign in to with their password, in
-// a terminal of their own, as away from the Mac: kit keeps the session it
-// gives back, the store's data, never shown, and has the store use it in
-// every run till it's over.
+// a terminal of their own, as away from the Mac. The session it gives back
+// is the store's data, never shown or written down, and may hold only for
+// what runs where they signed in: the kit there keeps it in memory, and
+// runs the store's commands for every other kit, each in the session
+// (Apply).
 type Passworded interface {
 	Driver
 	// SignIn signs the person in, the store's program asking for their
 	// password at kit's terminal itself (runner.Command's Terminal), kit
 	// never seeing it: the session it gives back.
 	SignIn(ctx context.Context, run runner.Runner) (string, error)
-	// Using is the store using session in all it runs: its Session is Open
-	// while the session lasts.
-	Using(session string) Driver
+	// Apply is c, a command of the store's own as its driver built it,
+	// run in session.
+	Apply(session string, c runner.Command) runner.Command
 	// Lasts reports whether session is open still: false, with no error,
 	// once the store says it's over; an error when the store doesn't
 	// answer, so it can't say.

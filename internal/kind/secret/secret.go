@@ -13,9 +13,9 @@
 // previous one, and a store that's signed out fails its own secrets alone.
 // A store whose approval needs the person at the Mac's screen isn't asked
 // while that screen's locked, as with the person away: kit says so at
-// once. A session kit keeps from a store's sign-in with a password is used
-// in every run while it lasts. Values and sessions never pass through
-// kit's events or log.
+// once. A store signed in to with a password by kit secret signin, open in
+// another terminal, has its commands run there (relay). Values and
+// sessions never pass through kit's events or log.
 package secret
 
 import (
@@ -33,6 +33,7 @@ import (
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/secret/relay"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/tilde"
@@ -65,14 +66,14 @@ func (s Secret) IsFile() bool {
 // Secrets is the secrets, each read from its store.
 type Secrets struct {
 	run runner.Runner
-	// home is the person's home folder; stateDir, kit's state, where it
-	// keeps the stores' sessions (sessionsName).
+	// home is the person's home folder; stateDir, kit's state, where kit
+	// secret signin's relay listens.
 	home, stateDir string
 	declared       []Secret
-	// mu guards sessions, the record of them as this run read it: nil till
-	// it's read, and again once kit changes it.
-	mu       sync.Mutex
-	sessions map[string]string
+	// mu guards relayed: the line to that relay, when it holds a store's
+	// sign-in, by the store's ID, as this run found: nil when it doesn't.
+	mu      sync.Mutex
+	relayed map[string]*relay.Line
 }
 
 // kindName names the kind.
@@ -94,7 +95,7 @@ var Descriptor = kind.Descriptor{
 // New returns the secrets of the user whose home is home, in the stores kit
 // knows (Stores), kit's state in stateDir.
 func New(run runner.Runner, home, stateDir string) *Secrets {
-	return &Secrets{run: run, home: home, stateDir: stateDir}
+	return &Secrets{run: run, home: home, stateDir: stateDir, relayed: map[string]*relay.Line{}}
 }
 
 func (s *Secrets) Name() string { return kindName }

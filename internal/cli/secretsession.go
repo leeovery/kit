@@ -6,14 +6,19 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kind/secret/relay"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 )
 
 // secretsSignIn signs the person in with their password to each store the
-// secrets are in that has such a sign-in, as a run of one step: each
-// store's program asks for the password at the terminal, the face stepped
-// aside meanwhile, and kit keeps the session it gives back. Without a
-// terminal, there's no one to ask.
+// secrets are in that has such a sign-in, then relays those stores'
+// commands for every other kit while it runs, as a run of one step (relay):
+// each store's program asks for the password at the terminal, the face
+// stepped aside meanwhile, and the sessions are held in memory alone. It
+// listens once they're signed in, so no other kit waits on it meanwhile.
+// Without a terminal, there's no one to ask; with kit secret signin open
+// already, in another terminal, there's no need, and no one's asked.
 func (a *app) secretsSignIn(ctx context.Context, r *run) error {
 	k, err := r.secrets()
 	if err != nil {
@@ -26,39 +31,63 @@ func (a *app) secretsSignIn(ctx context.Context, r *run) error {
 	if !a.Terminal(a.Stdin) {
 		return errors.New("kit secret signin asks for a password at a terminal: have the person run it in a terminal of their own")
 	}
+	socket := relay.Socket(r.stateDir)
 	return a.oneStep(ctx, r, secretsStep, "signing in", func(ctx context.Context) check.Result {
-		for _, d := range stores {
-			back := stepAside(r.face)
-			err := k.SignIn(ctx, d)
-			back()
-			if err != nil {
-				return check.Result{State: check.Failed, Reason: err.Error()}
-			}
+		open := check.Result{State: check.OK, Summary: relay.ErrOpen.Error()}
+		if relay.Answers(ctx, socket) {
+			return open
 		}
-		return check.Result{State: check.OK, Summary: "signed in to " + storeNames(stores) + ", till left unused or kit secret signout"}
+		held, err := signIn(ctx, r, stores)
+		if err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+		l, err := relay.Listen(socket)
+		if err != nil {
+			relay.SignOut(context.WithoutCancel(ctx), r.run, held)
+			if errors.Is(err, relay.ErrOpen) {
+				return open
+			}
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+		defer func() { _ = l.Close() }()
+		names := storeNames(stores)
+		event.Say(ctx, event.Doing{Says: "signed in to " + names, Todo: "kit's commands elsewhere use your sign-in to " + names + " while this stays open: ctrl-C ends it"})
+		why := l.Serve(ctx, r.run, held)
+		return check.Result{State: check.OK, Summary: "signed out of " + names + ": " + string(why)}
 	})
 }
 
-// secretsSignOut ends each session kit keeps, at its store, and deletes
-// kit's copy, as a run of one step: with none kept, it says so.
-func (a *app) secretsSignOut(ctx context.Context, r *run) error {
-	k, err := r.secrets()
-	if err != nil {
-		return err
+// signIn signs the person in to each of stores, its program asking for
+// their password at the terminal, the face stepped aside: each store's
+// sign-in, held. One that fails signs out of those signed in to already.
+func signIn(ctx context.Context, r *run, stores []store.Passworded) ([]relay.Held, error) {
+	var held []relay.Held
+	for _, d := range stores {
+		back := stepAside(r.face)
+		session, err := d.SignIn(ctx, r.run)
+		back()
+		if err != nil {
+			relay.SignOut(context.WithoutCancel(ctx), r.run, held)
+			return nil, err
+		}
+		held = append(held, relay.Held{Store: d, Session: session})
 	}
-	kept := k.Kept()
+	return held, nil
+}
+
+// secretsSignOut ends kit secret signin, open in another terminal, as a
+// run of one step: it signs out of its stores, and stops relaying their
+// commands. With none open, it says so.
+func (a *app) secretsSignOut(ctx context.Context, r *run) error {
 	return a.oneStep(ctx, r, secretsStep, "signing out", func(ctx context.Context) check.Result {
-		if len(kept) == 0 {
-			return check.Result{State: check.OK, Summary: "kit keeps no sign-in: nothing to sign out of"}
+		ended, err := relay.Stop(ctx, relay.Socket(r.stateDir))
+		switch {
+		case errors.Is(err, relay.ErrNone):
+			return check.Result{State: check.OK, Summary: "kit secret signin isn't open: nothing to sign out of"}
+		case err != nil:
+			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		var errs []error
-		for _, d := range kept {
-			errs = append(errs, k.SignOut(ctx, d))
-		}
-		if err := errors.Join(errs...); err != nil {
-			return check.Result{State: check.Failed, Reason: "kit's copy is deleted, but " + err.Error()}
-		}
-		return check.Result{State: check.OK, Summary: "signed out of " + storeNames(kept) + ", kit's copy deleted"}
+		return check.Result{State: check.OK, Summary: "signed out of " + strings.Join(ended, " and ") + ", and kit secret signin has ended"}
 	})
 }
 

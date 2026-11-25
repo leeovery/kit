@@ -28,6 +28,7 @@ import (
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
+	"github.com/leeovery/kit/internal/kind/secret/relay"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
@@ -812,12 +813,13 @@ func stepAside(face render.Face) (back func()) {
 	return func() {}
 }
 
-// commands is the runner a run's commands go through: on path, with env;
-// a command whose sudo asks given what asks has for it (askpassFor); each
-// reported to sink, and its output streamed there, redacted, the values of
-// the secrets it was given too.
+// commands is the runner a run's commands go through: on path, with env,
+// but a secrets store's that kit secret signin runs, open in another
+// terminal (relay.Via); a command whose sudo asks given what asks has for
+// it (askpassFor); each reported to sink, and its output streamed there,
+// redacted, the values of the secrets it was given too.
 func (a *app) commands(path, env []string, sink event.Sink, asks func() *askpass.Server) runner.Runner {
-	exec := runner.Prepared(a.Runner(path, env), askpassFor(asks))
+	exec := runner.Prepared(relay.Client(a.Runner(path, env)), askpassFor(asks))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	return runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
 		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line, runner.SecretValues(ctx)...)})

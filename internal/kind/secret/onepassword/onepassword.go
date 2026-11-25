@@ -23,13 +23,8 @@ import (
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// Driver is 1Password's driver: signed in with a password's session kit
-// keeps (Using), op runs with it.
-type Driver struct {
-	// session is that session's variable, as op signin has a shell set it:
-	// OP_SESSION_<account>=<token>.
-	session string
-}
+// Driver is 1Password's driver.
+type Driver struct{}
 
 // scheme starts each of 1Password's references.
 const scheme = "op://"
@@ -49,21 +44,25 @@ const opTimeout = 15 * time.Second
 // run is lost to a person still answering (9 Nov: a delete gave up at 15s).
 const approvalTimeout = 10 * time.Minute
 
-// op runs op as c says, in kit's session (runner.Command.SharesSession):
-// 1Password's app asks once a terminal, its approval lasting ten minutes,
-// and a run in a session of its own, without the terminal, is asked again
-// each time, six times for one kit secret add (5 Nov 2026). Signed in with
-// a password, there's no approval to share, and op, its session over, might
-// ask for the password at the terminal: it runs without it. op alone gets
-// kit's own variables of op's, a password's session or a service account's
-// token among them, then the session kit keeps: kit runs every other
-// program without them. A session's variable alone turns the app's
-// approval off, else op asks the app and ignores the session.
-func (d Driver) op(ctx context.Context, run runner.Runner, c runner.Command) (runner.Result, error) {
+// op runs op as c says (command).
+func (Driver) op(ctx context.Context, run runner.Runner, c runner.Command) (runner.Result, error) {
+	return run.Run(ctx, command(c))
+}
+
+// command is op run as c says, in kit's session (runner.Command's
+// SharesSession): 1Password's app asks once a terminal, its approval
+// lasting ten minutes, and a run in a session of its own, without the
+// terminal, is asked again each time, six times for one kit secret add (5
+// Nov 2026). Signed in with a password, there's no approval to share, and
+// op, its session over, might ask for the password at the terminal: it runs
+// without it. op alone gets kit's own variables of op's, a password's
+// session or a service account's token among them: kit runs every other
+// program without them.
+func command(c runner.Command) runner.Command {
 	c.Name = program
-	c.SharesSession = !d.passworded()
-	c.Env = slices.Concat(d.env(), c.Env)
-	return run.Run(ctx, c)
+	c.SharesSession = !passworded()
+	c.Env = slices.Concat(env(), c.Env)
+	return c
 }
 
 // biometric turns 1Password's app approval on or off for op.
@@ -74,13 +73,12 @@ func opVars() []string {
 	return slices.DeleteFunc(os.Environ(), func(kv string) bool { return !strings.HasPrefix(kv, "OP_") })
 }
 
-// env is op's environment: kit's own variables of op's, then the session
-// kit keeps, the app's approval off with it, whatever kit's own say.
-func (d Driver) env() []string {
+// env is op's environment: kit's own variables of op's, the app's approval
+// off with a session's variable, unless kit's own say otherwise. A
+// session's variable alone doesn't turn it off: op asks the app, and
+// ignores the session.
+func env() []string {
 	env := opVars()
-	if d.session != "" {
-		return append(env, d.session, biometric+"=false")
-	}
 	if _, set := os.LookupEnv(biometric); !set && inSession() {
 		env = append(env, biometric+"=false")
 	}
@@ -88,10 +86,9 @@ func (d Driver) env() []string {
 }
 
 // passworded is whether op is signed in with a password, as over a remote
-// connection: with a session kit keeps, the app's approval turned off, or a
-// session's variable set.
-func (d Driver) passworded() bool {
-	return d.session != "" || os.Getenv(biometric) == "false" || inSession()
+// connection: the app's approval turned off, or a session's variable set.
+func passworded() bool {
+	return os.Getenv(biometric) == "false" || inSession()
 }
 
 // inSession is whether a password's session variable is set.
@@ -127,13 +124,13 @@ var about = store.About{
 }
 
 // withPassword is how to have 1Password answer without its app's approval.
-const withPassword = "sign in with your 1Password password instead: kit secret signin, in a terminal of your own"
+const withPassword = "sign in with your 1Password password in a terminal of your own, and leave it open: kit secret signin"
 
 func (Driver) About() store.About { return about }
 
 // SignIn signs in with the person's password, op asking for it at kit's
 // terminal, the app's approval off: the session's variable op prints for a
-// shell to set, which names the account it's for, as kit keeps it. op
+// shell to set, which names the account it's for, as Apply sets it. op
 // prints it in the shell's own words, as fish's set -x, so it's told the
 // shell is sh; and it prints none while a session it's given is open, so
 // it's given none.
@@ -165,14 +162,26 @@ func sessionOf(out []byte) (string, bool) {
 	return "", false
 }
 
-// Using is 1Password with op run in session, as SignIn gave it.
-func (Driver) Using(session string) store.Driver { return Driver{session: session} }
+// Apply is c, a run of op, in session, as SignIn gave it: the session's
+// variable, over any of kit's own, and the app's approval off, as op asks
+// the app and ignores the session otherwise; in a session of its own, as
+// there's no approval to share.
+func (Driver) Apply(session string, c runner.Command) runner.Command {
+	c.Env = slices.Concat(c.Env, []string{session, biometric + "=false"})
+	c.SharesSession = false
+	return c
+}
+
+// inSession runs op as c says, in session.
+func (d Driver) inSession(ctx context.Context, run runner.Runner, session string, c runner.Command) (runner.Result, error) {
+	return run.Run(ctx, d.Apply(session, command(c)))
+}
 
 // Lasts reports whether session is open, as op whoami, run in it, says:
 // op exiting otherwise than 0 says it's over, as with the app's approval
 // off it asks nothing else; op not finishing says nothing.
-func (Driver) Lasts(ctx context.Context, run runner.Runner, session string) (bool, error) {
-	_, err := (Driver{session: session}).op(ctx, run, runner.Command{Args: []string{"whoami"}, Timeout: opTimeout})
+func (d Driver) Lasts(ctx context.Context, run runner.Runner, session string) (bool, error) {
+	_, err := d.inSession(ctx, run, session, runner.Command{Args: []string{"whoami"}, Timeout: opTimeout})
 	if _, over := errors.AsType[*runner.ExitError](err); err != nil && !over {
 		return false, fmt.Errorf("op didn't answer: %w", err)
 	}
@@ -180,8 +189,8 @@ func (Driver) Lasts(ctx context.Context, run runner.Runner, session string) (boo
 }
 
 // SignOut ends session with op signout, run in it.
-func (Driver) SignOut(ctx context.Context, run runner.Runner, session string) error {
-	if _, err := (Driver{session: session}).op(ctx, run, runner.Command{Args: []string{"signout"}, Timeout: opTimeout}); err != nil {
+func (d Driver) SignOut(ctx context.Context, run runner.Runner, session string) error {
+	if _, err := d.inSession(ctx, run, session, runner.Command{Args: []string{"signout"}, Timeout: opTimeout}); err != nil {
 		return fmt.Errorf("1Password didn't sign you out: %w", err)
 	}
 	return nil

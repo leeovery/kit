@@ -80,7 +80,8 @@ An agent can't do these, so it asks you:
 - **1Password's approval,** such as a fingerprint. It may be asked for before a secret is
   read, kept or deleted, and kit waits up to 10 minutes for it.
 - **Your 1Password password,** if the Mac's screen is locked. kit fails at once, so the agent
-  asks you to run `kit secret signin` in a terminal of your own, then carries on.
+  asks you to run `kit secret signin` in a terminal of your own and leave it open. The agent
+  carries on, then runs `kit secret signout` when it's done.
 - **The App Store's sign-in,** a step by hand that kit-config declares before App Store apps.
   The App Store apps wait until you've done it.
 - **Your administrator's password,** at a terminal. Without a terminal, an install that needs
