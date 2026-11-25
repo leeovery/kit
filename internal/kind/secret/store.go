@@ -11,14 +11,20 @@ import (
 )
 
 // Ready says whether d answers, as a store keeping a value needs: nil for a
-// session open already, or one it opens, the person approving it
-// (store.Driver.Unlock); not yet, signed out; or why not, in d's words.
+// session open already, kit's own from d's password sign-in among them, or
+// one it opens, the person approving it (store.Driver.Unlock); not yet,
+// signed out; or why not, in d's words, at once when the person can't
+// approve it (cantAsk).
 func (s *Secrets) Ready(ctx context.Context, d store.Driver) error {
-	switch d.Session(ctx, s.run) {
+	d, session := s.standing(ctx, d)
+	switch session {
 	case store.Open:
 		return nil
 	case store.SignedOut:
 		return engine.NotYet(d.About().SignedOut)
+	}
+	if err := s.cantAsk(ctx, d); err != nil {
+		return err
 	}
 	if err := d.Unlock(ctx, s.run); err != nil {
 		return errors.New(d.About().Name + " doesn't answer: " + d.About().NoAnswer)
@@ -29,13 +35,14 @@ func (s *Secrets) Ready(ctx context.Context, d store.Driver) error {
 // Free is nil when d's item keeps nothing at short: else that something's
 // there already. It changes nothing.
 func (s *Secrets) Free(ctx context.Context, d store.Driver, item, short string) error {
-	return d.Free(ctx, s.run, item, short)
+	return s.driver(d).Free(ctx, s.run, item, short)
 }
 
 // Fetch reads ref, in full, from d, for the secret that fills name: as a
 // file holds it for a file's (store.Driver.ReadFile), else as a variable's.
 // When it doesn't read, it says why, the value never shown.
 func (s *Secrets) Fetch(ctx context.Context, d store.Driver, name, ref string) (string, error) {
+	d = s.driver(d)
 	read := d.Read
 	if (Secret{Name: name}).IsFile() {
 		read = d.ReadFile
@@ -54,31 +61,35 @@ func (s *Secrets) Fetch(ctx context.Context, d store.Driver, name, ref string) (
 // Store keeps value in d's item, where field says, in d's words: its
 // reference, short for item. A field there already is refused.
 func (s *Secrets) Store(ctx context.Context, d store.Driver, item, field, value string) (string, error) {
-	return d.Store(ctx, s.run, item, field, value)
+	return s.driver(d).Store(ctx, s.run, item, field, value)
 }
 
 // Attach keeps the file at path in d's item, named name: its reference,
 // short for item.
 func (s *Secrets) Attach(ctx context.Context, d store.Driver, item, name, path string) (string, error) {
-	return d.Attach(ctx, s.run, item, name, path)
+	return s.driver(d).Attach(ctx, s.run, item, name, path)
 }
 
-// Delete deletes the value short names from d's item.
+// Delete deletes the value short names from d's item, once d answers
+// (Ready).
 func (s *Secrets) Delete(ctx context.Context, d store.Driver, item, short string) error {
-	return d.Delete(ctx, s.run, item, short)
+	if err := s.Ready(ctx, d); err != nil {
+		return err
+	}
+	return s.driver(d).Delete(ctx, s.run, item, short)
 }
 
 // ReadBack reads ref, in full, from d and compares it with want, byte for
 // byte, never showing either.
 func (s *Secrets) ReadBack(ctx context.Context, d store.Driver, ref, want string) error {
-	return s.readBack(ctx, d.Read, ref, want, d.About().Name)
+	return s.readBack(ctx, s.driver(d).Read, ref, want, d.About().Name)
 }
 
 // ReadBackFile reads ref, in full, from d as a file holds it
 // (store.Driver.ReadFile), and compares it with want, a file's contents,
 // as ReadBack does.
 func (s *Secrets) ReadBackFile(ctx context.Context, d store.Driver, ref, want string) error {
-	return s.readBack(ctx, d.ReadFile, ref, want, d.About().Name)
+	return s.readBack(ctx, s.driver(d).ReadFile, ref, want, d.About().Name)
 }
 
 // readBack reads ref with read, from the store called name, and compares

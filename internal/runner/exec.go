@@ -129,6 +129,9 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 	if cmd.Answer != nil {
 		return converse(ctx, c, cmd, e.timed())
 	}
+	if cmd.Terminal {
+		return atTerminal(c, e.timed())
+	}
 	if cmd.Input != "" {
 		c.Stdin = strings.NewReader(cmd.Input)
 	}
@@ -155,6 +158,23 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 		exited()
 	}
 	return done(c, d, out.Bytes(), errOut.Bytes()), err
+}
+
+// atTerminal runs c at kit's terminal (Command's Terminal), in kit's
+// process group, the terminal's foreground, where a program may read what
+// the person types: its output kept, the rest the terminal's. Ended, it's
+// sent SIGTERM alone, as its group is kit's; it leads no group of its own.
+func atTerminal(c *exec.Cmd, k *clock) (ran, error) {
+	var out bytes.Buffer
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, &out, os.Stderr
+	var ended atomic.Bool
+	c.WaitDelay = k.wait
+	c.Cancel = func() error {
+		ended.Store(true)
+		return c.Process.Signal(syscall.SIGTERM)
+	}
+	err := c.Run()
+	return ran{stdout: out.Bytes(), ended: ended.Load()}, err
 }
 
 // running tells cmd, its process c started, that it's running (Running):

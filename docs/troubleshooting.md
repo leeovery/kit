@@ -92,8 +92,25 @@ read until the next sync. Whatever waits on them waits too.
 3. Run `kit secret sync`, and approve the prompt.
 
 If kit says 1Password isn't signed in, and both are done, quit 1Password and open it again.
-Over a remote connection, sign in with a password in the shell kit runs from, as the message
-says.
+Away from the Mac, sign in with your password instead, as the next problem says.
+
+## 1Password says the screen is locked
+
+The secrets step says `1Password asks for your approval on the Mac's screen, which is locked`.
+So does a command that needs a secret.
+
+**Cause:** 1Password's app takes your approval only as a fingerprint on the Mac. While the
+screen is locked, as when you're away, nobody can give it. kit fails at once rather than wait
+10 minutes.
+
+**Fix:**
+
+1. In a terminal of your own, such as over SSH, run `kit secret signin`.
+2. Type your 1Password password when 1Password asks for it.
+3. Run the command again.
+
+Every kit command uses that session, an agent's included. Run `kit secret signout` when the
+work is done.
 
 ## App Store apps don't install
 

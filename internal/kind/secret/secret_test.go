@@ -23,12 +23,17 @@ import (
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
+	"github.com/leeovery/kit/internal/screen"
+	"github.com/leeovery/kit/internal/screen/screentest"
 )
 
 const item = "op://vault/Item"
 
 // onePassword is what kit knows of 1Password.
 var onePassword = onepassword.Driver{}.About()
+
+// readsScreen is the run that reads whether the Mac's screen is locked.
+var readsScreen = screen.Query().String()
 
 // declare declares each line's secret: one in full in the plain section,
 // quoted or not, the rest in item's.
@@ -50,7 +55,7 @@ func declare(t *testing.T, s *secret.Secrets, lines ...[2]string) config.List {
 }
 
 func TestLinesRead(t *testing.T) {
-	s := secret.New(runnertest.New(t), t.TempDir())
+	s := secret.New(runnertest.New(t), t.TempDir(), t.TempDir())
 	for _, c := range []struct{ item, value, want string }{
 		{"", "GitHub/token", `"GitHub/token" isn't a reference kit knows: in a plain [secrets], give where its store keeps it in full (1Password's, as in op://vault/item/field), or put it in its item's section`},
 		{item, "op://vault/a/b", "op://vault/a/b is in full: in [secrets " + item + "] a line names a field or attachment of its item"},
@@ -70,7 +75,7 @@ func TestLinesRead(t *testing.T) {
 // declared, and so is ~/.secrets.zsh, which kit writes the variables into,
 // while one's declared: a data restore never carries them.
 func TestHomePaths(t *testing.T) {
-	var homed kind.Homed = secret.New(runnertest.New(t), t.TempDir())
+	var homed kind.Homed = secret.New(runnertest.New(t), t.TempDir(), t.TempDir())
 	got := homed.HomePaths([]string{"~/.config/tool/credentials.json", "TOKEN", "/etc/tool.key", "OTHER"})
 	if want := []string{"~/.config/tool/credentials.json", "/etc/tool.key", "~/.secrets.zsh"}; !slices.Equal(got, want) {
 		t.Errorf("HomePaths() = %q; want %q", got, want)
@@ -83,7 +88,7 @@ func TestHomePaths(t *testing.T) {
 func TestCheckingReadsWhatsInPlace(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
-	s := secret.New(fake, home)
+	s := secret.New(fake, home, t.TempDir())
 	list := declare(t, s,
 		[2]string{"GH_TOKEN", "GitHub/token"},
 		[2]string{"MISSING", "GitHub/other"},
@@ -114,7 +119,7 @@ func TestCheckingReadsWhatsInPlace(t *testing.T) {
 func TestSyncPutsEachInPlace(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
-	s := secret.New(fake, home)
+	s := secret.New(fake, home, t.TempDir())
 	declare(t, s,
 		[2]string{"PLAIN", "Section/plain   # a note"},
 		[2]string{"AWKWARD", "Section/awkward"},
@@ -176,21 +181,20 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 // attachment.
 func TestSyncReadsEachValueWithOpRead(t *testing.T) {
 	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
+	s := secret.New(fake, t.TempDir(), t.TempDir())
 	declare(t, s,
 		[2]string{"ONE", "Section/one"},
 		[2]string{"TWO", "Section/two"},
 		[2]string{"~/.ssh/key", "'op://vault/Key Item/private key'"},
 		[2]string{"ALSO_ONE", "Section/one"},
 	)
-	fake.On("op", "whoami").Exits(1).PrintsToStderr("account is not signed in")
-	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+	signedIn(fake)
 	optest.Holds(fake, map[string]string{item + "/Section/one": "1", item + "/Section/two": "2", "op://vault/Key Item/private key": "-----BEGIN KEY-----\nabc\n-----END KEY-----"})
 	optest.Attaches(fake, "op://vault/Key Item")
 	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 4 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
-	want := []string{"op whoami", "op account list --format json", "op read " + item + "/Section/one", "op read " + item + "/Section/two", "op read 'op://vault/Key Item/private key'", "op item get 'Key Item' --vault vault --format json"}
+	want := []string{"op whoami", "op account list --format json", readsScreen, "op read " + item + "/Section/one", "op read " + item + "/Section/two", "op read 'op://vault/Key Item/private key'", "op item get 'Key Item' --vault vault --format json"}
 	if got := fake.Calls(); !slices.Equal(got, want) {
 		t.Errorf("ran %q, want %q: each reference read once", got, want)
 	}
@@ -208,7 +212,7 @@ func TestSyncReadsEachValueWithOpRead(t *testing.T) {
 func TestSyncWritesAnAttachmentByteForByte(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
-	s := secret.New(fake, home)
+	s := secret.New(fake, home, t.TempDir())
 	declare(t, s,
 		[2]string{"~/.config/tool/blob", "blob.bin"},
 		[2]string{"~/.config/tool/rc", "rc"},
@@ -244,7 +248,7 @@ func TestSyncWritesAnAttachmentByteForByte(t *testing.T) {
 // is a different file.
 func TestReadBackComparesExactly(t *testing.T) {
 	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
+	s := secret.New(fake, t.TempDir(), t.TempDir())
 	optest.Holds(fake, map[string]string{item + "/Section/field": "value", item + "/file": "line\n"})
 	optest.Attaches(fake, item, "file")
 	d := onepassword.Driver{}
@@ -275,7 +279,7 @@ func TestSyncOfFilesThatFailsPartway(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
 			fake := runnertest.New(t)
-			s := secret.New(fake, home)
+			s := secret.New(fake, home, t.TempDir())
 			declare(t, s, [2]string{"~/a", "a"}, [2]string{"~/b", "b"}, [2]string{"~/c", "c"})
 			for _, f := range []string{"b", "c"} {
 				if err := os.WriteFile(filepath.Join(home, f), []byte("old "+f), 0o600); err != nil {
@@ -306,11 +310,13 @@ func TestSyncOfFilesThatFailsPartway(t *testing.T) {
 	}
 }
 
-// signedIn has fake's 1Password signed in, with no session open, so that
-// each run of op that reads a value asks the person to approve it.
+// signedIn has fake's 1Password signed in, with no session open, and the
+// Mac's screen unlocked, so that each run of op that reads a value asks the
+// person to approve it there.
 func signedIn(fake *runnertest.Fake) {
 	fake.On("op", "whoami").Exits(1)
 	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+	screentest.Shows(fake, false)
 }
 
 // reads are the runs of op that read values, as fake has them.
@@ -327,7 +333,7 @@ func reads(fake *runnertest.Fake) []runner.Command {
 func TestSyncSaysItsWaitingForApproval(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		fake := runnertest.New(t)
-		s := secret.New(fake, t.TempDir())
+		s := secret.New(fake, t.TempDir(), t.TempDir())
 		declare(t, s, [2]string{"ONE", "Section/one"}, [2]string{"TWO", "Section/two"})
 		if open {
 			fake.On("op", "whoami")
@@ -355,7 +361,7 @@ func TestSyncSaysItsWaitingForApproval(t *testing.T) {
 // the run starts others meanwhile.
 func TestSyncGivesUpItsJobWhileItWaitsForApproval(t *testing.T) {
 	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
+	s := secret.New(fake, t.TempDir(), t.TempDir())
 	list := declare(t, s, [2]string{"ONE", "Section/one"})
 	signedIn(fake)
 	asking, ran := make(chan struct{}), make(chan struct{})
@@ -403,7 +409,7 @@ func TestSyncRefusesAVariableOfManyLines(t *testing.T) {
 	} {
 		home := t.TempDir()
 		fake := runnertest.New(t)
-		s := secret.New(fake, home)
+		s := secret.New(fake, home, t.TempDir())
 		declare(t, s, [2]string{"A", "Section/a"}, [2]string{"MANY", "Section/many"}, [2]string{"Z", "Section/z"})
 		if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte(c.old), 0o600); err != nil {
 			t.Fatal(err)
@@ -429,7 +435,7 @@ func TestSyncRefusesAVariableOfManyLines(t *testing.T) {
 func TestSyncLeavesOutAReferenceOpNames(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
-	s := secret.New(fake, home)
+	s := secret.New(fake, home, t.TempDir())
 	declare(t, s,
 		[2]string{"A", "Section/a"},
 		[2]string{"BROKEN", "Section/broken"},
@@ -467,7 +473,7 @@ func TestFetchSaysWhyInOpsWords(t *testing.T) {
 	said := "[ERROR] could not read secret '" + ref + "': no such field"
 	fake := runnertest.New(t)
 	fake.On("op", "read", ref).Exits(1).PrintsToStderr(said)
-	_, err := secret.New(fake, t.TempDir()).Fetch(t.Context(), onepassword.Driver{}, "TOKEN", ref)
+	_, err := secret.New(fake, t.TempDir(), t.TempDir()).Fetch(t.Context(), onepassword.Driver{}, "TOKEN", ref)
 	if want := ref + " doesn't read from 1Password: " + said; err == nil || err.Error() != want {
 		t.Errorf("Fetch() = %v, want %q", err, want)
 	}
@@ -484,7 +490,7 @@ func held(said string) string {
 // isn't asked again.
 func TestSyncReadsNoFurtherOnceNotApproved(t *testing.T) {
 	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
+	s := secret.New(fake, t.TempDir(), t.TempDir())
 	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"BROKEN", "Section/broken"}, [2]string{"C", "Section/c"}, [2]string{"D", "Section/d"})
 	signedIn(fake)
 	optest.Holds(fake, map[string]string{item + "/Section/a": "a"})
@@ -509,7 +515,7 @@ func TestAnApprovalOpQuotesAReferenceInNamesNone(t *testing.T) {
 		"[ERROR] 2026/11/05 05:52:13 could not read secret '" + item + "/Section/a': error initializing client: authorization timeout",
 	} {
 		fake := runnertest.New(t)
-		s := secret.New(fake, t.TempDir())
+		s := secret.New(fake, t.TempDir(), t.TempDir())
 		declare(t, s, [2]string{"A", "Section/a"}, [2]string{"B", "Section/b"})
 		signedIn(fake)
 		fake.On("op", "read", item+"/Section/a").Exits(1).PrintsToStderr(said)
@@ -528,7 +534,7 @@ func TestAnApprovalOpQuotesAReferenceInNamesNone(t *testing.T) {
 func TestVariableReadsWhatASyncWrote(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
-	s := secret.New(fake, home)
+	s := secret.New(fake, home, t.TempDir())
 	declare(t, s,
 		[2]string{"PLAIN", "Section/plain   # a note"},
 		[2]string{"AWKWARD", "Section/awkward"},
@@ -579,7 +585,7 @@ func TestSyncHoldsBackWhatOneReadDoesnt(t *testing.T) {
 		{"stopped", "op didn't finish", func(s *runnertest.Script, stop func()) { s.Does(stop).Hangs() }},
 	} {
 		fake := runnertest.New(t)
-		s := secret.New(fake, t.TempDir())
+		s := secret.New(fake, t.TempDir(), t.TempDir())
 		declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"OTHER", "Section/other"})
 		signedIn(fake)
 		ctx, stop := context.WithCancel(t.Context())
@@ -589,7 +595,7 @@ func TestSyncHoldsBackWhatOneReadDoesnt(t *testing.T) {
 		if err == nil || !engine.IsNotYet(err) || err.Error() != held(c.said) {
 			t.Errorf("%s: Sync() = %v, want both held back", c.name, err)
 		}
-		if want := []string{"op whoami", "op account list --format json", "op read " + item + "/Section/plain"}; !slices.Equal(fake.Calls(), want) {
+		if want := []string{"op whoami", "op account list --format json", readsScreen, "op read " + item + "/Section/plain"}; !slices.Equal(fake.Calls(), want) {
 			t.Errorf("%s: ran %q, want %q: no read but the one", c.name, fake.Calls(), want)
 		}
 	}
@@ -600,7 +606,7 @@ func TestSyncHoldsBackWhatOneReadDoesnt(t *testing.T) {
 // asks the app for nothing.
 func TestSyncWhenOnePasswordIsntSignedIn(t *testing.T) {
 	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
+	s := secret.New(fake, t.TempDir(), t.TempDir())
 	declare(t, s, [2]string{"PLAIN", "Section/plain"})
 	fake.On("op", "whoami").Exits(1)
 	fake.On("op", "account", "list", "--format", "json").Prints("[]")
@@ -616,7 +622,7 @@ func TestSyncWhenOnePasswordIsntSignedIn(t *testing.T) {
 func TestRemove(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
-	s := secret.New(fake, home)
+	s := secret.New(fake, home, t.TempDir())
 	declare(t, s, [2]string{"KEEP", "a/b"}, [2]string{"GONE", "a/c"}, [2]string{"~/.token", "a/d"})
 	if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte("# header\nexport KEEP='1'\nexport GONE='2'\n"), 0o600); err != nil {
 		t.Fatal(err)

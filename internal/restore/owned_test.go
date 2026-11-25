@@ -68,7 +68,7 @@ func TestReadOwned(t *testing.T) {
 		Config: cfg, Name: "laptop", Home: home, Dirs: dirs,
 		Linked: &linked.Files{Repo: gitrepo.Repo{Dir: repo, Run: fake}, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, "laptop"}},
 		Prefs:  true,
-		Kinds:  []kind.Kind{skill.New(fake, home), secret.New(fake, home)},
+		Kinds:  []kind.Kind{skill.New(fake, home), secret.New(fake, home, t.TempDir())},
 	}
 	want := restore.Owned{
 		Linked:    []string{"~/.claude/CLAUDE.md", "~/.zshrc"},

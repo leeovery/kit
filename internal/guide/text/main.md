@@ -47,7 +47,9 @@ with `kit setup`: `kit agent in-use` says how.
    Choose by where it's wanted: ask when you can't tell.
 
 6. A secret never goes on a command line. `kit secret add --stdin` takes its
-   value on standard input, and kit never prints a value.
+   value on standard input, and kit never prints a value. When kit says to
+   sign in with `kit secret signin`, ask the person to run it in a terminal
+   of their own, then carry on (`kit agent secrets`).
 
 7. Removing uninstalls as well as undeclaring. Ask the person before you
    remove anything.

@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/runner/runnertest"
+	"github.com/leeovery/kit/internal/screen/screentest"
 )
 
 // itemSection is the header of the secrets section for the item the tests'
@@ -69,6 +70,7 @@ func TestSecretsSyncSaysItsWaitingForApproval(t *testing.T) {
 	w.terminal = true
 	w.fake.On("op", "whoami").Exits(1)
 	w.fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+	screentest.Shows(w.fake, false)
 	optest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "the value"})
 	out, _, code := w.run(t, "secret", "sync")
 	out = ansi.Strip(out)
@@ -636,6 +638,7 @@ func TestRemoveASecretAndItsValue(t *testing.T) {
 	if code != 2 || !strings.Contains(errOut, "--keep-value or --delete-value") {
 		t.Errorf("printed %q, exit %d", errOut, code)
 	}
+	w.fake.On("op", "whoami")
 	w.fake.On("op", "item", "edit", "Item", "--vault", "vault", "Section.token[delete]")
 	w.expectSync(t, []string{"laptop/declarations"}, "kit secret remove TOKEN (laptop)")
 	out, _, code := w.run(t, "secret", "remove", "TOKEN", "--delete-value")

@@ -129,9 +129,40 @@ file's one block for an item. --json gives the same as one document.`,
 			})
 		},
 	}
-	cmd.AddCommand(add, remove, sync, places)
+	signin := &cobra.Command{
+		Use:   "signin",
+		Short: "Sign in to your secrets' stores with your password, for kit to read them while you're away from the Mac",
+		Long: `Sign in to the stores your secrets are in with your password, for kit to read
+them while you're away from the Mac, as over a remote connection, where a
+store's approval on the Mac's screen can't be given. Each store's own
+program asks for your password, at this terminal: kit never sees it.
+
+kit keeps the session the store gives back in its state, readable by you
+alone, and every kit command after uses it, in any shell, an agent's
+included, till kit secret signout, or till the store ends it. Run it in a
+terminal of your own.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return a.prepared(cmd, secretKind+" signin", a.secretsSignIn)
+		},
+	}
+	signout := &cobra.Command{
+		Use:   "signout",
+		Short: "End the sessions kit keeps from kit secret signin, and delete kit's copies",
+		Long: `End each session kit keeps from kit secret signin, at its store, and delete
+kit's copy, even when the store doesn't answer. With none kept, it says so.
+Run it once the work that needed your secrets is done.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return a.prepared(cmd, secretKind+" signout", a.secretsSignOut)
+		},
+	}
+	cmd.AddCommand(add, remove, sync, places, signin, signout)
 	return cmd
 }
+
+// secretsStep is the one step of kit secret's commands that run as one.
+var secretsStep = event.Step{Name: secret.Descriptor.Name, Title: secret.Descriptor.Label, Area: steps.AreaDrift, Row: secret.Descriptor.Row}
 
 // storesKnown says the secrets stores kit knows, and how their references
 // read, a paragraph each, within help's width.
@@ -153,8 +184,7 @@ func (a *app) secretsSync(ctx context.Context, r *run) error {
 	if err != nil || !slices.Contains(r.kinds, secretKind) {
 		return errors.New("no secrets are declared: kit-config's [secrets] declares them")
 	}
-	step := event.Step{Name: secret.Descriptor.Name, Title: secret.Descriptor.Label, Area: steps.AreaDrift, Row: secret.Descriptor.Row}
-	return a.oneStep(ctx, r, step, "syncing", func(ctx context.Context) check.Result {
+	return a.oneStep(ctx, r, secretsStep, "syncing", func(ctx context.Context) check.Result {
 		report, err := k.Sync(ctx)
 		switch {
 		case err != nil:

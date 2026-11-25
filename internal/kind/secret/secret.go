@@ -11,7 +11,11 @@
 // not approving holding back its values not yet read, as reading on would
 // ask the person again for each; a value that fails to read keeps its
 // previous one, and a store that's signed out fails its own secrets alone.
-// Values never pass through kit's events or log.
+// A store whose approval needs the person at the Mac's screen isn't asked
+// while that screen's locked, as with the person away: kit says so at
+// once. A session kit keeps from a store's sign-in with a password is used
+// in every run while it lasts. Values and sessions never pass through
+// kit's events or log.
 package secret
 
 import (
@@ -59,9 +63,11 @@ func (s Secret) IsFile() bool {
 
 // Secrets is the secrets, each read from its store.
 type Secrets struct {
-	run      runner.Runner
-	home     string
-	declared []Secret
+	run runner.Runner
+	// home is the person's home folder; stateDir, kit's state, where it
+	// keeps the stores' sessions (sessionsName).
+	home, stateDir string
+	declared       []Secret
 }
 
 // kindName names the kind.
@@ -77,13 +83,13 @@ var Descriptor = kind.Descriptor{
 	Row:        "Secrets",
 	Installing: kind.Words{Label: "Sync", Does: "sync it", Doing: "syncing", Done: "synced"},
 	Removing:   kind.Words{Label: "Delete", Does: "delete it from this Mac: its store keeps it", Doing: "deleting", Done: "deleted"},
-	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, d.StateDir) },
 }
 
 // New returns the secrets of the user whose home is home, in the stores kit
-// knows (Stores).
-func New(run runner.Runner, home string) *Secrets {
-	return &Secrets{run: run, home: home}
+// knows (Stores), kit's state in stateDir.
+func New(run runner.Runner, home, stateDir string) *Secrets {
+	return &Secrets{run: run, home: home, stateDir: stateDir}
 }
 
 func (s *Secrets) Name() string { return kindName }

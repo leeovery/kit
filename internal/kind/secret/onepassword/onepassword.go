@@ -23,8 +23,13 @@ import (
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// Driver is 1Password's driver.
-type Driver struct{}
+// Driver is 1Password's driver: signed in with a password's session kit
+// keeps (Using), op runs with it.
+type Driver struct {
+	// session is that session's variable, as op signin has a shell set it:
+	// OP_SESSION_<account>=<token>.
+	session string
+}
 
 // scheme starts each of 1Password's references.
 const scheme = "op://"
@@ -44,29 +49,38 @@ const opTimeout = 15 * time.Second
 // run is lost to a person still answering (9 Nov: a delete gave up at 15s).
 const approvalTimeout = 10 * time.Minute
 
-// opRun runs op as c says, in kit's session (runner.Command.SharesSession):
+// op runs op as c says, in kit's session (runner.Command.SharesSession):
 // 1Password's app asks once a terminal, its approval lasting ten minutes,
 // and a run in a session of its own, without the terminal, is asked again
 // each time, six times for one kit secret add (5 Nov 2026). Signed in with
 // a password, there's no approval to share, and op, its session over, might
 // ask for the password at the terminal: it runs without it. op alone gets
 // kit's own variables of op's, a password's session or a service account's
-// token among them: kit runs every other program without them. A session's
-// variable alone turns the app's approval off, else op asks the app and
-// ignores the session.
-func opRun(ctx context.Context, run runner.Runner, c runner.Command) (runner.Result, error) {
+// token among them, then the session kit keeps: kit runs every other
+// program without them. A session's variable alone turns the app's
+// approval off, else op asks the app and ignores the session.
+func (d Driver) op(ctx context.Context, run runner.Runner, c runner.Command) (runner.Result, error) {
 	c.Name = program
-	c.SharesSession = !passworded()
-	c.Env = slices.Concat(opEnv(), c.Env)
+	c.SharesSession = !d.passworded()
+	c.Env = slices.Concat(d.env(), c.Env)
 	return run.Run(ctx, c)
 }
 
 // biometric turns 1Password's app approval on or off for op.
 const biometric = "OP_BIOMETRIC_UNLOCK_ENABLED"
 
-// opEnv are kit's own variables of op's, each as name=value.
-func opEnv() []string {
-	env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return !strings.HasPrefix(kv, "OP_") })
+// opVars are kit's own variables of op's, each as name=value.
+func opVars() []string {
+	return slices.DeleteFunc(os.Environ(), func(kv string) bool { return !strings.HasPrefix(kv, "OP_") })
+}
+
+// env is op's environment: kit's own variables of op's, then the session
+// kit keeps, the app's approval off with it, whatever kit's own say.
+func (d Driver) env() []string {
+	env := opVars()
+	if d.session != "" {
+		return append(env, d.session, biometric+"=false")
+	}
 	if _, set := os.LookupEnv(biometric); !set && inSession() {
 		env = append(env, biometric+"=false")
 	}
@@ -74,9 +88,10 @@ func opEnv() []string {
 }
 
 // passworded is whether op is signed in with a password, as over a remote
-// connection: the app's approval turned off, or a session's variable set.
-func passworded() bool {
-	return os.Getenv(biometric) == "false" || inSession()
+// connection: with a session kit keeps, the app's approval turned off, or a
+// session's variable set.
+func (d Driver) passworded() bool {
+	return d.session != "" || os.Getenv(biometric) == "false" || inSession()
 }
 
 // inSession is whether a password's session variable is set.
@@ -90,8 +105,11 @@ var about = store.About{
 	Ref:       "op://vault/item/field",
 	Item:      "op://vault/item",
 	Field:     "<section>/<field>, as in GitHub/token",
-	NoAnswer:  "unlock its app, with Settings › Developer › Integrate with 1Password CLI on; over a remote connection, sign in with a password in the shell kit runs from: eval $(OP_BIOMETRIC_UNLOCK_ENABLED=false op signin)",
+	NoAnswer:  "unlock its app, with Settings › Developer › Integrate with 1Password CLI on; away from the Mac, as over a remote connection, " + withPassword,
 	SignedOut: "1Password isn't signed in, or its CLI isn't turned on: sign in to its app, then turn on Settings › Developer › Integrate with 1Password CLI; if kit still waits with both done, quit 1Password and open it again",
+	// The app's prompt takes a fingerprint, on the Mac alone.
+	AtScreen: true,
+	Locked:   withPassword,
 	SignIn: store.SignIn{
 		Title: "Sign in to 1Password",
 		Steps: []string{
@@ -108,7 +126,50 @@ var about = store.About{
 	},
 }
 
+// withPassword is how to have 1Password answer without its app's approval.
+const withPassword = "sign in with your 1Password password instead: kit secret signin, in a terminal of your own"
+
 func (Driver) About() store.About { return about }
+
+// SignIn signs in with the person's password, op asking for it at kit's
+// terminal, the app's approval off: the session's variable op prints for a
+// shell to set, which names the account it's for, as kit keeps it.
+func (Driver) SignIn(ctx context.Context, run runner.Runner) (string, error) {
+	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"signin"}, Env: append(opVars(), biometric+"=false"), Terminal: true, Secret: true, Timeout: approvalTimeout})
+	if err != nil {
+		return "", fmt.Errorf("1Password didn't sign you in: %w", err)
+	}
+	session, ok := sessionOf(res.Stdout)
+	if !ok {
+		return "", errors.New("1Password signed you in, but op gave no session")
+	}
+	return session, nil
+}
+
+// sessionOf is the session's variable op signin printed, as a shell would
+// set it, as NAME=token: export OP_SESSION_<account>="<token>", and lines
+// of advice after it, which a shell takes as comments.
+func sessionOf(out []byte) (string, bool) {
+	for line := range strings.Lines(string(out)) {
+		assignment, ok := strings.CutPrefix(strings.TrimSpace(line), "export ")
+		name, token, _ := strings.Cut(assignment, "=")
+		if token = strings.Trim(token, `"'`); ok && strings.HasPrefix(name, "OP_SESSION_") && token != "" {
+			return name + "=" + token, true
+		}
+	}
+	return "", false
+}
+
+// Using is 1Password with op run in session, as SignIn gave it.
+func (Driver) Using(session string) store.Driver { return Driver{session: session} }
+
+// SignOut ends session with op signout, run in it.
+func (Driver) SignOut(ctx context.Context, run runner.Runner, session string) error {
+	if _, err := (Driver{session: session}).op(ctx, run, runner.Command{Args: []string{"signout"}, Timeout: opTimeout}); err != nil {
+		return fmt.Errorf("1Password didn't sign you out: %w", err)
+	}
+	return nil
+}
 
 // path splits ref, after its scheme, into its parts: false when it isn't
 // one of 1Password's references.
@@ -143,11 +204,11 @@ func (Driver) Short(item, ref string) (string, bool) {
 // Session is open for a session open already (op whoami, which never opens
 // one); signed in for an account listed; else signed out, or the CLI isn't
 // on in the app.
-func (Driver) Session(ctx context.Context, run runner.Runner) store.Session {
-	if _, err := opRun(ctx, run, runner.Command{Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
+func (d Driver) Session(ctx context.Context, run runner.Runner) store.Session {
+	if _, err := d.op(ctx, run, runner.Command{Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
 		return store.Open
 	}
-	res, err := opRun(ctx, run, runner.Command{Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
+	res, err := d.op(ctx, run, runner.Command{Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
 	var accounts []json.RawMessage
 	if err != nil || json.Unmarshal(res.Stdout, &accounts) != nil || len(accounts) == 0 {
 		return store.SignedOut
@@ -157,8 +218,8 @@ func (Driver) Session(ctx context.Context, run runner.Runner) store.Session {
 
 // Unlock has the app open a session, asking for a fingerprint: listing the
 // vaults needs one.
-func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
-	_, err := opRun(ctx, run, runner.Command{Args: []string{"vault", "list", "--format", "json"}, Timeout: approvalTimeout})
+func (d Driver) Unlock(ctx context.Context, run runner.Runner) error {
+	_, err := d.op(ctx, run, runner.Command{Args: []string{"vault", "list", "--format", "json"}, Timeout: approvalTimeout})
 	return err
 }
 
@@ -168,8 +229,8 @@ func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
 // (tried, 9 Nov 2026), so a value that does reads without its own: through
 // the pipe, "a" and "a\n" are one. A file's bytes read whole only with
 // --out-file (ReadFile).
-func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
-	res, err := opRun(ctx, run, runner.Command{Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
+func (d Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
+	res, err := d.op(ctx, run, runner.Command{Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
 	if err != nil {
 		return "", unread(err, ref)
 	}
@@ -185,19 +246,19 @@ func (d Driver) ReadFile(ctx context.Context, run runner.Runner, ref string) (st
 	if err != nil {
 		return "", err
 	}
-	attached, err := isAttachment(ctx, run, ref)
+	attached, err := d.isAttachment(ctx, run, ref)
 	switch {
 	case err != nil:
 		return "", err
 	case attached:
-		return readOut(ctx, run, ref)
+		return d.readOut(ctx, run, ref)
 	}
 	return strings.TrimRight(value, "\n") + "\n", nil
 }
 
 // readOut reads ref's bytes exactly with op read --out-file, into a folder
 // only the person can read, made for it and removed after.
-func readOut(ctx context.Context, run runner.Runner, ref string) (string, error) {
+func (d Driver) readOut(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	dir, err := os.MkdirTemp("", "kit-secret-")
 	if err != nil {
 		return "", err
@@ -205,7 +266,7 @@ func readOut(ctx context.Context, run runner.Runner, ref string) (string, error)
 	defer func() { _ = os.RemoveAll(dir) }()
 	out := filepath.Join(dir, "value")
 	args := []string{"read", "--force", "--file-mode", "0600", "--out-file", out, ref}
-	if _, err := opRun(ctx, run, runner.Command{Args: args, Timeout: approvalTimeout, Secret: true}); err != nil {
+	if _, err := d.op(ctx, run, runner.Command{Args: args, Timeout: approvalTimeout, Secret: true}); err != nil {
 		return "", unread(err, ref)
 	}
 	data, err := os.ReadFile(out)
@@ -219,13 +280,13 @@ func readOut(ctx context.Context, run runner.Runner, ref string) (string, error)
 // attachments, as op item get lists them and op read finds them (has):
 // store.Unread when it finds a field there too, as which op reads is
 // unknown.
-func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, error) {
+func (d Driver) isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, error) {
 	parts, _ := path(ref)
 	if len(parts) != 3 && len(parts) != 4 {
 		return false, nil
 	}
 	item := scheme + parts[0] + "/" + parts[1]
-	_, doc, err := getItem(ctx, run, item)
+	_, doc, err := d.getItem(ctx, run, item)
 	if err != nil {
 		return false, err
 	}
@@ -285,7 +346,7 @@ func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value
 		return "", err
 	}
 	section, label, _ := strings.Cut(short, "/")
-	args, doc, err := getItem(ctx, run, item)
+	args, doc, err := d.getItem(ctx, run, item)
 	if err != nil {
 		return "", err
 	}
@@ -304,7 +365,7 @@ func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value
 	if err != nil {
 		return "", err
 	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: approvalTimeout, Secret: true}); err != nil {
+	if _, err := d.op(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: approvalTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("keep it in 1Password: %w", err)
 	}
 	return short, nil
@@ -312,8 +373,8 @@ func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value
 
 // Free is nil when item keeps nothing at short, a field (section/field) or
 // an attachment: else that it's there already.
-func (Driver) Free(ctx context.Context, run runner.Runner, item, short string) error {
-	_, doc, err := getItem(ctx, run, item)
+func (d Driver) Free(ctx context.Context, run runner.Runner, item, short string) error {
+	_, doc, err := d.getItem(ctx, run, item)
 	if err != nil {
 		return err
 	}
@@ -329,12 +390,12 @@ func taken(short string) error {
 }
 
 // getItem is item's arguments to op, and its JSON, as op item get has it.
-func getItem(ctx context.Context, run runner.Runner, item string) ([]string, map[string]any, error) {
+func (d Driver) getItem(ctx context.Context, run runner.Runner, item string) ([]string, map[string]any, error) {
 	args, err := itemArgs(item)
 	if err != nil {
 		return nil, nil, err
 	}
-	res, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: approvalTimeout, Secret: true})
+	res, err := d.op(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: approvalTimeout, Secret: true})
 	if err != nil {
 		return nil, nil, fmt.Errorf("read the item from 1Password: %w", err)
 	}
@@ -468,19 +529,19 @@ func (d Driver) Attach(ctx context.Context, run runner.Runner, item, name, path 
 	if _, err := os.Stat(path); err != nil {
 		return "", err
 	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(name) + "[file]=" + path}), Timeout: approvalTimeout, Secret: true}); err != nil {
+	if _, err := d.op(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(name) + "[file]=" + path}), Timeout: approvalTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("attach it in 1Password: %w", err)
 	}
 	return name, nil
 }
 
 // Delete deletes the field or attachment short names from item.
-func (Driver) Delete(ctx context.Context, run runner.Runner, item, short string) error {
+func (d Driver) Delete(ctx context.Context, run runner.Runner, item, short string) error {
 	args, err := itemArgs(item)
 	if err != nil {
 		return err
 	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(short) + "[delete]"}), Timeout: approvalTimeout, Secret: true}); err != nil {
+	if _, err := d.op(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(short) + "[delete]"}), Timeout: approvalTimeout, Secret: true}); err != nil {
 		return fmt.Errorf("delete it from 1Password: %w", err)
 	}
 	return nil
@@ -494,4 +555,4 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
-var _ store.Driver = Driver{}
+var _ store.Passworded = Driver{}

@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/kind/secret/store"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -240,6 +241,73 @@ func TestOpWithASessionRunsWithTheAppsApprovalOff(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Signing in with a password runs op signin at kit's terminal, op asking
+// for the password there itself, the app's approval off, what it prints
+// kept from every report: the session is the variable op prints for a
+// shell to set, as NAME=token. A sign-in op refuses, or that prints none,
+// fails, never saying what op printed.
+func TestSignInWithAPassword(t *testing.T) {
+	for _, c := range []struct {
+		name, prints string
+		exits        int
+		want         string
+	}{
+		{"signed in", "export OP_SESSION_ABC123=\"tok-en\"\n# This command is meant to be used with your shell's eval function.\n", 0, "OP_SESSION_ABC123=tok-en"},
+		{"no session", "# Run 'eval $(op signin)' to sign in\n", 0, ""},
+		{"refused", "export OP_SESSION_ABC123=\"tok-en\"\n", 1, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := runnertest.New(t)
+			run.On("op", "signin").Prints(c.prints).Exits(c.exits)
+			got, err := onepassword.Driver{}.SignIn(t.Context(), run)
+			if got != c.want || (err == nil) != (c.want != "") || err != nil && strings.Contains(err.Error(), "tok-en") {
+				t.Errorf("SignIn() = %q, %v; want %q", got, err, c.want)
+			}
+			cmd := run.Commands()[0]
+			if biometric, _ := runner.LookupEnv(cmd.Env, "OP_BIOMETRIC_UNLOCK_ENABLED"); !cmd.Terminal || !cmd.Secret || cmd.SharesSession || biometric != "false" {
+				t.Errorf("%s: at the terminal %v, its output a secret %v, sharing kit's session %v, the app's approval %q; want op at the terminal, the app's approval off, its output kept from reports",
+					cmd, cmd.Terminal, cmd.Secret, cmd.SharesSession, biometric)
+			}
+		})
+	}
+}
+
+// Using the session kit keeps, every run of op has the session's variable,
+// the app's approval off whatever kit's own variables say, outside kit's
+// session, as there's no approval to share; signing out runs op signout in
+// that session.
+func TestOpUsesTheSessionKitKeeps(t *testing.T) {
+	t.Setenv("OP_BIOMETRIC_UNLOCK_ENABLED", "true")
+	run := runnertest.New(t)
+	run.On("op", "whoami")
+	run.On("op", "signout")
+	optest.Holds(run, map[string]string{"op://vault/item/a": "a"})
+	d := onepassword.Driver{}.Using("OP_SESSION_ABC123=tok-en")
+	if got := d.Session(t.Context(), run); got != store.Open {
+		t.Fatalf("Session() = %v, want open", got)
+	}
+	if _, err := d.Read(t.Context(), run, "op://vault/item/a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (onepassword.Driver{}).SignOut(t.Context(), run, "OP_SESSION_ABC123=tok-en"); err != nil {
+		t.Fatal(err)
+	}
+	if got := run.Calls(); !slices.Equal(got, []string{"op whoami", "op read op://vault/item/a", "op signout"}) {
+		t.Errorf("ran %q", got)
+	}
+	for _, c := range run.Commands() {
+		session, _ := runner.LookupEnv(c.Env, "OP_SESSION_ABC123")
+		biometric, _ := runner.LookupEnv(c.Env, "OP_BIOMETRIC_UNLOCK_ENABLED")
+		if session != "tok-en" || biometric != "false" || c.SharesSession {
+			t.Errorf("%s ran with the session %q, the app's approval %q, sharing kit's session %v", c, session, biometric, c.SharesSession)
+		}
+	}
+	run.On("op", "signout").Exits(1)
+	if err := (onepassword.Driver{}).SignOut(t.Context(), run, "OP_SESSION_ABC123=tok-en"); err == nil {
+		t.Error("SignOut(), op failing = nil")
 	}
 }
 
