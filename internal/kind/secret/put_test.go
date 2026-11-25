@@ -28,7 +28,7 @@ func readEnv(t *testing.T, home string) string {
 func TestPutReplacesAVariablesLineAlone(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
-	s := secret.New(fake, home)
+	s := secret.New(fake, home, t.TempDir())
 	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"NEW", "Section/new   # a note"})
 	was := "# a header of my own\nexport A='a'\n\n  # a comment, indented  \nexport NEW='old'   # an old note\nexport STRAY=by\\ hand\nnot an export"
 	if err := os.WriteFile(envFile(home), []byte(was), 0o600); err != nil {
@@ -59,7 +59,7 @@ func TestPutInsertsAVariableWhereASyncWould(t *testing.T) {
 		t.Run(added[0], func(t *testing.T) {
 			home := t.TempDir()
 			fake := runnertest.New(t)
-			s := secret.New(fake, home)
+			s := secret.New(fake, home, t.TempDir())
 			if err := os.WriteFile(envFile(home), []byte("export STRAY='no line declares it'\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +95,7 @@ func TestPutInsertsAVariableWhereASyncWould(t *testing.T) {
 // a sync writes and that one line: the rest come with the next sync.
 func TestPutMakesTheFileWithItsHeader(t *testing.T) {
 	home := t.TempDir()
-	s := secret.New(runnertest.New(t), home)
+	s := secret.New(runnertest.New(t), home, t.TempDir())
 	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"B", "Section/b"})
 	if err := s.Put("B", "b"); err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func TestPutMakesTheFileWithItsHeader(t *testing.T) {
 // ~/.secrets.zsh isn't touched.
 func TestPutWritesAFileAlone(t *testing.T) {
 	home := t.TempDir()
-	s := secret.New(runnertest.New(t), home)
+	s := secret.New(runnertest.New(t), home, t.TempDir())
 	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"~/.config/tool/key", "key --mode 640"})
 	if err := s.Put("~/.config/tool/key", "line one\nline two\n\n"); err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestPutWritesAFileAlone(t *testing.T) {
 // fine.
 func TestPutRefusesAVariableOfManyLines(t *testing.T) {
 	home := t.TempDir()
-	s := secret.New(runnertest.New(t), home)
+	s := secret.New(runnertest.New(t), home, t.TempDir())
 	declare(t, s, [2]string{"A", "Section/a"})
 	if err := s.Put("A", "line one\nline two"); err == nil || err.Error() != "a variable is one line: declare it as a file" {
 		t.Errorf("Put() = %v, want it refused", err)
@@ -152,7 +152,7 @@ func TestPutRefusesAVariableOfManyLines(t *testing.T) {
 
 // Put puts a declared secret alone in place.
 func TestPutRefusesWhatsNotDeclared(t *testing.T) {
-	s := secret.New(runnertest.New(t), t.TempDir())
+	s := secret.New(runnertest.New(t), t.TempDir(), t.TempDir())
 	declare(t, s, [2]string{"A", "Section/a"})
 	if err := s.Put("B", "b"); err == nil || err.Error() != "B isn't declared" {
 		t.Errorf("Put() = %v, want it refused", err)

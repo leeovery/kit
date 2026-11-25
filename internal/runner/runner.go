@@ -76,6 +76,12 @@ type Command struct {
 	// as Homebrew's sudo, which asks kit (SUDO_ASKPASS, -A), and op, which
 	// asks in 1Password's app.
 	SharesSession bool
+	// Terminal runs it at kit's terminal, in kit's own process group, its
+	// input kit's and its errors shown there, for a program that asks the
+	// person something itself, as a password kit never sees: what it prints
+	// on its output is still kept. Only for a command kit runs while
+	// nothing else of kit's is drawn on the terminal.
+	Terminal bool
 	// SudoAsks is whether the sudo it runs asks kit's run for an
 	// administrator's password, through kit's helper (SUDO_ASKPASS), as
 	// Homebrew's installs do: only such a command is given the way to ask,

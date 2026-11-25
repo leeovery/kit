@@ -2,8 +2,9 @@
 // 1Password's does. kit's secrets kind picks each secret's driver by its
 // reference, so one config can keep secrets in several stores, and asks the
 // driver for everything that's the store's own: reading, keeping and
-// deleting values, whether it's signed in, its sign-in, its program and the
-// environment that needs, and its words.
+// deleting values, whether it's signed in, its sign-in, a sign-in with a
+// password when it has one (Passworded), its program and the environment
+// that needs, and its words.
 package store
 
 import (
@@ -69,6 +70,27 @@ type Driver interface {
 	Delete(ctx context.Context, run runner.Runner, item, short string) error
 }
 
+// Passworded is a store the person can sign in to with their password, in
+// a terminal of their own, as away from the Mac: kit keeps the session it
+// gives back, the store's data, never shown, and has the store use it in
+// every run till it's over.
+type Passworded interface {
+	Driver
+	// SignIn signs the person in, the store's program asking for their
+	// password at kit's terminal itself (runner.Command's Terminal), kit
+	// never seeing it: the session it gives back.
+	SignIn(ctx context.Context, run runner.Runner) (string, error)
+	// Using is the store using session in all it runs: its Session is Open
+	// while the session lasts.
+	Using(session string) Driver
+	// Lasts reports whether session is open still: false, with no error,
+	// once the store says it's over; an error when the store doesn't
+	// answer, so it can't say.
+	Lasts(ctx context.Context, run runner.Runner, session string) (bool, error)
+	// SignOut ends session at the store.
+	SignOut(ctx context.Context, run runner.Runner, session string) error
+}
+
 // Unread is a read that failed for the references it names, each with the
 // store's words for why: the rest may read without them.
 type Unread map[string]string
@@ -109,6 +131,12 @@ type About struct {
 	// NoAnswer says how to have it answer, signed in; SignedOut what's
 	// wanting, when it isn't.
 	NoAnswer, SignedOut string
+	// AtScreen is whether its approval needs the person at the Mac's
+	// screen, as a prompt only a fingerprint there answers: kit doesn't ask
+	// for it while that screen's locked, and says WhenLocked instead, what
+	// to do then.
+	AtScreen   bool
+	WhenLocked string
 	// SignIn is signing in to it, as kit raises it at a terminal.
 	SignIn SignIn
 }

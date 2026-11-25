@@ -812,3 +812,46 @@ func TestExecRunsAnUnlimitedCommandAsLongAsItTakes(t *testing.T) {
 		t.Errorf("Run = %v; want it ended with its context", err)
 	}
 }
+
+// A program run at kit's terminal, as one asking the person for a password
+// itself, runs in kit's own process group, the terminal's foreground, and
+// what it prints on its output is kept; ended, it's ended alone.
+func TestExecRunsAProgramAtKitsTerminal(t *testing.T) {
+	e, _ := programs(t, map[string]string{"says": `read typed; echo "kept $typed"`, "waits": `echo $$ > "$1"; exec /bin/sleep 10`})
+	typed := filepath.Join(t.TempDir(), "typed")
+	if err := os.WriteFile(typed, []byte("this\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, err := os.Open(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close() }()
+	e.In = in
+	res, err := e.Run(t.Context(), runner.Command{Name: "says", Terminal: true})
+	if err != nil || string(res.Stdout) != "kept this\n" || res.Group != 0 {
+		t.Errorf("Run() = %+v, %v; want what's typed at the terminal read, its output kept, no group of its own", res, err)
+	}
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	ctx, cancel := context.WithCancel(t.Context())
+	ended := make(chan error, 1)
+	go func() {
+		_, err := e.Run(ctx, runner.Command{Name: "waits", Args: []string{pidFile}, Terminal: true})
+		ended <- err
+	}()
+	pid := 0
+	for deadline := time.Now().Add(5 * time.Second); pid == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		data, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	pgid, err := syscall.Getpgid(pid)
+	sid, sidErr := syscall.Getsid(pid)
+	own, _ := syscall.Getsid(0)
+	if err != nil || sidErr != nil || pgid != syscall.Getpgrp() || sid != own {
+		t.Errorf("process %d is in group %d, session %d (%v, %v); want kit's, %d and %d", pid, pgid, sid, err, sidErr, syscall.Getpgrp(), own)
+	}
+	cancel()
+	if err := <-ended; !errors.Is(err, context.Canceled) {
+		t.Errorf("Run() = %v; want it ended with its context", err)
+	}
+}

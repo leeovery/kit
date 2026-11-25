@@ -146,7 +146,8 @@ func (s *Secrets) refs(d store.Driver, files bool) []string {
 
 // Sync reads every declared secret from its store and puts each in place:
 // first the secrets of the stores ready now, signed in with their programs
-// on kit's PATH; then, waiting for the rest together, each other's as soon
+// on kit's PATH, each in the session kit keeps for it while that lasts
+// (standing); then, waiting for the rest together, each other's as soon
 // as what it waits for has come, in a run that applies: its program, and
 // its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written
 // whole each time, each value without the newlines it ends with (a
@@ -155,8 +156,9 @@ func (s *Secrets) refs(d store.Driver, files bool) []string {
 // variable's value holding a line break fails,
 // as ~/.secrets.zsh holds each on a line of its own; each file as its store
 // reads it as a file (store.Driver.ReadFile), beside its place then renamed
-// into it. A store signed out, or whose program never comes, or that
-// doesn't read them, holds back its own secrets alone (Report.Held); a
+// into it. A store signed out, or whose program never comes, or that can't
+// ask the person for its approval (cantAsk), or doesn't read them, holds
+// back its own secrets alone (Report.Held); a
 // secret whose reference its store names as one it couldn't read fails
 // (Report.Failed). When every store's down and nothing's read, the sync
 // goes no further, not yet, saying why in each store's words.
@@ -173,7 +175,10 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 			later = append(later, d)
 			continue
 		}
-		switch session := d.Session(ctx, s.run); {
+		d, session, err := s.standing(ctx, d)
+		switch {
+		case err != nil:
+			sy.down[d.About().ID] = err.Error()
 		case session != store.SignedOut:
 			sy.read(ctx, d, session)
 		case engine.Takes(ctx, signInName(d)):
@@ -213,8 +218,9 @@ type syncing struct {
 // read reads d's secrets' values, d standing as session says: signed in,
 // with no session open, d has the person approve its first read, the step
 // saying it's waiting for them, and what they're to do, and giving its job
-// up till that read's answered, the approval covering the rest. d's down
-// when it doesn't read them all.
+// up till that read's answered, the approval covering the rest; d's down at
+// once, reading nothing, when the person can't approve it (cantAsk). d's
+// down when it doesn't read them all.
 func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Session) {
 	refs, files := sy.s.refs(d, false), sy.s.refs(d, true)
 	if len(refs)+len(files) == 0 {
@@ -222,6 +228,10 @@ func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Sessi
 	}
 	answered := func() {}
 	if session == store.SignedIn {
+		if err := sy.s.cantAsk(ctx, d); err != nil {
+			sy.down[d.About().ID] = err.Error()
+			return
+		}
 		name := d.About().Name
 		over := event.Meanwhile(ctx, event.Doing{Says: "waiting for your approval in " + name, Todo: name + " asks whether kit may read your secrets: approve it"})
 		back := engine.Release(ctx)
@@ -336,7 +346,11 @@ func (sy *syncing) heldBack(d store.Driver) string {
 // settle reads store d's secrets and puts them in place, now it's settled:
 // held back when it's still signed out.
 func (sy *syncing) settle(ctx context.Context, d store.Driver) error {
-	session := d.Session(ctx, sy.s.run)
+	d, session, err := sy.s.standing(ctx, d)
+	if err != nil {
+		sy.down[d.About().ID] = err.Error()
+		return nil
+	}
 	if session == store.SignedOut {
 		sy.down[d.About().ID] = d.About().SignedOut
 		return nil

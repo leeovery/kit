@@ -32,6 +32,10 @@ type Exec struct {
 	Path []string
 	Env  []string
 	Now  func() time.Time
+	// In and Err are the terminal a command run at it (Command's Terminal)
+	// reads and shows its errors on: kit's standard input and error when
+	// nil.
+	In, Err *os.File
 	// clock keeps the time of what it runs: the real clock when nil, as
 	// it is but in tests, which can't wait as long as kit gives a command.
 	clock *clock
@@ -129,6 +133,9 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 	if cmd.Answer != nil {
 		return converse(ctx, c, cmd, e.timed())
 	}
+	if cmd.Terminal {
+		return atTerminal(c, cmp.Or(e.In, os.Stdin), cmp.Or(e.Err, os.Stderr), e.timed())
+	}
 	if cmd.Input != "" {
 		c.Stdin = strings.NewReader(cmd.Input)
 	}
@@ -155,6 +162,24 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 		exited()
 	}
 	return done(c, d, out.Bytes(), errOut.Bytes()), err
+}
+
+// atTerminal runs c at kit's terminal, in and errs (Command's Terminal),
+// in kit's process group, the terminal's foreground, where a program may
+// read what the person types: its output kept, the rest the terminal's.
+// Ended, it's sent SIGTERM alone, as its group is kit's; it leads no group
+// of its own.
+func atTerminal(c *exec.Cmd, in, errs *os.File, k *clock) (ran, error) {
+	var out bytes.Buffer
+	c.Stdin, c.Stdout, c.Stderr = in, &out, errs
+	var ended atomic.Bool
+	c.WaitDelay = k.wait
+	c.Cancel = func() error {
+		ended.Store(true)
+		return c.Process.Signal(syscall.SIGTERM)
+	}
+	err := c.Run()
+	return ran{stdout: out.Bytes(), ended: ended.Load()}, err
 }
 
 // running tells cmd, its process c started, that it's running (Running):

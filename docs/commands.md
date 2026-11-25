@@ -104,7 +104,7 @@ then declares it.
 
 Most of these have `add` and `remove`. Three differ:
 
-- `kit secret` has `add`, `remove`, `sync` and `places`.
+- `kit secret` has `add`, `remove`, `sync`, `places`, `signin` and `signout`.
 - `kit prefs` has `capture`, `restore`, `history`, `pending` and `start-fresh`.
 - `kit feature` has `on` and `off`.
 

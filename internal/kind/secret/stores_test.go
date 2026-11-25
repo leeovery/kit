@@ -38,20 +38,32 @@ type fakeStore struct {
 	// locked has every read fail, naming nothing, as one the person
 	// doesn't approve.
 	locked bool
+	// atScreen has its approval need the person at the Mac's screen;
+	// unlocks counts the times it was asked to open a session.
+	atScreen bool
+	unlocks  int
+	// readWith is the session each read ran in, "" for none.
+	readWith []string
 }
 
 func (f *fakeStore) About() store.About {
+	var a store.About
 	if f.name != "" {
 		title := "The " + f.name + " store"
-		return store.About{ID: f.name, Name: title, Program: f.name, Ref: f.name + ":item/field", Item: f.name + ":item", Field: "<field>",
+		a = store.About{ID: f.name, Name: title, Program: f.name, Ref: f.name + ":item/field", Item: f.name + ":item", Field: "<field>",
 			NoAnswer: "unlock " + title, SignedOut: title + " is signed out", SignIn: store.SignIn{Title: "Sign in to " + title}}
+	} else {
+		a = store.About{
+			ID: "fake", Name: "Fake Vault", Program: "fakevault",
+			Ref: "vault:item/field", Item: "vault:item", Field: "<field>",
+			NoAnswer: "unlock Fake Vault", SignedOut: "Fake Vault is signed out",
+			SignIn: store.SignIn{Title: "Sign in to Fake Vault", Steps: []string{"Open Fake Vault", "Sign in"}, App: "com.example.fakevault", AppName: "Fake Vault"},
+		}
 	}
-	return store.About{
-		ID: "fake", Name: "Fake Vault", Program: "fakevault",
-		Ref: "vault:item/field", Item: "vault:item", Field: "<field>",
-		NoAnswer: "unlock Fake Vault", SignedOut: "Fake Vault is signed out",
-		SignIn: store.SignIn{Title: "Sign in to Fake Vault", Steps: []string{"Open Fake Vault", "Sign in"}, App: "com.example.fakevault", AppName: "Fake Vault"},
+	if f.atScreen {
+		a.AtScreen, a.WhenLocked = true, "sign in with its password"
 	}
+	return a
 }
 
 // scheme is what its references start with.
@@ -84,9 +96,19 @@ func (f *fakeStore) signIn() {
 	f.session = store.SignedIn
 }
 
-func (f *fakeStore) Unlock(context.Context, runner.Runner) error { return nil }
+func (f *fakeStore) Unlock(context.Context, runner.Runner) error {
+	f.unlocks++
+	return nil
+}
+
 func (f *fakeStore) Read(_ context.Context, _ runner.Runner, ref string) (string, error) {
+	return f.readIn("", ref)
+}
+
+// readIn reads ref in session, "" for none.
+func (f *fakeStore) readIn(session, ref string) (string, error) {
 	f.reads = append(f.reads, []string{ref})
+	f.readWith = append(f.readWith, session)
 	if f.locked {
 		return "", errors.New("not approved")
 	}
@@ -126,6 +148,79 @@ func (f *fakeStore) Delete(context.Context, runner.Runner, string, string) error
 	return errors.New("not kept here")
 }
 
+// passwordStore is fake signing in with a password too: each sign-in gives
+// the next of gives, a session live till it's ended or expired; refused,
+// it signs no one in; failsSignOut has a sign-out fail, the session ended
+// none the less; silent has it never answer whether a session lasts. ended
+// are the sessions signed out of.
+type passwordStore struct {
+	*fakeStore
+	gives        []string
+	live         map[string]bool
+	ended        []string
+	refused      bool
+	failsSignOut bool
+	silent       bool
+}
+
+func (p *passwordStore) SignIn(context.Context, runner.Runner) (string, error) {
+	if p.refused || len(p.gives) == 0 {
+		return "", errors.New("wrong password")
+	}
+	session := p.gives[0]
+	p.gives = p.gives[1:]
+	if p.live == nil {
+		p.live = map[string]bool{}
+	}
+	p.live[session] = true
+	return session, nil
+}
+
+func (p *passwordStore) Using(session string) store.Driver { return inSession{p, session} }
+
+func (p *passwordStore) SignOut(_ context.Context, _ runner.Runner, session string) error {
+	p.ended = append(p.ended, session)
+	delete(p.live, session)
+	if p.failsSignOut {
+		return errors.New("no answer")
+	}
+	return nil
+}
+
+// Lasts says whether session is live: no answer at all while silent.
+func (p *passwordStore) Lasts(_ context.Context, _ runner.Runner, session string) (bool, error) {
+	if p.silent {
+		return false, errors.New("timed out")
+	}
+	return p.live[session], nil
+}
+
+// expire has session end, as a store ends one left unused.
+func (p *passwordStore) expire(session string) { delete(p.live, session) }
+
+// inSession is a passwordStore using a session: open while it's live.
+type inSession struct {
+	*passwordStore
+	session string
+}
+
+func (s inSession) Session(ctx context.Context, run runner.Runner) store.Session {
+	if s.live[s.session] {
+		return store.Open
+	}
+	return s.passwordStore.Session(ctx, run)
+}
+
+func (s inSession) Read(_ context.Context, _ runner.Runner, ref string) (string, error) {
+	return s.readIn(s.session, ref)
+}
+
+func (s inSession) ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error) {
+	return s.Read(ctx, run, ref)
+}
+
+var _ store.Passworded = (*passwordStore)(nil)
+
 // twoStores are the secrets of a home in 1Password and fake, the stores
 // kit knows, each driven as its reference says, and the fake runner
 // standing in for 1Password, signed in, holding A, and with the fake's
@@ -136,7 +231,7 @@ func twoStores(t *testing.T, fake *fakeStore) (*secret.Secrets, config.List, *ru
 	secret.UseStores(t, onepassword.Driver{}, fake)
 	home := t.TempDir()
 	run := runnertest.New(t)
-	s := secret.New(run, home)
+	s := secret.New(run, home, t.TempDir())
 	list := config.List{Kind: "secret", Declared: true, Entries: []config.Entry{
 		{Name: "A", Value: "Section/a", Item: item, Section: "secrets " + item, Scope: "shared", Line: 2},
 		{Name: "B", Value: "vault:keys/b", Section: "secrets", Scope: "shared", Line: 5},
@@ -247,7 +342,7 @@ func TestEveryStoreDown(t *testing.T) {
 	run.On("op", "whoami").Exits(1)
 	run.On("op", "account", "list", "--format", "json").Prints("[]")
 	run.On("fakevault")
-	s := secret.New(run, t.TempDir())
+	s := secret.New(run, t.TempDir(), t.TempDir())
 	list := config.List{Kind: "secret", Declared: true, Entries: []config.Entry{
 		{Name: "A", Value: item + "/a", Section: "secrets"},
 		{Name: "B", Value: "vault:keys/b", Section: "secrets"},
@@ -281,7 +376,7 @@ func TestAStoresProgramMissingHoldsBackItsOwnAlone(t *testing.T) {
 // own, a value's or an item's.
 func TestAReferenceNoStoreKnows(t *testing.T) {
 	secret.UseStores(t, onepassword.Driver{}, &fakeStore{})
-	s := secret.New(runnertest.New(t), t.TempDir())
+	s := secret.New(runnertest.New(t), t.TempDir(), t.TempDir())
 	for _, c := range []struct {
 		e    config.Entry
 		want string
@@ -322,7 +417,7 @@ func TestSectionsKnowTheStoresItems(t *testing.T) {
 func TestEachStoreUsedBringsItsSignIn(t *testing.T) {
 	fake := &fakeStore{session: store.SignedOut}
 	secret.UseStores(t, onepassword.Driver{}, fake)
-	s := secret.New(runnertest.New(t), t.TempDir())
+	s := secret.New(runnertest.New(t), t.TempDir(), t.TempDir())
 	if _, err := s.Values(config.List{Entries: []config.Entry{{Name: "B", Value: "vault:keys/b", Section: "secrets"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +455,7 @@ func TestStoresHeldAreAwaitedTogether(t *testing.T) {
 	run := runnertest.New(t)
 	run.On("bee")
 	run.On("sea")
-	s := secret.New(run, home)
+	s := secret.New(run, home, t.TempDir())
 	list := config.List{Kind: "secret", Declared: true, Entries: []config.Entry{
 		{Name: "B", Value: "bee:keys/b", Section: "secrets"},
 		{Name: "C", Value: "sea:keys/c", Section: "secrets"},

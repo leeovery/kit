@@ -37,9 +37,26 @@ references.
 ## The person's approval
 
 Reading, keeping or deleting a value may have the person approve it, at
-their store's prompt, as 1Password's app asks for a fingerprint once its
-last approval has lapsed. A command waits up to 10 minutes for that: tell
-the person to look for the prompt. Only they can answer it.
+their store's prompt, as 1Password's app asks for a fingerprint on the
+Mac's screen once its last approval has lapsed. A command waits up to 10
+minutes for that: tell the person to look for the prompt. Only they can
+answer it.
+
+## The person away from the Mac
+
+While the Mac's screen is locked, as with the person away, kit asks for no
+approval there: a command that needs one fails at once, saying to sign in
+with `kit secret signin`. Then:
+
+1. Ask the person to run `kit secret signin` in a terminal of their own.
+   Their store asks for their password there; never ask for it yourself.
+2. Carry on once they say it's done: every kit command after uses the
+   session kit keeps, in any shell, yours included.
+3. Run `kit secret signout` once the work that needed secrets is done.
+
+The store ends the session by itself once it's unused a while, as
+1Password does after 30 minutes. kit then drops its copy, and the next
+command that needs a secret says to sign in again.
 
 ## How they're declared
 
