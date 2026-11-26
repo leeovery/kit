@@ -18,10 +18,11 @@ type palette struct {
 	wordmark                    func(string) string
 }
 
-// kit is kit's own look's palette: white names, muted words, pink for
-// what's chosen, the wordmark along the gradient.
+// kit is kit's own look's palette: names bold and words faint in the
+// terminal's text colour, pink for what's chosen, the wordmark along the
+// gradient.
 var kit = palette{
-	name: fg(white).Bold(true), key: fg(white), says: fg(muted), dim: fg(dim), label: fg(pink).Bold(true),
+	name: bold, key: plain, says: muted, dim: dim, label: fg(pink).Bold(true),
 	cursor: fg(pink).Bold(true), chosen: lipgloss.NewStyle().Foreground(dark).Background(pink).Bold(true),
 	field:    lipgloss.NewStyle().Foreground(dark).Background(pink),
 	wordmark: func(k string) string { return along(k, 0, ansi.StringWidth(k)) },

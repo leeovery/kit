@@ -12,10 +12,16 @@
 //     pill, its words where the others' are;
 //   - what to do starts "→ ", the command in it white;
 //   - one blank line between blocks, none inside one;
-//   - the states: done a pink ●, needs you an orange ▲, failed a red ✗,
+//   - the states: done a pink ●, needs you a yellow ▲, failed a red ✗,
 //     running a cyan ◐, queued a cyan ○, skipped a grey –, to do a white △.
-//     Grey means only "didn't run", orange only "needs you now", and colour
-//     is never the only sign.
+//     Grey means only "didn't run", yellow only "needs you now", and colour
+//     is never the only sign;
+//   - words take the terminal's own colours, its theme's, so they read on
+//     whatever background it has, light or dark: white is its text colour,
+//     grey its faint text or its bright black, red, yellow and cyan its
+//     own. Only what kit paints for itself has colours of its own, exact:
+//     the wordmark and the bar along kit's gradient, pink for what's done
+//     or chosen, and a pill.
 package look
 
 import (
@@ -31,43 +37,52 @@ import (
 // Width is the widest a line goes.
 const Width = 80
 
-// The colours: pink to orange, kit's gradient, with white, two greys, red
-// and cyan; dark is a pill's text.
+// kit's own colours, exact, for what it paints itself: pink to orange, its
+// gradient; scarlet, a failure's pill; dark, a pill's text.
 var (
-	pink   = lipgloss.Color("#FF4F9A")
-	orange = lipgloss.Color("#FFA24C")
-	white  = lipgloss.Color("#F4F4F6")
-	muted  = lipgloss.Color("#9CA3B4")
-	dim    = lipgloss.Color("#596173")
-	red    = lipgloss.Color("#FF5C5C")
-	cyan   = lipgloss.Color("#64D2FF")
-	dark   = lipgloss.Color("#1B1D24")
+	pink    = lipgloss.Color("#FF4F9A")
+	orange  = lipgloss.Color("#FFA24C")
+	scarlet = lipgloss.Color("#FF5C5C")
+	dark    = lipgloss.Color("#1B1D24")
+)
+
+// The words' styles, in the terminal's own colours: its text colour, plain
+// or bold; faint; its bright black; its yellow, red and cyan.
+var (
+	plain  = lipgloss.NewStyle()
+	bold   = plain.Bold(true)
+	muted  = plain.Faint(true)
+	dim    = fg(lipgloss.BrightBlack)
+	yellow = fg(lipgloss.Yellow)
+	red    = fg(lipgloss.Red)
+	cyan   = fg(lipgloss.Cyan)
 )
 
 func fg(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
 
 // Muted is words that say something: a row's text, a note.
-func Muted(s string) string { return fg(muted).Render(s) }
+func Muted(s string) string { return muted.Render(s) }
 
 // Dim is what's there to be found, not read: a command run, a time, a dot.
-func Dim(s string) string { return fg(dim).Render(s) }
+func Dim(s string) string { return dim.Render(s) }
 
 // White is what's typed or counted: a command to run, a figure.
-func White(s string) string { return fg(white).Render(s) }
+func White(s string) string { return plain.Render(s) }
 
 // Strong is a name.
-func Strong(s string) string { return fg(white).Bold(true).Render(s) }
+func Strong(s string) string { return bold.Render(s) }
 
 // Pink, Orange, Red and Cyan are words in a state's colour: done, needs
-// you, failed, running.
+// you, failed, running. Orange is the terminal's yellow, which a light
+// theme darkens towards orange.
 func Pink(s string) string   { return fg(pink).Render(s) }
-func Orange(s string) string { return fg(orange).Render(s) }
-func Red(s string) string    { return fg(red).Render(s) }
-func Cyan(s string) string   { return fg(cyan).Render(s) }
+func Orange(s string) string { return yellow.Render(s) }
+func Red(s string) string    { return red.Render(s) }
+func Cyan(s string) string   { return cyan.Render(s) }
 
-// Urgent is what needs you now, orange and bold: what's to be done, and
+// Urgent is what needs you now, Orange and bold: what's to be done, and
 // the numbers and keys that do it.
-func Urgent(s string) string { return fg(orange).Bold(true).Render(s) }
+func Urgent(s string) string { return yellow.Bold(true).Render(s) }
 
 // Cmd is a command in words saying what to do: white, as it's typed.
 func Cmd(s string) string { return White(s) }
@@ -350,7 +365,7 @@ func Pill(text string, s State) string {
 	case NeedsYou:
 		bg = orange
 	case Failed:
-		bg = red
+		bg = scarlet
 	}
 	return lipgloss.NewStyle().Foreground(dark).Background(bg).Bold(true).Render(" " + text + " ")
 }
@@ -405,14 +420,10 @@ func Checklist(ts []Tick, cursor int) []string {
 }
 
 // QR is text as a QR code in half blocks, a cell two modules high, as a
-// camera reads it: on a dark background its light modules and a quiet zone
-// of two are white; on a light one, its dark modules are dark.
+// camera reads it, in the terminal's text colour: on a dark background its
+// light modules and a quiet zone of two; on a light one, its dark modules.
 func QR(text string, darkBackground bool) ([]string, error) {
-	paint := White
-	if !darkBackground {
-		paint = func(s string) string { return fg(dark).Render(s) }
-	}
-	return qrCode(text, darkBackground, paint)
+	return qrCode(text, darkBackground, White)
 }
 
 // Chosen is something chosen from a list: the cursor in the marks'
@@ -772,8 +783,9 @@ func CutKeeping(s, kept string, w int) string {
 }
 
 // Colours are kit's colours, as the boot's arrival in the terminal turns
-// its noise from amber into them: pink, a purple, a blue, cyan and orange.
-var Colours = []color.Color{pink, lipgloss.Color("#B57BFF"), lipgloss.Color("#5B8CFF"), cyan, orange}
+// its noise from amber into them: pink, a purple, a blue, a cyan and
+// orange.
+var Colours = []color.Color{pink, lipgloss.Color("#B57BFF"), lipgloss.Color("#5B8CFF"), lipgloss.Color("#64D2FF"), orange}
 
 // Gradient is the colour t along kit's gradient, from pink (0) to orange
 // (1).

@@ -296,6 +296,37 @@ func TestStatesMarks(t *testing.T) {
 	}
 }
 
+// Words take the terminal's own colours, its theme's, so they read on a
+// light background as on a dark one: white its text colour, names bold;
+// muted faint and dim its bright black; needs you its yellow, mark and
+// words alike; failed its red, running its cyan. Only kit's accent, pink,
+// keeps a colour of its own, and a pill, dark on kit's own colour.
+func TestWordsTakeTheTheme(t *testing.T) {
+	for _, tt := range []struct {
+		name, got, want string
+	}{
+		{"White", look.White("a"), "a"},
+		{"Cmd", look.Cmd("a"), "a"},
+		{"Strong", look.Strong("a"), "\x1b[1ma\x1b[m"},
+		{"Muted", look.Muted("a"), "\x1b[2ma\x1b[m"},
+		{"Dim", look.Dim("a"), "\x1b[90ma\x1b[m"},
+		{"Orange", look.Orange("a"), "\x1b[33ma\x1b[m"},
+		{"Urgent", look.Urgent("a"), "\x1b[1;33ma\x1b[m"},
+		{"Red", look.Red("a"), "\x1b[31ma\x1b[m"},
+		{"Cyan", look.Cyan("a"), "\x1b[36ma\x1b[m"},
+		{"needs you's mark", look.Mark(look.NeedsYou), "\x1b[33m▲\x1b[m"},
+		{"failed's mark", look.Mark(look.Failed), "\x1b[31m✗\x1b[m"},
+		{"running's mark", look.Mark(look.Running), "\x1b[36m◐\x1b[m"},
+		{"skipped's mark", look.Mark(look.Skipped), "\x1b[2m–\x1b[m"},
+		{"done's mark", look.Mark(look.Done), "\x1b[38;2;255;79;154m●\x1b[m"},
+		{"a failure's pill", look.Pill("a", look.Failed), "\x1b[1;38;2;27;29;36;48;2;255;92;92m a \x1b[m"},
+	} {
+		if tt.got != tt.want {
+			t.Errorf("%s drew %q; want %q", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
 // A question's answers: the cursor in the marks' column, the chosen label a
 // pill whose words line up with the others'.
 func TestAnswers(t *testing.T) {
@@ -326,8 +357,9 @@ func TestChecklist(t *testing.T) {
 	}
 }
 
-// Kit's own QR code is white on a dark background, its quiet zone lit, and
-// dark on a light one, as the boot's is amber.
+// Kit's own QR code is in the terminal's text colour, as the boot's is
+// amber: its light modules on a dark background, its quiet zone lit, and
+// its dark modules on a light one.
 func TestQR(t *testing.T) {
 	onDark, err := look.QR("https://github.com/login/device", true)
 	if err != nil {
@@ -343,6 +375,9 @@ func TestQR(t *testing.T) {
 	}
 	if strings.TrimSpace(text(onLight...)[0]) != "" {
 		t.Errorf("on light, the first line is %q: want the quiet zone blank", text(onLight...)[0])
+	}
+	if modules := text(onLight...)[1]; onLight[1] != look.White(modules) {
+		t.Errorf("on light, drew %q: want its modules in the terminal's text colour", onLight[1])
 	}
 }
 
