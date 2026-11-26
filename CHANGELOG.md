@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-11-26
+
+🔧 Changed
+- Terminal output now uses your terminal theme's own colours for text, greys, yellow, red and cyan — it stays readable on light and dark backgrounds, including themes like Solarized Dark.
+- "Needs you" prompts and markers are now yellow instead of orange.
+- QR codes are drawn in the terminal's text colour instead of fixed white or dark.
+
 ## [0.5.4] - 2026-11-26
 
 Read your secrets while away from the Mac by signing in once with your password and leaving it open.
