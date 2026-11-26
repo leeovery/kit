@@ -36,8 +36,10 @@ through defaults export and import, and the settings files [prefs files] names.
 Each Mac saves them nightly into its own folder on kit-config's prefs branch
 (private on GitHub, or kit doesn't push), which kit clones alone in its data
 folder; each capture that changed anything is a commit, so restore can go back
-to a date. The first capture makes the branch. [prefs deny] leaves domains
-out; [prefs apps] says whose a domain is when its name doesn't;
+to a date. The first capture makes the branch. [prefs keys] keeps some keys
+of a domain alone, Apple's included, merged back on restore, then restarts
+the process it names; [prefs deny] leaves domains out; [prefs apps] says
+whose a domain is when its name doesn't;
 [prefs machine-bound] are never copied to another Mac, or onto other
 hardware.`,
 	}
@@ -207,6 +209,17 @@ func (a *app) prefs(r *run) (*prefs.Prefs, error) {
 	for _, e := range apps.Entries {
 		lists.Apps = append(lists.Apps, [2]string{e.Name, e.Value})
 	}
+	keys, err := r.cfg.List(config.PrefsKeysKind, r.machine)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range keys.Entries {
+		k, err := prefs.ParseKeys(e)
+		if err != nil {
+			return nil, err
+		}
+		lists.Keys = append(lists.Keys, k)
+	}
 	p := prefs.New(r.run, r.homeDir, r.stateDir, filepath.Join(r.dataDir, prefsNoun), r.cfg.Dir, r.machine, lists, a.Now)
 	p.Probes = append(p.Probes[:len(p.Probes)-1], a.TCC)
 	p.AppDirs = a.appFolders(r.homeDir).Dirs
@@ -287,7 +300,7 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.Kept)+len(report.ToOpen) == 0 && report.Failures() == 0 {
+		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.Kept)+len(report.ToOpen)+len(report.Rearranged) == 0 && report.Failures() == 0 {
 			return check.Result{State: check.OK, Summary: "nothing pending"}
 		}
 		res := check.Result{State: check.OK}.Saying(report.Says()...)
@@ -308,7 +321,11 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 			res.Items = append(res.Items, check.Item{ID: "prefs:pending:" + d, Name: d, State: "pending", Detail: report.Waiting[d], Quiet: quiet})
 		}
 		for _, d := range slices.Sorted(maps.Keys(report.Kept)) {
-			res.Items = append(res.Items, check.Item{ID: "prefs:kept:" + d, Name: d, State: "kept", Detail: "its app isn't installed", Quiet: "restored once it is"})
+			it := check.Item{ID: "prefs:kept:" + d, Name: d, State: "kept", Detail: "its app isn't installed", Quiet: "restored once it is"}
+			if report.Kept[d] == prefs.LeftOutWhy {
+				it.Detail, it.Quiet = prefs.LeftOutWhy, "each put back once its app is here, unless it's changed since"
+			}
+			res.Items = append(res.Items, it)
 		}
 		if report.Failures() > 0 {
 			res.State = check.Attention
@@ -342,10 +359,12 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		return err
 	}
 	if a.json {
-		pending := rec.Pending
-		if pending == nil {
-			pending = &prefs.Pending{Domains: []string{}}
+		pending := prefs.Pending{Domains: []string{}}
+		if rec.Pending != nil {
+			pending = *rec.Pending
 		}
+		// What kit wrote, and the items left out, are its own bookkeeping.
+		pending.Keyed = nil
 		return render.WriteJSON(a.Stdout, pending)
 	}
 	if rec.Pending == nil {

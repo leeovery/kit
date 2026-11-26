@@ -368,12 +368,17 @@ func waitingFor(report prefs.RestoreReport) string {
 }
 
 // keptFor is how many of report's domains are kept for apps not installed,
-// after a semicolon: "" for none.
+// and wait for apps to put items back, each after a semicolon: "" for
+// none.
 func keptFor(report prefs.RestoreReport) string {
-	if n := len(report.Kept); n > 0 {
-		return fmt.Sprintf("; %d kept for apps not installed", n)
+	said := ""
+	if n := len(report.Kept) - len(report.Held); n > 0 {
+		said += fmt.Sprintf("; %d kept for apps not installed", n)
 	}
-	return ""
+	if n := len(report.Held); n > 0 {
+		said += "; " + prefs.ItemsWaiting(n)
+	}
+	return said
 }
 
 // appsOf counts the apps of domains, as apps names them, each once.
@@ -403,12 +408,15 @@ func startAfresh(p *prefs.Prefs) (string, error) {
 		said = "saving from now"
 	}
 	if rec.Pending != nil {
-		kept := rec.Pending.Kept()
-		if n := len(rec.Pending.Domains) + len(rec.Pending.Files) - kept; n > 0 {
+		kept, items := rec.Pending.Kept(), rec.Pending.Waiting()
+		if n := len(rec.Pending.Domains) + len(rec.Pending.Files) - kept - items; n > 0 {
 			said += fmt.Sprintf("; %d still %s to come back", n, look.Plural(n, "waits", "wait"))
 		}
 		if kept > 0 {
 			said += fmt.Sprintf("; %d kept for apps not installed", kept)
+		}
+		if items > 0 {
+			said += "; " + prefs.ItemsWaiting(items)
 		}
 	}
 	return said, nil

@@ -55,12 +55,14 @@ func StepFolder(scope, name string) string {
 }
 
 // The sections of kit prefs's lists, which aren't kinds: the settings files
-// it saves besides apps' preferences; the domains it never saves; the apps
-// that domains belong to when their names don't say, a domain's pattern then
-// the app's bundle id; and the settings that belong to one Mac, never
-// copied to another.
+// it saves besides apps' preferences; the domains it keeps some keys of
+// alone, Apple's among them, a domain then its keys and options; the
+// domains it never saves; the apps that domains belong to when their names
+// don't say, a domain's pattern then the app's bundle id; and the settings
+// that belong to one Mac, never copied to another.
 const (
 	PrefsFilesKind        = "prefs-files"
+	PrefsKeysKind         = "prefs-keys"
 	PrefsDenyKind         = "prefs-deny"
 	PrefsAppsKind         = "prefs-apps"
 	PrefsMachineBoundKind = "prefs-machine-bound"
@@ -205,6 +207,7 @@ var (
 	}
 	ownTrailing = []sectionDef{
 		{header: "prefs files", kind: PrefsFilesKind, form: Paths},
+		{header: "prefs keys", kind: PrefsKeysKind, form: Options},
 		{header: "prefs deny", kind: PrefsDenyKind, form: Paths},
 		{header: "prefs apps", kind: PrefsAppsKind, form: Settings},
 		{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: Paths},

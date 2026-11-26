@@ -443,6 +443,32 @@ func TestPrefsRestoreSaysWhatsKept(t *testing.T) {
 	}
 }
 
+// kit prefs restore of a domain kept by its keys, an app of its Dock tiles
+// not on the Mac, says the Dock waits for apps to put its items back.
+func TestPrefsRestoreSaysWhatWaitsForItsApps(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "features", "prefs\n")
+	w.writeSection(t, "laptop", "prefs keys", "com.apple.dock persistent-apps --restart Dock\n")
+	w.write(t, filepath.Join(".local", "state", "kit", "prefs.json"), `{"on": "restored"}`)
+	clone := w.storeCloned()
+	w.write(t, filepath.Join(".local", "share", "kit", "prefs", ".git", "HEAD"), "")
+	w.write(t, filepath.Join(".local", "share", "kit", "prefs", "laptop", "keys", "com.apple.dock.plist"),
+		`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>persistent-apps</key><array><dict><key>_CFURLString</key><string>`+
+			filepath.Join(w.home, "Applications", "Not Here.app")+`</string></dict></array></dict></plist>`)
+	w.fake.On("git", "-C", clone, "remote")
+	w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
+	w.fake.On("defaults", "export", "com.apple.dock", "-").Prints(noSettings).Then().
+		Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>persistent-apps</key><array/></dict></plist>`)
+	w.fake.On("defaults", "import", "com.apple.dock", "-")
+	w.fake.On("killall", "Dock")
+	out, errOut, code := w.run(t, "prefs", "restore", "com.apple.dock")
+	want := "prefs ok restored 1 domain and 0 files from laptop; 1 waiting for apps to put its items back\n" +
+		"prefs kept:each put back once its app is here, unless it's changed since com.apple.dock (waiting for apps to put its items back)\n"
+	if !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit prefs restore printed\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
+	}
+}
+
 // kit prefs restore of a domain whose app is running holds it till the app's
 // quit, as a full restore does, so capture leaves its stored copy be.
 func TestPrefsRestoreOfADomainHoldsItWhileItsAppRuns(t *testing.T) {

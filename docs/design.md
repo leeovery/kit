@@ -1683,6 +1683,27 @@ refused clone uninstalls it all the same, deleting none of its saved settings an
   restore --pending`, after anything wrong with capture itself. A held
   file's saved copy stays in the store, on the Mac or not. `[prefs deny]` leaves
   domains out.
+- **`[prefs keys]`**: a domain, the keys of it kept, and `--restart` a process, as in
+  `com.apple.dock persistent-apps persistent-others --restart Dock` (the Dock's apps and
+  folders): any domain, Apple's included, never one whole. Capture saves those keys alone, in
+  `<mac>/keys/<domain>.plist`, a folder of its own so no restore ever replaces a domain with
+  them, and saves no domain declared so whole. Restore (full, named or `--pending`) merges
+  them into the domain as exported (the whole domain imported back, its other keys as they
+  were, so it holds whether import merges or replaces), saving the live copy first, then
+  `killall`s the process once, when anything changed. An array's item holding a file's URL
+  (`_CFURLString`) whose file isn't on this Mac, as a Dock tile of an app not installed, is
+  left out, and the domain held, "waiting for apps to put its items back": the record keeps
+  each item left out (its key, its place in the stored array, its file, the item as XML) and a
+  fingerprint of what kit wrote (each array by its items' file paths, in order, the rest of an
+  item the app's to rewrite). `RestoreInstalled` (apply's settings step) and the hourly pass,
+  once a left-out item's file is here, put that item back where it was, and nothing else from
+  the store, only while the live keys match the fingerprint; the hold goes once nothing's left
+  out. Capture compares the live keys with the fingerprint too: changed, as a Dock rearranged,
+  the hold goes and capture saves them as any; unchanged, while held from this Mac's own
+  folder, capture leaves the stored copy, the whole list. `kit cask add` and `kit mas add`
+  don't put back, as a named restore merges from the store. A merge that fails is held as
+  failed, the fingerprint kept, for `--pending` by hand. Without a line, keys stored before
+  aren't restored.
 
 ## Data restore (`[restore]`)
 

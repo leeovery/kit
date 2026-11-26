@@ -221,8 +221,9 @@ type Report struct {
 	Removed        []string
 	// Pending counts the domains and settings files left alone, waiting to
 	// be restored; Kept, the domains left alone, kept till their apps are
-	// installed.
-	Pending, Kept int
+	// installed; Waiting, those kept by their keys waiting for apps to put
+	// back what their restores left out.
+	Pending, Kept, Waiting int
 	// Errors are what couldn't be saved, each with why: kept as stored.
 	Errors []string
 	// Claimed is whether this capture claimed the folder for this Mac.
@@ -277,6 +278,9 @@ func (r Report) Says() []string {
 	}
 	if r.Kept > 0 {
 		says = append(says, fmt.Sprintf("%d kept for apps not installed", r.Kept))
+	}
+	if r.Waiting > 0 {
+		says = append(says, ItemsWaiting(r.Waiting))
 	}
 	if len(r.Errors) > 0 {
 		says = append(says, fmt.Sprintf("%d errors", len(r.Errors)))
@@ -352,17 +356,62 @@ func (e NotOwnerError) Error() string {
 	return fmt.Sprintf("the store's %s folder belongs to another Mac (hardware %s%s%s): this one doesn't capture into it until it takes ownership", e.Mac, e.Owner.Hardware, model, since)
 }
 
+// captureDomain writes content, a domain's settings as the store keeps
+// them, to its stored copy at path, into report: an error read it (err)
+// or writing it kept as stored; nothing to keep (no content) taken as
+// gone. It reports whether the stored copy stays.
+func (p *Prefs) captureDomain(report *Report, path, domain string, content []byte, err error) bool {
+	if err != nil {
+		report.Errors = append(report.Errors, domain+": "+err.Error())
+		return true
+	}
+	if content == nil {
+		return false
+	}
+	report.Domains++
+	what, err := write(path, content)
+	if err != nil {
+		report.Errors = append(report.Errors, domain+": "+err.Error())
+		return true
+	}
+	if what != "" {
+		report.changes = append(report.changes, change{what, domain})
+	}
+	return true
+}
+
+// staleIn are the stored copies in dir of domains keep doesn't hold: none
+// when there's no dir.
+func staleIn(dir string, keep map[string]bool) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var stale []string
+	for _, e := range entries {
+		if d, ok := strings.CutSuffix(e.Name(), ".plist"); ok && !keep[d] {
+			stale = append(stale, filepath.Join(dir, e.Name()))
+		}
+	}
+	return stale, nil
+}
+
 // gitignore is a Mac's folder's ignore file: Finder's litter and capture's
 // files half written.
 const gitignore = ".DS_Store\n.*.tmp\n"
 
 // Capture saves the Mac's settings into its folder in the store, writing
 // only what changed and removing what's gone from the Mac, then commits and
-// pushes. It needs Full Disk Access, capture switched on, and this Mac to
-// own the folder (claiming it when no Mac has). One capture at a time: it
-// waits for one under way (lockCapture). A domain or file that
+// pushes: the domains kept whole, and the keys [prefs keys] names of
+// others, those alone. It needs Full Disk Access, capture switched on, and
+// this Mac to own the folder (claiming it when no Mac has). One capture at
+// a time: it waits for one under way (lockCapture). A domain or file that
 // fails to read is kept as stored, and the rest go on; domains waiting to
-// be restored are left alone.
+// be restored are left alone, but one kept by its keys the person's
+// changed since its restore, whose hold goes.
 func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	var report Report
 	rec, err := p.Load()
@@ -422,11 +471,6 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 			heldFiles[f] = true
 		}
 	}
-	report.Pending = len(protected) + len(heldFiles)
-	if rec.Pending != nil && rec.Pending.From == p.Mac {
-		report.Kept = rec.Pending.Kept()
-		report.Pending -= report.Kept
-	}
 	// What stays stored: domains captured now, ones that failed to export
 	// (still there, unreadable this time) and pending ones. A domain that
 	// exports empty counts as gone: macOS lists a deleted domain for a
@@ -436,8 +480,9 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	if err != nil {
 		return report, err
 	}
+	keyed := p.keyedBy()
 	for _, domain := range live {
-		if protected[domain] {
+		if _, byKeys := keyed[domain]; protected[domain] || byKeys {
 			continue
 		}
 		m, err := p.export(ctx, domain)
@@ -445,24 +490,19 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		if err == nil {
 			content, err = normalised(m)
 		}
-		if err != nil {
-			report.Errors = append(report.Errors, domain+": "+err.Error())
+		if p.captureDomain(&report, filepath.Join(domainsDir, domain+".plist"), domain, content, err) {
 			keep[domain] = true
-			continue
 		}
-		if content == nil {
-			continue
-		}
-		report.Domains++
-		keep[domain] = true
-		what, err := write(filepath.Join(domainsDir, domain+".plist"), content)
-		if err != nil {
-			report.Errors = append(report.Errors, domain+": "+err.Error())
-			continue
-		}
-		if what != "" {
-			report.changes = append(report.changes, change{what, domain})
-		}
+	}
+	keyedDir := filepath.Join(store, keysDir)
+	var heldKeyed map[string]KeysHeld
+	if rec.Pending != nil {
+		heldKeyed = rec.Pending.Keyed
+	}
+	keepKeyed, released := p.captureKeys(ctx, &report, keyedDir, protected, heldKeyed)
+	if held := rec.Pending.without(released); held != nil && held.From == p.Mac {
+		report.Kept, report.Waiting = held.Kept(), held.Waiting()
+		report.Pending = len(held.Domains) + len(held.Files) - report.Kept - report.Waiting
 	}
 
 	sources := p.settingsFiles()
@@ -495,16 +535,15 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	}
 
 	// The mirror: what's stored but gone from the Mac, or no longer saved.
-	var stale []string
-	if entries, err := os.ReadDir(domainsDir); err == nil {
-		for _, e := range entries {
-			if d, ok := strings.CutSuffix(e.Name(), ".plist"); ok && !keep[d] {
-				stale = append(stale, filepath.Join(domainsDir, e.Name()))
-			}
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	stale, err := staleIn(domainsDir, keep)
+	if err != nil {
 		return report, err
 	}
+	staleKeyed, err := staleIn(keyedDir, keepKeyed)
+	if err != nil {
+		return report, err
+	}
+	stale = append(stale, staleKeyed...)
 	for _, f := range storedFiles(filesDir) {
 		if !wanted[f] {
 			stale = append(stale, f)
@@ -533,6 +572,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	}
 	return report, p.update(func(r *Record) {
 		r.Captured, r.Summary, r.Parts, r.Errors, r.NotOwner = p.Now(), report.Summary(), report.Says(), len(report.Errors), ""
+		r.Pending = r.Pending.without(released)
 		if report.PushError == "" {
 			r.Unpushed, r.PushError = time.Time{}, ""
 			return
