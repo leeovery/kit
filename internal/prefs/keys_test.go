@@ -234,7 +234,7 @@ func TestRestoreMergesTheDeclaredKeys(t *testing.T) {
 			if got := w.read(t, filepath.Join(report.Saved, "com.apple.dock.plist")); got != stored(t, live) {
 				t.Errorf("the live settings saved as %q", got)
 			}
-			if !strings.Contains(report.Summary(), "restored 1 domain and 0 files from laptop; 1 item left out, not on this Mac") {
+			if !strings.Contains(report.Summary(), "restored 1 domain and 0 files from laptop; 1 item left out till it's on this Mac; previous") {
 				t.Errorf("Summary() = %q", report.Summary())
 			}
 		})
@@ -281,7 +281,8 @@ func TestRestoreKeysOnlyAsDeclared(t *testing.T) {
 }
 
 // A merge macOS refuses is held, failed, for kit prefs restore --pending,
-// which merges it, never restoring it whole; the hourly pass leaves it.
+// which merges it, never restoring it whole, then holds it for what it left
+// out; the hourly pass leaves it.
 func TestAFailedMergeWaitsForPendingByHand(t *testing.T) {
 	w := newWorld(t, prefs.Lists{Keys: []prefs.Keys{dock}})
 	w.keysStore(t, "laptop")
@@ -307,8 +308,8 @@ func TestAFailedMergeWaitsForPendingByHand(t *testing.T) {
 	if err != nil || !slices.Equal(report.Restored, []string{"com.apple.dock"}) || imported["tilesize"] != int64(36) {
 		t.Errorf("Restore(--pending) = %+v, %v; imported %v", report, err, imported)
 	}
-	if rec, _ := w.p.Load(); rec.Pending != nil {
-		t.Errorf("pending = %+v, want nothing held", rec.Pending)
+	if rec, _ := w.p.Load(); rec.Pending == nil || rec.Pending.Why["com.apple.dock"] != prefs.LeftOutWhy || len(rec.Pending.Failed) > 0 {
+		t.Errorf("pending = %+v, want the Dock held for the app left out, failed no more", rec.Pending)
 	}
 }
 
@@ -321,5 +322,117 @@ func TestHistoryOfDeclaredKeys(t *testing.T) {
 	changes, err := w.p.History(t.Context(), "", "com.apple.dock", 5)
 	if err != nil || len(changes) != 1 || changes[0].Changed != "diff --git a/x b/x\n+an app" {
 		t.Errorf("History(com.apple.dock) = %+v, %v", changes, err)
+	}
+}
+
+// heldForGone restores the Dock's keys, the app Gone not on this Mac, so
+// the Dock is held for it, the live Dock what the restore wrote; and
+// returns the tiles stored.
+func (w *world) heldForGone(t *testing.T) (here, gone, folder map[string]any) {
+	t.Helper()
+	here, gone, folder = w.keysStore(t, "laptop")
+	w.exports(t, "com.apple.dock", map[string]any{"persistent-apps": []any{}, "tilesize": int64(36)})
+	var imported map[string]any
+	w.importsWhole(t, "com.apple.dock", &imported)
+	w.fake.On("killall", "Dock")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := w.p.Load()
+	if rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.apple.dock"}) || rec.Pending.Why["com.apple.dock"] != prefs.LeftOutWhy || rec.Pending.Wrote["com.apple.dock"] == "" {
+		t.Fatalf("pending = %+v, want the Dock held for the app left out, with what kit wrote", rec.Pending)
+	}
+	return here, gone, folder
+}
+
+// count is how many of the fake's calls start with prefix.
+func (w *world) count(prefix string) int {
+	n := 0
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// A Dock restored with a tile left out is held: the passes leave it while
+// the app's still not on this Mac, and merge it again once it is, the
+// Dock as kit wrote it, then let it go.
+func TestALeftOutTileComesBackOnceItsAppIs(t *testing.T) {
+	w := newWorld(t, prefs.Lists{Keys: []prefs.Keys{dock}})
+	here, gone, folder := w.heldForGone(t)
+
+	if report, err := w.p.RestoreInstalled(t.Context()); err != nil || len(report.Restored) > 0 {
+		t.Errorf("RestoreInstalled() = %+v, %v; want nothing, the app still not here", report, err)
+	}
+	if report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true}); err != nil || len(report.Restored) > 0 {
+		t.Errorf("the hourly pass = %+v, %v; want nothing, the app still not here", report, err)
+	}
+	if n := w.count("defaults import"); n != 1 {
+		t.Errorf("imported %d times, want once: nothing more till the app's here", n)
+	}
+
+	if err := os.MkdirAll(filepath.Join(w.apps, "Gone.app"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var imported map[string]any
+	w.importsWhole(t, "com.apple.dock", &imported)
+	report, err := w.p.RestoreInstalled(t.Context())
+	if err != nil || !slices.Equal(report.Restored, []string{"com.apple.dock"}) || report.LeftOut != 0 {
+		t.Fatalf("RestoreInstalled() = %+v, %v; want the Dock merged again", report, err)
+	}
+	want := map[string]any{"persistent-apps": []any{here, gone}, "persistent-others": []any{folder}, "tilesize": int64(36)}
+	if !plist.Equal(imported, want) {
+		t.Errorf("imported %v\nwant %v", imported, want)
+	}
+	if n := w.count("killall Dock"); n != 2 {
+		t.Errorf("restarted the Dock %d times, want twice", n)
+	}
+	if rec, _ := w.p.Load(); rec.Pending != nil {
+		t.Errorf("pending = %+v, want nothing held, nothing left out", rec.Pending)
+	}
+}
+
+// A Dock rearranged since kit restored it is left as it is once the app
+// left out arrives, and held no more, the summary saying so.
+func TestARearrangedDockIsLeftAlone(t *testing.T) {
+	w := newWorld(t, prefs.Lists{Keys: []prefs.Keys{dock}})
+	_, _, folder := w.heldForGone(t)
+	w.exports(t, "com.apple.dock", map[string]any{"persistent-apps": []any{}, "persistent-others": []any{folder}, "tilesize": int64(36)})
+	if err := os.MkdirAll(filepath.Join(w.apps, "Gone.app"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true})
+	if err != nil || len(report.Restored) > 0 || !slices.Equal(report.Rearranged, []string{"com.apple.dock"}) {
+		t.Fatalf("the hourly pass = %+v, %v; want the rearranged Dock left", report, err)
+	}
+	if !strings.Contains(report.Summary(), "1 changed since kit restored it, left as it is") {
+		t.Errorf("Summary() = %q", report.Summary())
+	}
+	if n := w.count("defaults import"); n != 1 {
+		t.Errorf("imported %d times, want once: the rearranged Dock left alone", n)
+	}
+	if rec, _ := w.p.Load(); rec.Pending != nil {
+		t.Errorf("pending = %+v, want the hold dropped", rec.Pending)
+	}
+}
+
+// While the Dock's held for what its restore left out, from this Mac's own
+// folder, capture leaves the stored copy, the whole list, as it is.
+func TestCaptureLeavesAHeldDockAsStored(t *testing.T) {
+	w := newWorld(t, prefs.Lists{Keys: []prefs.Keys{dock}})
+	w.heldForGone(t)
+	store := filepath.Join(w.clone, "laptop")
+	before := w.read(t, filepath.Join(store, "keys", "com.apple.dock.plist"))
+	w.write(t, filepath.Join(store, ".gitignore"), ".DS_Store\n.*.tmp\n")
+	w.fake.On("defaults", "domains").Prints("com.apple.dock\n")
+	w.pushes(t, "Capture 2026-10-06 03:00: no changes", "", nil, nil)
+	if _, err := w.p.Capture(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.read(t, filepath.Join(store, "keys", "com.apple.dock.plist")); got != before {
+		t.Errorf("the held Dock stored as\n%s\nwant it left as\n%s", got, before)
 	}
 }

@@ -23,16 +23,17 @@ type App struct {
 // held is what waits to be restored, as a restore changes it: domains, and
 // of them those whose apps the person opens once (open) and those whose
 // restore failed otherwise (failed); settings files, whose restore failed;
-// and why each waits.
+// and why each waits; and what kit wrote of each domain kept by its keys
+// held for what it left out.
 type held struct {
 	domains, files, failed map[string]bool
 	open                   map[string]App
-	why                    map[string]string
+	why, wrote             map[string]string
 }
 
 // heldIn is what p holds: nothing, for none.
 func heldIn(p *Pending) held {
-	h := held{domains: map[string]bool{}, files: map[string]bool{}, failed: map[string]bool{}, open: map[string]App{}, why: map[string]string{}}
+	h := held{domains: map[string]bool{}, files: map[string]bool{}, failed: map[string]bool{}, open: map[string]App{}, why: map[string]string{}, wrote: map[string]string{}}
 	if p == nil {
 		return h
 	}
@@ -47,6 +48,7 @@ func heldIn(p *Pending) held {
 	}
 	maps.Copy(h.open, p.Open)
 	maps.Copy(h.why, p.Why)
+	maps.Copy(h.wrote, p.Wrote)
 	return h
 }
 
@@ -60,23 +62,30 @@ func running(why string) bool {
 	return strings.HasSuffix(why, " is running")
 }
 
+// kept reports whether why is that a domain's kept, its app not installed
+// or what it left out not on this Mac, rather than waiting.
+func kept(why string) bool {
+	return why == keptWhy || why == LeftOutWhy
+}
+
 // anyToTry reports whether h holds anything an unattended pass might bring
-// back: a domain that didn't fail otherwise, and, kept till its app is
-// installed, has an app now (owned).
-func (h held) anyToTry(owned func(domain string) bool) bool {
+// back: a domain that didn't fail otherwise, and, kept, is ready now: its
+// app installed, or something it left out here (ready).
+func (h held) anyToTry(ready func(domain string) bool) bool {
 	for d := range h.domains {
-		if !h.failed[d] && (h.why[d] != keptWhy || owned(d)) {
+		if !h.failed[d] && (!kept(h.why[d]) || ready(d)) {
 			return true
 		}
 	}
 	return false
 }
 
-// Kept counts the domains p keeps till their apps are installed.
+// Kept counts the domains p keeps till their apps are installed, or what
+// they left out is on this Mac.
 func (p *Pending) Kept() int {
 	n := 0
 	for _, d := range p.Domains {
-		if p.Why[d] == keptWhy {
+		if kept(p.Why[d]) {
 			n++
 		}
 	}
@@ -104,6 +113,7 @@ func (h held) drop(name string) {
 	delete(h.failed, name)
 	delete(h.open, name)
 	delete(h.why, name)
+	delete(h.wrote, name)
 }
 
 // hold puts domain on, as waiting for its app, or kept till it's
@@ -146,6 +156,9 @@ func (h held) pending(from string) *Pending {
 	}
 	if len(h.why) > 0 {
 		p.Why = maps.Clone(h.why)
+	}
+	if len(h.wrote) > 0 {
+		p.Wrote = maps.Clone(h.wrote)
 	}
 	return p
 }

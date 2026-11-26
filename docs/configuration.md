@@ -135,8 +135,8 @@ PATH but out of kit's.
 
 ### The sections
 
-These are the sections, in the order kit writes them. A command adds each line for you,
-though the ordering options on a `[manual]` line are written by hand.
+These are the sections, in the order kit writes them. A command adds each line for you, but
+not the `[prefs …]` sections or the ordering options on a `[manual]` line.
 
 | Section | A line holds | Command |
 |---|---|---|
@@ -158,6 +158,11 @@ though the ordering options on a `[manual]` line are written by hand.
 | `[power settings]` | A setting in `pmset` form | `kit power` |
 | `[backup exclusions]` | A folder | `kit backup-exclusion` |
 | `[spotlight exclusions]` | A folder | `kit spotlight-exclusion` |
+| `[prefs files]` | A settings file, or a folder | By hand |
+| `[prefs keys]` | A domain, its keys, `--restart` | By hand |
+| `[prefs deny]` | A domain left out | By hand |
+| `[prefs apps]` | A domain, then its app's bundle id | By hand |
+| `[prefs machine-bound]` | A domain or file kept to one Mac | By hand |
 | `[restore]` | A path, then `--skip` options | `kit restore` |
 | `[steps]` | A name, what it does, options | `kit step` |
 | `[manual]` | A name, what to do, options | `kit manual` |
@@ -165,8 +170,18 @@ though the ordering options on a `[manual]` line are written by hand.
 | `[hourly]` | A name, then a command | `kit hourly` |
 | `[nightly]` | A name, then a command | `kit nightly` |
 
-The four `[prefs …]` sections belong to apps' settings, which get a
+The five `[prefs …]` sections belong to apps' settings, which get a
 [page of their own](apps-settings.md).
+
+A `[prefs keys]` line keeps only the keys it names, of any domain, Apple's included. A restore
+works like this:
+
+- **It merges them in.** The domain's other keys stay as they are.
+- **It restarts the process** after `--restart`, only if the merge changed anything.
+- **It leaves out an item whose file isn't on this Mac,** such as the Dock tile of an app not
+  installed. The domain is then held, and `kit prefs pending` lists it.
+- **It merges again once that file is here,** at the next `kit apply` or hourly run. If you've
+  changed those keys since, kit leaves them as they are and drops the hold.
 
 A few sections take more after the header:
 

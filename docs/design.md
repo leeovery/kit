@@ -1692,8 +1692,16 @@ refused clone uninstalls it all the same, deleting none of its saved settings an
   were, so it holds whether import merges or replaces), saving the live copy first, then
   `killall`s the process once, when anything changed. An array's item holding a file's URL
   (`_CFURLString`) whose file isn't on this Mac, as a Dock tile of an app not installed, is
-  left out and counted. Never waiting or kept, a merge that fails is held as failed, for
-  `--pending` by hand. Without a line, keys stored before aren't restored.
+  left out and counted, and the domain held, "kept till what it left out is on this Mac", with
+  a fingerprint of what kit wrote (each array by its items' file paths, in order, the rest of
+  an item the app's to rewrite). `RestoreInstalled` (apply's settings step) and the hourly pass
+  merge it again once a left-out item's file is here, but only while the live keys still match
+  that fingerprint: changed since, as a Dock rearranged, they're left and the hold dropped,
+  the summary saying so. `kit cask add` and `kit mas add` don't, as a named restore merges
+  whatever's changed. While held from this Mac's own folder, capture leaves the stored copy,
+  the whole list, as held domains are; from another Mac's, the list is in that Mac's folder,
+  which this Mac never captures into. A merge that fails is held as failed, for `--pending` by
+  hand. Without a line, keys stored before aren't restored.
 
 ## Data restore (`[restore]`)
 

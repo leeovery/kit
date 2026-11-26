@@ -88,6 +88,10 @@ type Pending struct {
 	Why     map[string]string `json:"why,omitempty"`
 	Open    map[string]App    `json:"open,omitempty"`
 	Failed  []string          `json:"failed,omitempty"`
+	// Wrote is what kit wrote of each domain kept by its keys held for
+	// what its restore left out (LeftOutWhy), as fingerprint has it: it's
+	// merged again only while it's as kit wrote it.
+	Wrote map[string]string `json:"wrote,omitempty"`
 }
 
 // Restored is where a full restore came from.

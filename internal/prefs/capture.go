@@ -480,8 +480,9 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	if err != nil {
 		return report, err
 	}
+	keyed := p.keyedBy()
 	for _, domain := range live {
-		if _, byKeys := p.keysOf(domain); protected[domain] || byKeys {
+		if _, byKeys := keyed[domain]; protected[domain] || byKeys {
 			continue
 		}
 		m, err := p.export(ctx, domain)

@@ -321,7 +321,11 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 			res.Items = append(res.Items, check.Item{ID: "prefs:pending:" + d, Name: d, State: "pending", Detail: report.Waiting[d], Quiet: quiet})
 		}
 		for _, d := range slices.Sorted(maps.Keys(report.Kept)) {
-			res.Items = append(res.Items, check.Item{ID: "prefs:kept:" + d, Name: d, State: "kept", Detail: "its app isn't installed", Quiet: "restored once it is"})
+			it := check.Item{ID: "prefs:kept:" + d, Name: d, State: "kept", Detail: "its app isn't installed", Quiet: "restored once it is"}
+			if report.Kept[d] == prefs.LeftOutWhy {
+				it.Detail, it.Quiet = "some of what it points at isn't on this Mac", "merged again once it is, unless it's changed since"
+			}
+			res.Items = append(res.Items, it)
 		}
 		if report.Failures() > 0 {
 			res.State = check.Attention

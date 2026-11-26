@@ -21,8 +21,7 @@ commands for you. See [Your first kit-config](first-config.md).
 ## What happens
 
 - **Every app is covered,** except Apple's apps and macOS itself. kit reads each preferences
-  domain through `defaults export`. It also saves the files `[prefs files]` names, and the
-  keys `[prefs keys]` names, such as the apps in your Dock.
+  domain through `defaults export`. It also saves the files `[prefs files]` names.
 - **The hourly run saves them once a night.** Each save that changed anything is a commit.
 - **A new Mac restores them** once its casks and App Store apps are installed, if prefs is on
   for it. It is if the new Mac takes the old one's name, or starts as a copy of it. Otherwise,
@@ -35,17 +34,16 @@ commands for you. See [Your first kit-config](first-config.md).
 
 ## Your Dock's apps, on the next Mac
 
-Add this section to a declarations file, and the next save keeps the apps in your Dock:
+This section, in a declarations file, keeps the apps in your Dock:
 
 ```
 [prefs keys]
 com.apple.dock persistent-apps --restart Dock
 ```
 
-A line names a domain, then the keys to keep, then the process to restart once they're back.
-Add `persistent-others` to keep the folders on the right of the Dock too. kit saves only those
-keys, so the Dock's size stays with `kit defaults`. A restore merges them in and restarts the
-Dock. It leaves out any app that isn't installed, so the Dock shows no question marks.
+A line names a domain, the keys to keep, then a process to restart. An app not installed
+yet is left out until it is, so the Dock shows no question marks. See
+[Configuration](configuration.md) for how the restore merges them.
 
 ## Where they're kept
 
@@ -87,8 +85,8 @@ drops what's held, so the next save keeps what's on the Mac.
   terminal, for `kit prefs` run there. `kit status` checks it. See
   [Running by itself](running-by-itself.md).
 - **Leave apps out of `kit defaults`.** kit saves their settings already.
-- **Five sections tune it,** listed under Reference. They have no `add` command: edit them
-  by hand in a declarations file, then commit.
+- **Five `[prefs …]` sections tune it,** listed in [Configuration](configuration.md). They
+  have no `add` command: edit them by hand in a declarations file, then commit.
 - **A step that sets up an app** belongs after the restore: declare it `--after prefs`. See
   [Steps of your own, and steps by hand](steps.md).
 
@@ -102,14 +100,6 @@ drops what's held, so the next save keeps what's on the Mac.
 | `kit prefs history` | The saves that changed anything |
 | `kit prefs pending` | What's held to restore, and why |
 | `kit prefs start-fresh` | Save from now, restoring nothing |
-
-| Section | What it holds |
-|---|---|
-| `[prefs files]` | Settings files saved beside the domains |
-| `[prefs keys]` | Keys of a domain saved, those only |
-| `[prefs deny]` | Domains left out |
-| `[prefs apps]` | Which app a domain belongs to |
-| `[prefs machine-bound]` | Domains kept to the hardware they came from |
 
 ## Related
 

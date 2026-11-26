@@ -59,8 +59,13 @@ type RestoreReport struct {
 	// Apps are the apps of the domains not restored, where kit found them.
 	Apps map[string]App
 	// LeftOut counts the items of the domains kept by their keys left out,
-	// pointing at files not on this Mac, as the Dock's tiles at apps.
-	LeftOut int
+	// pointing at files not on this Mac, as the Dock's tiles at apps. Wrote
+	// is what it wrote of each domain kept for that (LeftOutWhy, among
+	// Kept), as fingerprint has it. Rearranged are the domains held so that changed
+	// since, left as they are, no longer held.
+	LeftOut    int
+	Wrote      map[string]string
+	Rearranged []string
 	// Saved is where the live settings replaced were saved.
 	Saved  string
 	DryRun bool
@@ -94,8 +99,8 @@ func (r RestoreReport) Says() []string {
 	if len(r.Waiting) > 0 {
 		says = append(says, fmt.Sprintf("%d waiting for their apps", len(r.Waiting)))
 	}
-	if len(r.Kept) > 0 {
-		says = append(says, fmt.Sprintf("%d kept for apps not installed", len(r.Kept)))
+	if n := len(r.Kept) - len(r.Wrote); n > 0 {
+		says = append(says, fmt.Sprintf("%d kept for apps not installed", n))
 	}
 	if len(r.ToOpen) > 0 {
 		says = append(says, fmt.Sprintf("%d to open once", len(r.ToOpen)))
@@ -104,7 +109,10 @@ func (r RestoreReport) Says() []string {
 		says = append(says, fmt.Sprintf("%d failed", n))
 	}
 	if r.LeftOut > 0 {
-		says = append(says, fmt.Sprintf("%d %s left out, not on this Mac", r.LeftOut, look.Plural(r.LeftOut, "item", "items")))
+		says = append(says, fmt.Sprintf("%d %s left out till %s on this Mac", r.LeftOut, look.Plural(r.LeftOut, "item", "items"), look.Plural(r.LeftOut, "it's", "they're")))
+	}
+	if n := len(r.Rearranged); n > 0 {
+		says = append(says, fmt.Sprintf("%d changed since kit restored %s, left as %s", n, look.Plural(n, "it", "them"), look.Plural(n, "it is", "they are")))
 	}
 	if r.Saved != "" {
 		says = append(says, "previous settings saved in "+r.Saved)
@@ -295,7 +303,7 @@ func (p *Prefs) saveLive(domain string, current map[string]any, saved string) er
 // which it opens and quits itself, starting it again if it was running. From another Mac's folder, or onto other
 // hardware, the settings bound to one Mac are left out.
 func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport, error) {
-	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, Kept: map[string]string{}, ToOpen: map[string]string{}, Failed: map[string]string{}, FilesFailed: map[string]string{}, Apps: map[string]App{}}
+	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, Kept: map[string]string{}, ToOpen: map[string]string{}, Failed: map[string]string{}, FilesFailed: map[string]string{}, Apps: map[string]App{}, Wrote: map[string]string{}}
 	if report.From == "" {
 		report.From = p.Mac
 	}
@@ -317,7 +325,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		if rec.Pending == nil || len(rec.Pending.Domains)+len(rec.Pending.Files) == 0 {
 			return report, nil
 		}
-		if opts.Unattended && !before.anyToTry(p.owned()) {
+		if opts.Unattended && !before.anyToTry(p.readyIn(rec.Pending)) {
 			return report, nil
 		}
 		report.From, named = rec.Pending.From, slices.Clone(rec.Pending.Domains)
@@ -404,7 +412,11 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		})
 	}
 	p.restartHelpers(ctx, restart)
-	p.restoreKeys(ctx, &report, keyed, keyedDir, saved, opts.DryRun)
+	how := merging{dir: keyedDir, saved: saved, dryRun: opts.DryRun}
+	if opts.Pending {
+		how.wrote = before.wrote
+	}
+	p.restoreKeys(ctx, &report, keyed, how)
 
 	if full || len(files) > 0 {
 		report.Files, report.FilesFailed = p.restoreFiles(filesDir, bound, files, saved, opts.DryRun)
@@ -431,9 +443,11 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 // all it tried, what waits, is kept, or has its app to open, when waits
 // says, and what failed otherwise, when failed says; but an app to open
 // that's running, open still, as it stays to be quit; and, when it tried
-// them (files), the settings files that failed in place of those held.
+// them (files), the settings files that failed in place of those held. A
+// domain kept by its keys that left items out is put on whatever it was
+// tried by, with what was written of it; one changed since, taken off.
 func (r RestoreReport) held(h held, waits, failed, files bool) held {
-	for _, d := range r.Restored {
+	for _, d := range slices.Concat(r.Restored, r.Rearranged) {
 		h.drop(d)
 	}
 	for d, why := range r.waits() {
@@ -441,8 +455,13 @@ func (r RestoreReport) held(h held, waits, failed, files bool) held {
 		switch {
 		case toOpen && running(why):
 			h.toOpen(d, app, why)
-		case waits || h.domains[d]:
+		case waits || h.domains[d] || why == LeftOutWhy:
 			h.hold(d, why)
+		}
+	}
+	for d, wrote := range r.Wrote {
+		if h.domains[d] {
+			h.wrote[d] = wrote
 		}
 	}
 	for d, why := range r.ToOpen {
@@ -508,17 +527,24 @@ func (p *Prefs) RestoreKept(ctx context.Context, ids []string) (RestoreReport, e
 }
 
 // keptFor are the domains held kept till their apps are installed whose
-// apps are installed now: of the apps of ids alone, given any.
+// apps are installed now: of the apps of ids alone, given any. Given none,
+// those held for what their restores left out, something of it here now,
+// too (keysReady): a restore of named domains merges them whatever's
+// changed since, which only the pass of what's held looks at.
 func (p *Prefs) keptFor(held *Pending, ids []string) []string {
-	installed := p.installedApps()
+	installed, ready := p.installedApps(), p.keysReady(held)
 	var domains []string
 	for _, d := range held.Domains {
-		if held.Why[d] != keptWhy {
-			continue
-		}
-		owners := p.owningApps(d, installed)
-		if len(owners) > 0 && (ids == nil || slices.ContainsFunc(owners, func(id string) bool { return slices.Contains(ids, id) })) {
-			domains = append(domains, d)
+		switch held.Why[d] {
+		case keptWhy:
+			owners := p.owningApps(d, installed)
+			if len(owners) > 0 && (ids == nil || slices.ContainsFunc(owners, func(id string) bool { return slices.Contains(ids, id) })) {
+				domains = append(domains, d)
+			}
+		case LeftOutWhy:
+			if ids == nil && ready(d) {
+				domains = append(domains, d)
+			}
 		}
 	}
 	return domains
@@ -528,6 +554,14 @@ func (p *Prefs) keptFor(held *Pending, ids []string) []string {
 func (p *Prefs) owned() func(domain string) bool {
 	installed := p.installedApps()
 	return func(d string) bool { return len(p.owningApps(d, installed)) > 0 }
+}
+
+// readyIn reports whether a domain held kept, as held has it, could come
+// back now: its app installed (owned), or something its restore left out
+// on this Mac (keysReady).
+func (p *Prefs) readyIn(held *Pending) func(domain string) bool {
+	owned, ready := p.owned(), p.keysReady(held)
+	return func(d string) bool { return owned(d) || ready(d) }
 }
 
 // AppName is the installed app whose bundle id is id, by the name its
