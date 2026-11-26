@@ -112,8 +112,9 @@ with a made-up code. The boot's Mac is `MacBook-Pro`, set up as `laptop`; the Gi
   At 22px a cell is 13 × 29 px, so 120 × 34 is 1560 × 986, twice the 780 the README shows it at,
   so a high-density screen draws it sharp. The status still, 80 columns of kit's report, is drawn
   at 30px to come out as wide.
-- **Colour:** the capture tool draws in truecolor, as Ghostty and Terminal on macOS 26 show; kit's
-  colours are its own, on the terminal's background.
+- **Colour:** the capture tool draws in truecolor, as Ghostty and Terminal on macOS 26 show. kit's
+  words take the theme's colours, `look.tape`'s; only its wordmark, bar, pink and pills keep
+  colours of their own.
 
 ## How a tape becomes art
 

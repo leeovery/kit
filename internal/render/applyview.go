@@ -28,9 +28,9 @@ func (p *Pretty) Sized(size func() (int, int)) *Pretty {
 func (p *Pretty) runningRow(r runningStep, w int) look.Row {
 	switch {
 	case r.todo != "":
-		return look.Row{State: look.NeedsYou, Name: r.title, Says: look.Orange(r.doing), Under: todoLines(r.todo, w-6)}
+		return look.Row{State: look.NeedsYou, Name: r.title, Says: look.Yellow(r.doing), Under: todoLines(r.todo, w-6)}
 	case p.needsYou(r):
-		return look.Row{State: look.NeedsYou, Name: r.title, Says: look.Orange("needs you")}
+		return look.Row{State: look.NeedsYou, Name: r.title, Says: look.Yellow("needs you")}
 	}
 	return look.Row{State: look.Running, Name: r.title, Says: p.workSays(r), Under: look.Output(lastOf(p.output[r.step], keptRunning)...)}
 }
@@ -212,7 +212,7 @@ func whatsLeft(r check.Result, s event.Step, start time.Time) []string {
 		if key := it.State + "|" + it.Detail; it.Quiet == "" && alike[key] > 3 {
 			if !told[key] {
 				told[key] = true
-				lines = append(lines, look.Says(look.Orange(fmt.Sprintf("%d %s", alike[key], wrong(s, it))), look.Muted(it.Detail)))
+				lines = append(lines, look.Says(look.Yellow(fmt.Sprintf("%d %s", alike[key], wrong(s, it))), look.Muted(it.Detail)))
 			}
 			continue
 		}
@@ -228,7 +228,7 @@ func whatsLeft(r check.Result, s event.Step, start time.Time) []string {
 				lines = append(lines, look.Says(look.White(it.Name), look.Muted(why)))
 			}
 		case IsDrift(it):
-			says := []string{look.Orange(it.Name), look.Muted(wrong(s, it))}
+			says := []string{look.Yellow(it.Name), look.Muted(wrong(s, it))}
 			if more := beyond(s, it); more != "" {
 				says = append(says, look.Muted(more))
 			}
@@ -244,7 +244,7 @@ func whatsLeft(r check.Result, s event.Step, start time.Time) []string {
 				hints = append(hints, hint)
 			}
 		default:
-			lines = append(lines, look.Orange(it.Name))
+			lines = append(lines, look.Yellow(it.Name))
 			if it.Detail != "" {
 				lines = append(lines, todo(it.Detail))
 			}
@@ -333,7 +333,7 @@ func (p *Pretty) tally(e event.RunFinished) string {
 		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
 	}
 	if n := len(p.unwell(look.NeedsYou)); n > 0 {
-		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, look.Plural(n, "needs", "need"))))
+		parts = append(parts, look.Yellow(fmt.Sprintf("%d %s you", n, look.Plural(n, "needs", "need"))))
 	}
 	parts = append(parts, look.White(fmt.Sprintf("%d fine", len(p.rowsDone()))), look.Muted(took(e.Duration)))
 	return look.Says(parts...)

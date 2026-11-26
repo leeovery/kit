@@ -43,7 +43,7 @@ func ReconcileQuestion(d Drifted, answers []Answer, now time.Time) ask.Question 
 // driftSays says what d is, as its question's row says it: its kind,
 // what's wrong, and for how long.
 func driftSays(d Drifted, now time.Time) string {
-	says := []string{look.Muted(d.Kind), look.Orange(d.What)}
+	says := []string{look.Muted(d.Kind), look.Yellow(d.What)}
 	if !strings.Contains(d.What, d.Detail) {
 		says = append(says, look.Muted(d.Detail))
 	}

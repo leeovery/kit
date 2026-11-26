@@ -271,7 +271,7 @@ func (e *errOut) show(cmd *cobra.Command, args []string, err error, status int) 
 	case errors.Is(err, ask.ErrCancelled):
 		state, says = look.Skipped, look.Muted
 	case needsYou:
-		state, says = look.NeedsYou, look.Orange
+		state, says = look.NeedsYou, look.Yellow
 	}
 	text := err.Error()
 	row := look.Row{State: state, Name: cmd.CommandPath()}

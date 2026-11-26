@@ -299,7 +299,7 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.Logged:
 		switch {
 		case p.applying() && e.Alert:
-			p.note(p.stamp(e.Time), p.rowOf(e.Step), look.Mark(look.NeedsYou), look.Orange(e.Line))
+			p.note(p.stamp(e.Time), p.rowOf(e.Step), look.Mark(look.NeedsYou), look.Yellow(e.Line))
 		case p.applying():
 			p.note(p.stamp(e.Time), p.rowOf(e.Step), look.Dim("+"), look.Muted(e.Line))
 		}
@@ -642,7 +642,7 @@ var quietWords = map[string]string{"new": "new", "snoozed": "snoozed", "temporar
 // thing is a row for something that needs attention, of step s: its name,
 // what's wrong, for how long, and what to run about it.
 func (p *Pretty) thing(s event.Step, it check.Item) look.Row {
-	says := []string{look.Orange(wrong(s, it))}
+	says := []string{look.Yellow(wrong(s, it))}
 	if more := beyond(s, it); IsDrift(it) && more != "" {
 		says = append(says, look.Muted(more))
 	}
@@ -736,7 +736,7 @@ func tally(counts map[check.State]int) []string {
 		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
 	}
 	if n := counts[check.Attention]; n > 0 {
-		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, look.Plural(n, "needs", "need"))))
+		parts = append(parts, look.Yellow(fmt.Sprintf("%d %s you", n, look.Plural(n, "needs", "need"))))
 	}
 	if n := counts[check.Deferred]; n > 0 {
 		parts = append(parts, look.Muted(fmt.Sprintf("%d not checked", n)))
@@ -838,7 +838,7 @@ func (p *Pretty) askingLines(w int) []string {
 	if p.asking == "" {
 		return nil
 	}
-	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: "macOS", Says: look.Orange(p.asking), Under: todoLines("answer it in the window macOS shows", w-6)})
+	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: "macOS", Says: look.Yellow(p.asking), Under: todoLines("answer it in the window macOS shows", w-6)})
 }
 
 // The terminal's controls the live part uses: the cursor hidden and shown,

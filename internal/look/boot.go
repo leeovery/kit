@@ -84,7 +84,7 @@ func (b Boot) Tag(s State) string {
 	case NeedsYou:
 		in = b.Rev(" !! ")
 	case Failed:
-		in = fg(red).Bold(true).Render("FAIL")
+		in = fg(scarlet).Bold(true).Render("FAIL")
 	case Skipped:
 		in = b.Dim(" -- ")
 	}
@@ -98,7 +98,7 @@ func (b Boot) Words(s State, text string) string {
 	case Running, NeedsYou:
 		return b.Full(text)
 	case Failed:
-		return Red(text)
+		return fg(scarlet).Render(text)
 	}
 	return b.Mid(text)
 }

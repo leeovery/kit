@@ -149,7 +149,7 @@ func (p *Pretty) heldRow(name string, seen map[string]bool) string {
 
 // rowLook is a row as it stands, its steps taken together: a step failed,
 // what went wrong, or how many did; a card up for a step by hand holding
-// one of them up, or one of them needing you, orange; one at work, what
+// one of them up, or one of them needing you, yellow; one at work, what
 // it's doing; some waiting, what for; all finished, how many things
 // they've left to do at the end (laterState), what one held behind
 // another's to-dos waits for, or that they didn't run, or, all well,
@@ -187,7 +187,7 @@ func (p *Pretty) rowLook(r applyRow) look.Row {
 	case len(failed) > 1:
 		row.State, row.Says = look.Failed, look.Red(fmt.Sprintf("%d failed", len(failed)))
 	case waitsYou:
-		row.State, row.Says = look.NeedsYou, look.Orange(waits)
+		row.State, row.Says = look.NeedsYou, look.Yellow(waits)
 	case len(unwell) > 0:
 		row.State, row.Says = look.NeedsYou, p.listRow(unwell[0]).Says
 	case atWork:

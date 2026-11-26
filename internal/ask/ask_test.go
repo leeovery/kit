@@ -47,7 +47,7 @@ var (
 
 func question(name string) Question {
 	return Question{
-		About:   look.Row{State: look.NeedsYou, Name: name, Says: look.Says(look.Muted("cask"), look.Orange("installed, not declared"))},
+		About:   look.Row{State: look.NeedsYou, Name: name, Says: look.Says(look.Muted("cask"), look.Yellow("installed, not declared"))},
 		Answers: []look.Choice{{Label: "Adopt", Does: "declare it"}, {Label: "Remove", Does: "uninstall it"}, {Label: "Skip", Does: "not now"}},
 	}
 }
@@ -279,7 +279,7 @@ func TestWalk(t *testing.T) {
 func TestWalkWrapsWhatsAsked(t *testing.T) {
 	long := "~/Library/Application Support/Some Long App Name/Default/Service Worker/CacheStorage/Cache_Data"
 	asked := question(long)
-	asked.About.Says = look.Says(look.Muted("backup-exclusion"), look.Orange("installed, not declared"), look.Muted("a detail long enough to go past the end of the line"), look.Muted("under a day"))
+	asked.About.Says = look.Says(look.Muted("backup-exclusion"), look.Yellow("installed, not declared"), look.Muted("a detail long enough to go past the end of the line"), look.Muted("under a day"))
 	w := newWalk("Reconcile", []Question{asked, question("~/Library/Application Support/Another App/Default/Service Worker/Cache_Data")})
 	equal(t, "view", plain(w.view(80, 40)), []string{
 		"  RECONCILE  1 of 2",
@@ -401,7 +401,7 @@ func TestOffer(t *testing.T) {
 
 // A secret is typed or pasted, a dot a character, never shown.
 func TestSecretField(t *testing.T) {
-	f := &field{about: look.Row{State: look.NeedsYou, Name: "NPM_TOKEN", Says: look.Orange("needs its value")}}
+	f := &field{about: look.Row{State: look.NeedsYou, Name: "NPM_TOKEN", Says: look.Yellow("needs its value")}}
 	press(f, key{text: "a"}, key{text: "q"}, key{text: "bcd\n", paste: true}, key{name: "backspace"})
 	got := plain(f.view(80, 40))
 	equal(t, "view", got, []string{"  ▲ NPM_TOKEN  needs its value", "  │ ❯ •••• ", "", "  enter done · esc cancel"})
@@ -414,7 +414,7 @@ func TestSecretField(t *testing.T) {
 // it carries: too long for its line, the names wrap on theirs, what's
 // needed under them.
 func TestSecretFieldSaysWhatItNeedsWhole(t *testing.T) {
-	f := &field{about: look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep, charger:womp", Says: look.Orange("need an administrator's password")}}
+	f := &field{about: look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep, charger:womp", Says: look.Yellow("need an administrator's password")}}
 	equal(t, "view", plain(f.view(80, 40))[:3], []string{"  ▲ charger:hibernatemode, charger:networkoversleep, charger:womp", "  │ need an administrator's password", "  │ ❯  "})
 }
 
