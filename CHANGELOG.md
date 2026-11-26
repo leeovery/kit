@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-11-26
+
+Read your secrets while away from the Mac by signing in once with your password and leaving it open.
+
+✨ Added
+- `kit secret signin` — sign in to your secrets' stores with your password in a terminal of your own, and kit's other commands, in any shell or from an agent, use that sign-in while it stays open.
+- `kit secret signout` — ends an open `kit secret signin` and signs out of the stores.
+
+🔧 Changed
+- While the Mac's screen is locked, kit no longer waits for a 1Password approval nobody can give — a command that needs one fails at once and says to use `kit secret signin`.
+- The agent guide now explains how to have the person sign in with `kit secret signin` and sign out when the work is done.
+- `kit secret remove` checks each store is ready once before deleting values, so you're asked for approval at most once per store.
+
+🐛 Fixed
+- Commands that ask for a password at the terminal, such as a store's sign-in, can now read what you type and show their prompts.
+
 ## [0.5.3] - 2026-11-24
 
 🐛 Fixed
