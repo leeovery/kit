@@ -38,17 +38,19 @@ keeps them:
     com.apple.dock persistent-apps persistent-others --restart Dock
 
 - A line is the domain, the keys kept, then --restart and a process to
-  restart once they're restored, if one needs it. It may name any domain.
+  restart once they're restored, if one needs it. It may name any domain;
+  an app's needs its app named, as a running app writes over the keys.
 - Capture saves those keys alone, in `<mac>/keys/<domain>.plist` on the
   prefs branch, and never the domain's other keys: declare those as
   `kit defaults` lines, such as the Dock's size.
 - Restore merges the keys into the domain as it stands, and restarts the
   process only if that changed anything. An item pointing at a file not on
   this Mac, such as the Dock tile of an app not installed, is left out.
-- A domain with items left out stays held (`kit prefs pending`). Once one
-  of them is on the Mac, `kit apply` or the hourly run merges it again, but
-  only if the person hasn't changed those keys since; if they have, kit
-  leaves them and drops the hold.
+- A domain with items left out stays held (`kit prefs pending`), waiting
+  for apps to put its items back. Once an item's file is on the Mac,
+  `kit apply` or the hourly run puts that item back where it was, and
+  nothing else. Once the person changes those keys, as by moving a Dock
+  tile, kit drops the hold, and the nightly capture saves them as they are.
 - On a new Mac this happens with the rest of the restore, once the run's
   apps are installed.
 

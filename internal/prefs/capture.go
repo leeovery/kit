@@ -221,8 +221,9 @@ type Report struct {
 	Removed        []string
 	// Pending counts the domains and settings files left alone, waiting to
 	// be restored; Kept, the domains left alone, kept till their apps are
-	// installed.
-	Pending, Kept int
+	// installed; Waiting, those kept by their keys waiting for apps to put
+	// back what their restores left out.
+	Pending, Kept, Waiting int
 	// Errors are what couldn't be saved, each with why: kept as stored.
 	Errors []string
 	// Claimed is whether this capture claimed the folder for this Mac.
@@ -277,6 +278,9 @@ func (r Report) Says() []string {
 	}
 	if r.Kept > 0 {
 		says = append(says, fmt.Sprintf("%d kept for apps not installed", r.Kept))
+	}
+	if r.Waiting > 0 {
+		says = append(says, ItemsWaiting(r.Waiting))
 	}
 	if len(r.Errors) > 0 {
 		says = append(says, fmt.Sprintf("%d errors", len(r.Errors)))
@@ -403,10 +407,11 @@ const gitignore = ".DS_Store\n.*.tmp\n"
 // only what changed and removing what's gone from the Mac, then commits and
 // pushes: the domains kept whole, and the keys [prefs keys] names of
 // others, those alone. It needs Full Disk Access, capture switched on, and
-// this Mac to own the folder (claiming it when no Mac has). One capture at a time: it
-// waits for one under way (lockCapture). A domain or file that
+// this Mac to own the folder (claiming it when no Mac has). One capture at
+// a time: it waits for one under way (lockCapture). A domain or file that
 // fails to read is kept as stored, and the rest go on; domains waiting to
-// be restored are left alone.
+// be restored are left alone, but one kept by its keys the person's
+// changed since its restore, whose hold goes.
 func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	var report Report
 	rec, err := p.Load()
@@ -466,11 +471,6 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 			heldFiles[f] = true
 		}
 	}
-	report.Pending = len(protected) + len(heldFiles)
-	if rec.Pending != nil && rec.Pending.From == p.Mac {
-		report.Kept = rec.Pending.Kept()
-		report.Pending -= report.Kept
-	}
 	// What stays stored: domains captured now, ones that failed to export
 	// (still there, unreadable this time) and pending ones. A domain that
 	// exports empty counts as gone: macOS lists a deleted domain for a
@@ -495,7 +495,15 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		}
 	}
 	keyedDir := filepath.Join(store, keysDir)
-	keepKeyed := p.captureKeys(ctx, &report, keyedDir, protected)
+	var heldKeyed map[string]KeysHeld
+	if rec.Pending != nil {
+		heldKeyed = rec.Pending.Keyed
+	}
+	keepKeyed, released := p.captureKeys(ctx, &report, keyedDir, protected, heldKeyed)
+	if held := rec.Pending.without(released); held != nil && held.From == p.Mac {
+		report.Kept, report.Waiting = held.Kept(), held.Waiting()
+		report.Pending = len(held.Domains) + len(held.Files) - report.Kept - report.Waiting
+	}
 
 	sources := p.settingsFiles()
 	wanted := map[string]bool{}
@@ -564,6 +572,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	}
 	return report, p.update(func(r *Record) {
 		r.Captured, r.Summary, r.Parts, r.Errors, r.NotOwner = p.Now(), report.Summary(), report.Says(), len(report.Errors), ""
+		r.Pending = r.Pending.without(released)
 		if report.PushError == "" {
 			r.Unpushed, r.PushError = time.Time{}, ""
 			return

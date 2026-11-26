@@ -99,9 +99,9 @@ func TestOnThisMac(t *testing.T) {
 		{"an empty array", []any{}, []any{}, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got, n := prefs.OnThisMac(c.value)
-			if !plist.Equal(got, c.want) || n != c.leftOut {
-				t.Errorf("OnThisMac() = %v, %d; want %v, %d", got, n, c.want, c.leftOut)
+			got, out := prefs.OnThisMac("persistent-apps", c.value)
+			if !plist.Equal(got, c.want) || len(out) != c.leftOut {
+				t.Errorf("OnThisMac() = %v, %+v; want %v, %d left out", got, out, c.want, c.leftOut)
 			}
 		})
 	}
@@ -217,7 +217,7 @@ func TestRestoreMergesTheDeclaredKeys(t *testing.T) {
 			w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
 
 			report, err := w.p.Restore(t.Context(), c.opts)
-			if err != nil || !slices.Equal(report.Restored, []string{"com.apple.dock"}) || len(report.Failed) > 0 || report.LeftOut != 1 {
+			if err != nil || !slices.Equal(report.Restored, []string{"com.apple.dock"}) || len(report.Failed) > 0 || len(report.Held["com.apple.dock"].LeftOut) != 1 {
 				t.Fatalf("Restore() = %+v, %v", report, err)
 			}
 			want := map[string]any{"persistent-apps": []any{here}, "persistent-others": []any{folder}, "tilesize": int64(36), "orientation": "left"}
@@ -234,7 +234,7 @@ func TestRestoreMergesTheDeclaredKeys(t *testing.T) {
 			if got := w.read(t, filepath.Join(report.Saved, "com.apple.dock.plist")); got != stored(t, live) {
 				t.Errorf("the live settings saved as %q", got)
 			}
-			if !strings.Contains(report.Summary(), "restored 1 domain and 0 files from laptop; 1 item left out till it's on this Mac; previous") {
+			if !strings.Contains(report.Summary(), "restored 1 domain and 0 files from laptop; 1 waiting for apps to put its items back; previous") {
 				t.Errorf("Summary() = %q", report.Summary())
 			}
 		})
@@ -340,7 +340,7 @@ func (w *world) heldForGone(t *testing.T) (here, gone, folder map[string]any) {
 		t.Fatal(err)
 	}
 	rec, _ := w.p.Load()
-	if rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.apple.dock"}) || rec.Pending.Why["com.apple.dock"] != prefs.LeftOutWhy || rec.Pending.Wrote["com.apple.dock"] == "" {
+	if rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.apple.dock"}) || rec.Pending.Why["com.apple.dock"] != prefs.LeftOutWhy || rec.Pending.Keyed["com.apple.dock"].Wrote == "" {
 		t.Fatalf("pending = %+v, want the Dock held for the app left out, with what kit wrote", rec.Pending)
 	}
 	return here, gone, folder
@@ -380,7 +380,7 @@ func TestALeftOutTileComesBackOnceItsAppIs(t *testing.T) {
 	var imported map[string]any
 	w.importsWhole(t, "com.apple.dock", &imported)
 	report, err := w.p.RestoreInstalled(t.Context())
-	if err != nil || !slices.Equal(report.Restored, []string{"com.apple.dock"}) || report.LeftOut != 0 {
+	if err != nil || !slices.Equal(report.Restored, []string{"com.apple.dock"}) || len(report.Held) > 0 {
 		t.Fatalf("RestoreInstalled() = %+v, %v; want the Dock merged again", report, err)
 	}
 	want := map[string]any{"persistent-apps": []any{here, gone}, "persistent-others": []any{folder}, "tilesize": int64(36)}
@@ -429,10 +429,115 @@ func TestCaptureLeavesAHeldDockAsStored(t *testing.T) {
 	w.write(t, filepath.Join(store, ".gitignore"), ".DS_Store\n.*.tmp\n")
 	w.fake.On("defaults", "domains").Prints("com.apple.dock\n")
 	w.pushes(t, "Capture 2026-10-06 03:00: no changes", "", nil, nil)
-	if _, err := w.p.Capture(t.Context()); err != nil {
+	report, err := w.p.Capture(t.Context())
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got := w.read(t, filepath.Join(store, "keys", "com.apple.dock.plist")); got != before {
 		t.Errorf("the held Dock stored as\n%s\nwant it left as\n%s", got, before)
+	}
+	if got := report.Summary(); !strings.HasSuffix(got, "; 1 waiting for apps to put its items back") || strings.Contains(got, "kept for apps") {
+		t.Errorf("Summary() = %q, want the Dock waiting for apps to put its items back", got)
+	}
+}
+
+// A Dock rearranged while it's held is captured as any, its hold dropped,
+// so a later restore brings back the Dock as the person left it.
+func TestCaptureReleasesARearrangedDock(t *testing.T) {
+	w := newWorld(t, prefs.Lists{Keys: []prefs.Keys{dock}})
+	_, _, folder := w.heldForGone(t)
+	store := filepath.Join(w.clone, "laptop")
+	w.write(t, filepath.Join(store, ".gitignore"), ".DS_Store\n.*.tmp\n")
+	w.exports(t, "com.apple.dock", map[string]any{"persistent-apps": []any{}, "persistent-others": []any{folder}, "tilesize": int64(36)})
+	w.fake.On("defaults", "domains").Prints("com.apple.dock\n")
+	w.pushes(t, "Capture 2026-10-06 03:00: 1 changed\n\nchanged: com.apple.dock", " M laptop/keys/com.apple.dock.plist\x00", []string{"laptop/keys/com.apple.dock.plist"}, nil)
+	report, err := w.p.Capture(t.Context())
+	if err != nil || report.Waiting != 0 {
+		t.Fatalf("Capture() = %+v, %v", report, err)
+	}
+	if got, want := w.read(t, filepath.Join(store, "keys", "com.apple.dock.plist")), stored(t, map[string]any{"persistent-apps": []any{}, "persistent-others": []any{folder}}); got != want {
+		t.Errorf("the Dock stored as\n%s\nwant it as rearranged\n%s", got, want)
+	}
+	if rec, _ := w.p.Load(); rec.Pending != nil {
+		t.Errorf("pending = %+v, want the hold dropped", rec.Pending)
+	}
+}
+
+// Items left out are put back one by one as their apps arrive, each where
+// it was, whatever the store holds since; the hold keeps what's still not
+// here, and goes once nothing is.
+func TestLeftOutItemsComeBackWhereTheyWere(t *testing.T) {
+	w := newWorld(t, prefs.Lists{Keys: []prefs.Keys{dock}})
+	tileOf := func(name string) map[string]any { return tile(fileURL(filepath.Join(w.apps, name))) }
+	for _, app := range []string{"A.app", "B.app"} {
+		if err := os.MkdirAll(filepath.Join(w.apps, app), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, one, b, two := tileOf("A.app"), tileOf("One.app"), tileOf("B.app"), tileOf("Two.app")
+	store := filepath.Join(w.clone, "laptop")
+	w.write(t, filepath.Join(store, "owner"), "hardware HW-THIS\n")
+	w.write(t, filepath.Join(store, "keys", "com.apple.dock.plist"), stored(t, map[string]any{"persistent-apps": []any{a, one, b, two}}))
+	w.exports(t, "com.apple.dock", map[string]any{"persistent-apps": []any{}})
+	var imported map[string]any
+	w.importsWhole(t, "com.apple.dock", &imported)
+	w.fake.On("killall", "Dock")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{}); err != nil || !plist.Equal(imported["persistent-apps"], []any{a, b}) {
+		t.Fatalf("Restore() = %v; imported %v", err, imported)
+	}
+	// The store changes meanwhile: a pass brings none of that to this Mac.
+	w.write(t, filepath.Join(store, "keys", "com.apple.dock.plist"), stored(t, map[string]any{"persistent-apps": []any{two}}))
+
+	for _, c := range []struct {
+		arrives string
+		want    []any
+		held    int
+	}{
+		{"Two.app", []any{a, b, two}, 1},
+		{"One.app", []any{a, one, b, two}, 0},
+	} {
+		if err := os.MkdirAll(filepath.Join(w.apps, c.arrives), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true}); err != nil {
+			t.Fatal(err)
+		}
+		if !plist.Equal(imported["persistent-apps"], c.want) {
+			t.Errorf("%s arrived: imported %v, want %v", c.arrives, imported["persistent-apps"], c.want)
+		}
+		held := 0
+		if rec, _ := w.p.Load(); rec.Pending != nil {
+			held = len(rec.Pending.Keyed["com.apple.dock"].LeftOut)
+		}
+		if held != c.held {
+			t.Errorf("%s arrived: %d still held, want %d", c.arrives, held, c.held)
+		}
+	}
+}
+
+// A put-back that fails keeps what kit wrote, so kit prefs restore
+// --pending by hand still leaves a Dock rearranged since as it is.
+func TestAFailedPutBackKeepsWhatKitWrote(t *testing.T) {
+	w := newWorld(t, prefs.Lists{Keys: []prefs.Keys{dock}})
+	_, _, folder := w.heldForGone(t)
+	if err := os.MkdirAll(filepath.Join(w.apps, "Gone.app"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	w.fake.On("defaults", "import", "com.apple.dock", "-").Exits(1)
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true})
+	if err != nil || report.Failed["com.apple.dock"] != "macOS didn't take them" {
+		t.Fatalf("the hourly pass = %+v, %v", report, err)
+	}
+	if rec, _ := w.p.Load(); rec.Pending == nil || rec.Pending.Keyed["com.apple.dock"].Wrote == "" {
+		t.Fatalf("pending = %+v, want what kit wrote kept through the failure", rec.Pending)
+	}
+	w.exports(t, "com.apple.dock", map[string]any{"persistent-apps": []any{}, "persistent-others": []any{folder}})
+	report, err = w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true})
+	if err != nil || !slices.Equal(report.Rearranged, []string{"com.apple.dock"}) || len(report.Restored) > 0 {
+		t.Errorf("Restore(--pending) = %+v, %v; want the rearranged Dock left", report, err)
+	}
+	if rec, _ := w.p.Load(); rec.Pending != nil {
+		t.Errorf("pending = %+v, want the hold dropped", rec.Pending)
 	}
 }

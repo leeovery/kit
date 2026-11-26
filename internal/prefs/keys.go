@@ -1,6 +1,7 @@
 package prefs
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -154,16 +155,28 @@ func (k Keys) picked(m map[string]any) ([]byte, error) {
 }
 
 // captureKeys saves the keys each domain kept by its keys has into dir,
-// into report as captureDomain does, but those protected, waiting to be
-// restored, left as stored: the domains whose stored copies stay.
-func (p *Prefs) captureKeys(ctx context.Context, report *Report, dir string, protected map[string]bool) map[string]bool {
-	keep := map[string]bool{}
+// into report as captureDomain does: the domains whose stored copies stay;
+// and, of those held for what their restores left out (held), those the
+// person's changed since, whose holds go (released), captured as any. One
+// held so as kit wrote it, or waiting otherwise, is left as stored when
+// protected.
+func (p *Prefs) captureKeys(ctx context.Context, report *Report, dir string, protected map[string]bool, held map[string]KeysHeld) (keep map[string]bool, released []string) {
+	keep = map[string]bool{}
 	for _, k := range p.keyed() {
-		if protected[k.Domain] {
+		kh, isHeld := held[k.Domain]
+		if protected[k.Domain] && !isHeld {
 			keep[k.Domain] = true
 			continue
 		}
 		m, err := p.export(ctx, k.Domain)
+		if err == nil && isHeld {
+			if k.fingerprint(m) != kh.Wrote {
+				released = append(released, k.Domain)
+			} else if protected[k.Domain] {
+				keep[k.Domain] = true
+				continue
+			}
+		}
 		var content []byte
 		if err == nil {
 			content, err = k.picked(m)
@@ -172,54 +185,60 @@ func (p *Prefs) captureKeys(ctx context.Context, report *Report, dir string, pro
 			keep[k.Domain] = true
 		}
 	}
-	return keep
+	return keep, released
 }
 
 // LeftOutWhy is why a domain kept by its keys is held once a restore left
-// out items pointing at files not on this Mac: the next pass merges it
-// again once one of them is here, so a Dock gets the tiles of apps
+// out items pointing at files not on this Mac (KeysHeld): the next pass
+// puts each back once its file is here, so a Dock gets the tiles of apps
 // installed later.
-const LeftOutWhy = "kept till what it left out is on this Mac"
+const LeftOutWhy = "waiting for apps to put its items back"
+
+// KeysHeld is a domain kept by its keys held for what its restore left
+// out: those items, and what kit wrote of its keys, as fingerprint has it,
+// so a domain the person's changed since is never written over.
+type KeysHeld struct {
+	Wrote   string    `json:"wrote"`
+	LeftOut []LeftOut `json:"left_out"`
+}
+
+// LeftOut is an item a restore left out, pointing at a file not on this
+// Mac: its key, where it was in the key's array, the file, and the item, as
+// an XML property list's element.
+type LeftOut struct {
+	Key   string `json:"key"`
+	Index int    `json:"index"`
+	Path  string `json:"path"`
+	Item  string `json:"item"`
+}
 
 // merging is how domains kept by their keys are restored: from their
 // stored copies in dir, the live settings saved first in saved; dryRun,
-// only saying they would be. wrote is what kit last wrote of each domain
-// held for what it left out (LeftOutWhy), as fingerprint has it.
+// only saying they would be. held are those held for what their restores
+// left out, which only have that put back.
 type merging struct {
 	dir, saved string
 	dryRun     bool
-	wrote      map[string]string
+	held       map[string]KeysHeld
 }
 
-// restoreKeys merges each of keys' stored copies into its domain, into
-// report, then restarts each process named by those it changed, once. One
-// that left items out is held (LeftOutWhy), with what it wrote; one held so
-// already is merged again only as again says.
+// restoreKeys restores each of keys into its domain, into report, then
+// restarts each process named by those it changed, once: from its stored
+// copy (restoreStored), or, held for what its restore left out, only that
+// (putBack).
 func (p *Prefs) restoreKeys(ctx context.Context, report *RestoreReport, keys []Keys, how merging) {
 	restart := map[string]bool{}
 	for _, k := range keys {
-		wanted, err := readStored(filepath.Join(how.dir, k.Domain+".plist"))
+		var changed bool
+		var err error
+		if kh, isHeld := how.held[k.Domain]; isHeld {
+			changed, err = p.putBack(ctx, report, k, kh, how)
+		} else {
+			changed, err = p.restoreStored(ctx, report, k, how)
+		}
 		if err != nil {
 			report.Failed[k.Domain] = err.Error()
 			continue
-		}
-		put, left := k.toPut(wanted)
-		if wrote, held := how.wrote[k.Domain]; held && !p.again(ctx, report, k.Domain, put, wrote) {
-			continue
-		}
-		if how.dryRun {
-			report.Restored = append(report.Restored, k.Domain)
-			continue
-		}
-		changed, err := p.mergeKeys(ctx, k.Domain, put, how.saved)
-		if err != nil {
-			report.Failed[k.Domain] = err.Error()
-			continue
-		}
-		report.Restored = append(report.Restored, k.Domain)
-		report.LeftOut += left
-		if left > 0 {
-			report.Kept[k.Domain], report.Wrote[k.Domain] = LeftOutWhy, fingerprint(put)
 		}
 		if changed && k.Restart != "" {
 			restart[k.Restart] = true
@@ -231,46 +250,124 @@ func (p *Prefs) restoreKeys(ctx context.Context, report *RestoreReport, keys []K
 	}
 }
 
-// again reports whether a domain held for what its restore left out, whose
-// keys kit last wrote as wrote, is merged again, put being what it would
-// put now: only once something left out is on this Mac, and only while the
-// domain's keys are as kit wrote them. Else it stays held, nothing on this
-// Mac yet; or, changed since, as when the person's rearranged the Dock, it's
-// left as it is, its hold dropped (Rearranged).
-func (p *Prefs) again(ctx context.Context, report *RestoreReport, domain string, put map[string]any, wrote string) bool {
-	if fingerprint(put) == wrote {
-		report.Kept[domain], report.Wrote[domain] = LeftOutWhy, wrote
-		return false
-	}
-	live, err := p.export(ctx, domain)
+// restoreStored merges k's keys from their stored copy into the domain, an
+// array's items pointing at files not on this Mac left out (onThisMac),
+// the domain held for them: whether it changed the domain.
+func (p *Prefs) restoreStored(ctx context.Context, report *RestoreReport, k Keys, how merging) (bool, error) {
+	wanted, err := readStored(filepath.Join(how.dir, k.Domain+".plist"))
 	if err != nil {
-		report.Failed[domain] = "its live settings couldn't be read"
-		return false
+		return false, err
 	}
-	if fingerprint(pick(live, slices.Collect(maps.Keys(put)))) != wrote {
-		report.Rearranged = append(report.Rearranged, domain)
-		return false
+	put, out := k.toPut(wanted)
+	if how.dryRun {
+		report.Restored = append(report.Restored, k.Domain)
+		report.keep(k.Domain, KeysHeld{LeftOut: out})
+		return false, nil
 	}
-	return true
+	changed, after, err := p.mergeKeys(ctx, k.Domain, put, how.saved)
+	if err != nil {
+		return false, err
+	}
+	report.Restored = append(report.Restored, k.Domain)
+	report.keep(k.Domain, KeysHeld{Wrote: k.fingerprint(after), LeftOut: out})
+	return changed, nil
+}
+
+// putBack puts the items a domain's restore left out, kh, whose files are
+// on this Mac now, back where they were, and nothing else, whatever the
+// store holds now: only while the domain's keys are as kit wrote them;
+// changed since, as a Dock the person's rearranged, it's left as it is,
+// held no more (Rearranged). What's still not here stays held. It reports
+// whether it changed the domain.
+func (p *Prefs) putBack(ctx context.Context, report *RestoreReport, k Keys, kh KeysHeld, how merging) (bool, error) {
+	live, err := p.export(ctx, k.Domain)
+	if err != nil {
+		return false, errors.New("its live settings couldn't be read")
+	}
+	if k.fingerprint(live) != kh.Wrote {
+		report.Rearranged = append(report.Rearranged, k.Domain)
+		return false, nil
+	}
+	put, still := map[string]any{}, []LeftOut{}
+	for key, out := range byKey(kh.LeftOut) {
+		items, _ := live[key].([]any)
+		back, left := restoreItems(items, out)
+		if len(left) < len(out) {
+			put[key] = back
+		}
+		still = append(still, left...)
+	}
+	slices.SortFunc(still, func(a, b LeftOut) int { return cmp.Or(cmp.Compare(a.Key, b.Key), cmp.Compare(a.Index, b.Index)) })
+	if len(put) == 0 {
+		report.keep(k.Domain, kh)
+		return false, nil
+	}
+	if how.dryRun {
+		report.Restored = append(report.Restored, k.Domain)
+		report.keep(k.Domain, KeysHeld{Wrote: kh.Wrote, LeftOut: still})
+		return false, nil
+	}
+	changed, after, err := p.mergeKeys(ctx, k.Domain, put, how.saved)
+	if err != nil {
+		return false, err
+	}
+	report.Restored = append(report.Restored, k.Domain)
+	report.keep(k.Domain, KeysHeld{Wrote: k.fingerprint(after), LeftOut: still})
+	return changed, nil
+}
+
+// keep holds domain, kept by its keys, for what it left out, kh: nothing,
+// with nothing left out.
+func (r *RestoreReport) keep(domain string, kh KeysHeld) {
+	if len(kh.LeftOut) > 0 {
+		r.Kept[domain], r.Held[domain] = LeftOutWhy, kh
+	}
+}
+
+// byKey are items left out, by their keys.
+func byKey(out []LeftOut) map[string][]LeftOut {
+	by := map[string][]LeftOut{}
+	for _, o := range out {
+		by[o.Key] = append(by[o.Key], o)
+	}
+	return by
+}
+
+// restoreItems is items, a key's array as kit wrote it, with those of out,
+// left out of it, whose files are here now put back where they were, in
+// order; and those still not here. An item's place is its place in the
+// array as stored less those before it still left out.
+func restoreItems(items []any, out []LeftOut) ([]any, []LeftOut) {
+	items = slices.Clone(items)
+	slices.SortFunc(out, func(a, b LeftOut) int { return cmp.Compare(a.Index, b.Index) })
+	var still []LeftOut
+	for _, o := range out {
+		item, err := plist.ReadValue(o.Item)
+		if err != nil || !here(o.Path) {
+			still = append(still, o)
+			continue
+		}
+		items = slices.Insert(items, min(o.Index-len(still), len(items)), item)
+	}
+	return items, still
 }
 
 // keysReady reports whether a domain held, as held has it, for what its
-// restore left out has something left out on this Mac now, for the next
-// pass to merge it again.
-func (p *Prefs) keysReady(held *Pending) func(domain string) bool {
-	keyed := p.keyedBy()
+// restore left out has a file of what it left out on this Mac now, for the
+// next pass to put back.
+func keysReady(held *Pending) func(domain string) bool {
 	return func(domain string) bool {
-		k, ok := keyed[domain]
-		if held == nil || held.Why[domain] != LeftOutWhy || !ok {
+		if held == nil || held.Why[domain] != LeftOutWhy {
 			return false
 		}
-		wanted, err := readStored(filepath.Join(p.Clone, held.From, keysDir, domain+".plist"))
-		if err != nil {
-			return false
-		}
-		put, _ := k.toPut(wanted)
-		return fingerprint(put) != held.Wrote[domain]
+		return slices.ContainsFunc(held.Keyed[domain].LeftOut, func(o LeftOut) bool { return here(o.Path) })
 	}
+}
+
+// here reports whether there's a file at path.
+func here(path string) bool {
+	_, err := os.Stat(path)
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // readStored is a stored copy's settings.
@@ -292,22 +389,24 @@ func readStored(path string) (map[string]any, error) {
 
 // toPut is what a restore puts of wanted, a stored copy: k's keys, an
 // array's items pointing at files not on this Mac left out (onThisMac);
-// and how many it left out.
-func (k Keys) toPut(wanted map[string]any) (map[string]any, int) {
-	put, left := pick(wanted, k.Keys), 0
-	for key, value := range put {
-		var n int
-		put[key], n = onThisMac(value)
-		left += n
+// and those it left out.
+func (k Keys) toPut(wanted map[string]any) (map[string]any, []LeftOut) {
+	put := pick(wanted, k.Keys)
+	var out []LeftOut
+	for _, key := range slices.Sorted(maps.Keys(put)) {
+		var left []LeftOut
+		put[key], left = onThisMac(key, put[key])
+		out = append(out, left...)
 	}
-	return put, left
+	return put, out
 }
 
-// fingerprint is what m's settings hold, as a restore tells whether a
+// fingerprint is what m holds of k's keys, as a restore tells whether a
 // domain's are as it wrote them: an array by the files its items point at,
 // in order, the rest of each item being the app's to rewrite as it reads
 // it; anything else as it is.
-func fingerprint(m map[string]any) string {
+func (k Keys) fingerprint(m map[string]any) string {
+	m = pick(m, k.Keys)
 	h := sha256.New()
 	for _, key := range slices.Sorted(maps.Keys(m)) {
 		h.Write([]byte(key + "\x00"))
@@ -327,35 +426,35 @@ func fingerprint(m map[string]any) string {
 // mergeKeys puts put, keys of a domain, into the domain as it stands,
 // through cfprefsd, its other keys left as they are: the live settings
 // saved first, then read back and compared. It reports whether the domain
-// changed.
-func (p *Prefs) mergeKeys(ctx context.Context, domain string, put map[string]any, saved string) (bool, error) {
+// changed, and the domain as it stands after.
+func (p *Prefs) mergeKeys(ctx context.Context, domain string, put map[string]any, saved string) (bool, map[string]any, error) {
 	current, err := p.export(ctx, domain)
 	if err != nil {
-		return false, errors.New("its live settings couldn't be read, to save them first")
+		return false, nil, errors.New("its live settings couldn't be read, to save them first")
 	}
 	merged := map[string]any{}
 	maps.Copy(merged, current)
 	maps.Copy(merged, put)
 	if plist.Equal(merged, current) {
-		return false, nil
+		return false, current, nil
 	}
 	if err := p.saveLive(domain, current, saved); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	// The whole domain imported, its other keys as they were exported, so
 	// the merge stands whether import merges or replaces.
 	whole, err := plist.Encode(merged)
 	if err != nil {
-		return false, errors.New("its merged settings couldn't be written")
+		return false, nil, errors.New("its merged settings couldn't be written")
 	}
 	if _, err := p.Run.Run(ctx, runner.Command{Name: "defaults", Args: []string{"import", domain, "-"}, Input: string(whole)}); err != nil {
-		return false, errors.New("macOS didn't take them")
+		return false, nil, errors.New("macOS didn't take them")
 	}
 	back, err := p.export(ctx, domain)
 	if err != nil || !maps.EqualFunc(put, pick(back, slices.Collect(maps.Keys(put))), plist.Equal) {
-		return false, errors.New("macOS took them, but they read back different")
+		return false, nil, errors.New("macOS took them, but they read back different")
 	}
-	return true, nil
+	return true, back, nil
 }
 
 // pick is the settings of m under keys, those it has.
@@ -369,24 +468,25 @@ func pick(m map[string]any, keys []string) map[string]any {
 	return out
 }
 
-// onThisMac is value, an array's items pointing at a file not on this Mac
-// left out, as the Dock's tiles point at their apps and folders: an item
-// holding a file's URL as CoreFoundation saves one (_CFURLString); and how
-// many it left out. Any other value is as it is.
-func onThisMac(value any) (any, int) {
+// onThisMac is value, key's, an array's items pointing at a file not on
+// this Mac left out, as the Dock's tiles point at their apps and folders:
+// an item holding a file's URL as CoreFoundation saves one (_CFURLString);
+// and those it left out. Any other value is as it is.
+func onThisMac(key string, value any) (any, []LeftOut) {
 	items, ok := value.([]any)
 	if !ok {
-		return value, 0
+		return value, nil
 	}
-	kept := slices.DeleteFunc(slices.Clone(items), func(item any) bool {
-		path, ok := fileOf(item)
-		if !ok {
-			return false
+	kept := []any{}
+	var out []LeftOut
+	for i, item := range items {
+		if path, ok := fileOf(item); ok && !here(path) {
+			out = append(out, LeftOut{Key: key, Index: i, Path: path, Item: plist.XML(item)})
+			continue
 		}
-		_, err := os.Stat(path)
-		return errors.Is(err, fs.ErrNotExist)
-	})
-	return kept, len(items) - len(kept)
+		kept = append(kept, item)
+	}
+	return kept, out
 }
 
 // fileOf is the path of the file an item points at, the first URL to one

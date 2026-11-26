@@ -177,11 +177,14 @@ A `[prefs keys]` line keeps only the keys it names, of any domain, Apple's inclu
 works like this:
 
 - **It merges them in.** The domain's other keys stay as they are.
-- **It restarts the process** after `--restart`, only if the merge changed anything.
+- **It restarts the process** after `--restart`, only if the merge changed anything. Name one
+  for an app's domain: an app that's running would write over the keys.
 - **It leaves out an item whose file isn't on this Mac,** such as the Dock tile of an app not
   installed. The domain is then held, and `kit prefs pending` lists it.
-- **It merges again once that file is here,** at the next `kit apply` or hourly run. If you've
-  changed those keys since, kit leaves them as they are and drops the hold.
+- **It puts the item back where it was once that file is here,** at the next `kit apply` or
+  hourly run. Nothing else from the store comes with it.
+- **It stops holding if you change those keys,** such as moving a Dock tile. The nightly save
+  then keeps your Dock as it is.
 
 A few sections take more after the header:
 

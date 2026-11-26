@@ -1,12 +1,12 @@
 // Package prefs is kit's saving and restoring of apps' settings, the
 // successor to the dotfiles' prefsync: every preferences domain that isn't
 // Apple's or the system's, through defaults export and import (cfprefsd's
-// view, never a plist copied behind its back); the keys [prefs keys] names
-// of any domain, Apple's included, alone, merged back into the domain; and
-// the settings files [prefs files] names. Each Mac keeps them in its own
-// folder of one git branch, kit-config's prefs, cloned alone in kit's data
-// folder: a commit for each capture that changed anything, pushed, so
-// history can restore the settings as they were on a date.
+// view, never a plist copied behind its back); the keys [prefs keys]
+// names of any domain, Apple's included, alone, merged back into the
+// domain; and the settings files [prefs files] names. Each Mac keeps them
+// in its own folder of one git branch, kit-config's prefs, cloned alone in
+// kit's data folder: a commit for each capture that changed anything,
+// pushed, so history can restore the settings as they were on a date.
 //
 // The store's format is prefsync's, byte for byte: <mac>/domains/<domain>.plist
 // in sorted XML, keys that change by themselves stripped; <mac>/files/
@@ -88,10 +88,9 @@ type Pending struct {
 	Why     map[string]string `json:"why,omitempty"`
 	Open    map[string]App    `json:"open,omitempty"`
 	Failed  []string          `json:"failed,omitempty"`
-	// Wrote is what kit wrote of each domain kept by its keys held for
-	// what its restore left out (LeftOutWhy), as fingerprint has it: it's
-	// merged again only while it's as kit wrote it.
-	Wrote map[string]string `json:"wrote,omitempty"`
+	// Keyed are the domains kept by their keys held for what their
+	// restores left out (KeysHeld).
+	Keyed map[string]KeysHeld `json:"keyed,omitempty"`
 }
 
 // Restored is where a full restore came from.

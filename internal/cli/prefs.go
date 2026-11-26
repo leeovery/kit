@@ -300,7 +300,7 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.Kept)+len(report.ToOpen) == 0 && report.Failures() == 0 {
+		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.Kept)+len(report.ToOpen)+len(report.Rearranged) == 0 && report.Failures() == 0 {
 			return check.Result{State: check.OK, Summary: "nothing pending"}
 		}
 		res := check.Result{State: check.OK}.Saying(report.Says()...)
@@ -323,7 +323,7 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 		for _, d := range slices.Sorted(maps.Keys(report.Kept)) {
 			it := check.Item{ID: "prefs:kept:" + d, Name: d, State: "kept", Detail: "its app isn't installed", Quiet: "restored once it is"}
 			if report.Kept[d] == prefs.LeftOutWhy {
-				it.Detail, it.Quiet = "some of what it points at isn't on this Mac", "merged again once it is, unless it's changed since"
+				it.Detail, it.Quiet = prefs.LeftOutWhy, "each put back once its app is here, unless it's changed since"
 			}
 			res.Items = append(res.Items, it)
 		}
@@ -359,10 +359,12 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		return err
 	}
 	if a.json {
-		pending := rec.Pending
-		if pending == nil {
-			pending = &prefs.Pending{Domains: []string{}}
+		pending := prefs.Pending{Domains: []string{}}
+		if rec.Pending != nil {
+			pending = *rec.Pending
 		}
+		// What kit wrote, and the items left out, are its own bookkeeping.
+		pending.Keyed = nil
 		return render.WriteJSON(a.Stdout, pending)
 	}
 	if rec.Pending == nil {

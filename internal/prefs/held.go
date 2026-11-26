@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -23,17 +24,18 @@ type App struct {
 // held is what waits to be restored, as a restore changes it: domains, and
 // of them those whose apps the person opens once (open) and those whose
 // restore failed otherwise (failed); settings files, whose restore failed;
-// and why each waits; and what kit wrote of each domain kept by its keys
-// held for what it left out.
+// and why each waits; and, of the domains kept by their keys held for what
+// they left out, what they left out and what kit wrote.
 type held struct {
 	domains, files, failed map[string]bool
 	open                   map[string]App
-	why, wrote             map[string]string
+	why                    map[string]string
+	keyed                  map[string]KeysHeld
 }
 
 // heldIn is what p holds: nothing, for none.
 func heldIn(p *Pending) held {
-	h := held{domains: map[string]bool{}, files: map[string]bool{}, failed: map[string]bool{}, open: map[string]App{}, why: map[string]string{}, wrote: map[string]string{}}
+	h := held{domains: map[string]bool{}, files: map[string]bool{}, failed: map[string]bool{}, open: map[string]App{}, why: map[string]string{}, keyed: map[string]KeysHeld{}}
 	if p == nil {
 		return h
 	}
@@ -48,7 +50,7 @@ func heldIn(p *Pending) held {
 	}
 	maps.Copy(h.open, p.Open)
 	maps.Copy(h.why, p.Why)
-	maps.Copy(h.wrote, p.Wrote)
+	maps.Copy(h.keyed, p.Keyed)
 	return h
 }
 
@@ -80,16 +82,30 @@ func (h held) anyToTry(ready func(domain string) bool) bool {
 	return false
 }
 
-// Kept counts the domains p keeps till their apps are installed, or what
-// they left out is on this Mac.
-func (p *Pending) Kept() int {
+// Kept counts the domains p keeps till their apps are installed; Waiting,
+// those kept by their keys till what they left out is on this Mac.
+func (p *Pending) Kept() int { return p.count(keptWhy) }
+
+// Waiting counts the domains p holds till what their restores left out is
+// on this Mac (LeftOutWhy).
+func (p *Pending) Waiting() int { return p.count(LeftOutWhy) }
+
+// count counts the domains p holds for why.
+func (p *Pending) count(why string) int {
 	n := 0
 	for _, d := range p.Domains {
-		if kept(p.Why[d]) {
+		if p.Why[d] == why {
 			n++
 		}
 	}
 	return n
+}
+
+// ItemsWaiting is how a summary tells of n domains kept by their keys
+// waiting for apps to put back what their restores left out, as the
+// Dock's tiles.
+func ItemsWaiting(n int) string {
+	return fmt.Sprintf("%d waiting for apps to put %s back", n, look.Plural(n, "its items", "their items"))
 }
 
 // Running reports whether why, a domain's left waiting for, is that its
@@ -113,14 +129,19 @@ func (h held) drop(name string) {
 	delete(h.failed, name)
 	delete(h.open, name)
 	delete(h.why, name)
-	delete(h.wrote, name)
+	delete(h.keyed, name)
 }
 
 // hold puts domain on, as waiting for its app, or kept till it's
-// installed, with why.
+// installed, with why: what a domain kept by its keys left out kept, so a
+// merge that fails after it is checked as it was.
 func (h held) hold(domain, why string) {
+	kh, keyed := h.keyed[domain]
 	h.drop(domain)
 	h.domains[domain], h.why[domain] = true, why
+	if keyed {
+		h.keyed[domain] = kh
+	}
 }
 
 // toOpen puts domain on, its app, app, for the person to open once: why
@@ -157,8 +178,8 @@ func (h held) pending(from string) *Pending {
 	if len(h.why) > 0 {
 		p.Why = maps.Clone(h.why)
 	}
-	if len(h.wrote) > 0 {
-		p.Wrote = maps.Clone(h.wrote)
+	if len(h.keyed) > 0 {
+		p.Keyed = maps.Clone(h.keyed)
 	}
 	return p
 }
@@ -212,4 +233,16 @@ func (p *Prefs) Open(ctx context.Context, id string) {
 func (p *Prefs) hasFolder(id string) bool {
 	_, err := os.Stat(filepath.Join(p.Home, "Library/Containers", id))
 	return err == nil
+}
+
+// without is p with domains taken off: nil when nothing's left.
+func (p *Pending) without(domains []string) *Pending {
+	if p == nil || len(domains) == 0 {
+		return p
+	}
+	h := heldIn(p)
+	for _, d := range domains {
+		h.drop(d)
+	}
+	return h.pending(p.From)
 }
