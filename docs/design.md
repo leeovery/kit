@@ -1683,6 +1683,17 @@ refused clone uninstalls it all the same, deleting none of its saved settings an
   restore --pending`, after anything wrong with capture itself. A held
   file's saved copy stays in the store, on the Mac or not. `[prefs deny]` leaves
   domains out.
+- **`[prefs keys]`**: a domain, the keys of it kept, and `--restart` a process, as in
+  `com.apple.dock persistent-apps persistent-others --restart Dock` (the Dock's apps and
+  folders): any domain, Apple's included, never one whole. Capture saves those keys alone, in
+  `<mac>/keys/<domain>.plist`, a folder of its own so no restore ever replaces a domain with
+  them, and saves no domain declared so whole. Restore (full, named or `--pending`) merges
+  them into the domain as exported (the whole domain imported back, its other keys as they
+  were, so it holds whether import merges or replaces), saving the live copy first, then
+  `killall`s the process once, when anything changed. An array's item holding a file's URL
+  (`_CFURLString`) whose file isn't on this Mac, as a Dock tile of an app not installed, is
+  left out and counted. Never waiting or kept, a merge that fails is held as failed, for
+  `--pending` by hand. Without a line, keys stored before aren't restored.
 
 ## Data restore (`[restore]`)
 

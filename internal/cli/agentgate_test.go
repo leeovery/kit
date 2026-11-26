@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/guide"
 	"github.com/leeovery/kit/internal/kinds"
+	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -115,6 +116,8 @@ func TestTheGuidesChecksFindWhatsWrong(t *testing.T) {
 		{"[manual]\nname \"do\" --frob x\n", "isn't one of a step by hand's options"},
 		{"[manual]\nname \"do\" --test test -L x --after cask:a\n", "--after can't be in --test's command"},
 		{"[secrets op://vault/item --as tokens]\nTOKEN Section/token\n", ""},
+		{"[prefs keys]\ncom.apple.dock persistent-apps --restart Dock\n", ""},
+		{"[prefs keys]\ncom.apple.dock --restart Dock\n", "names no keys"},
 	}
 	for _, tt := range examples {
 		err := readsAsDeclarations(t, tt.example)
@@ -350,6 +353,15 @@ func readsAsDeclarations(t *testing.T, example string) error {
 	}
 	for _, e := range byHand.Entries {
 		if _, err := steps.ParseManual(dir, e); err != nil {
+			return err
+		}
+	}
+	keys, err := cfg.List(config.PrefsKeysKind, "laptop")
+	if err != nil {
+		return err
+	}
+	for _, e := range keys.Entries {
+		if _, err := prefs.ParseKeys(e); err != nil {
 			return err
 		}
 	}

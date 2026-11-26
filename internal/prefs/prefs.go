@@ -1,16 +1,18 @@
 // Package prefs is kit's saving and restoring of apps' settings, the
 // successor to the dotfiles' prefsync: every preferences domain that isn't
 // Apple's or the system's, through defaults export and import (cfprefsd's
-// view, never a plist copied behind its back), and the settings files
-// [prefs files] names. Each Mac keeps them in its own folder of one git
-// branch, kit-config's prefs, cloned alone in kit's data folder: a commit
-// for each capture that changed anything, pushed, so history can restore
-// the settings as they were on a date.
+// view, never a plist copied behind its back); the keys [prefs keys] names
+// of any domain, Apple's included, alone, merged back into the domain; and
+// the settings files [prefs files] names. Each Mac keeps them in its own
+// folder of one git branch, kit-config's prefs, cloned alone in kit's data
+// folder: a commit for each capture that changed anything, pushed, so
+// history can restore the settings as they were on a date.
 //
 // The store's format is prefsync's, byte for byte: <mac>/domains/<domain>.plist
 // in sorted XML, keys that change by themselves stripped; <mac>/files/
 // mirroring each file's path under the home folder (or _root/ for one
-// outside it). <mac>/owner records the hardware of the Mac the folder
+// outside it). <mac>/keys/<domain>.plist holds a domain's declared keys
+// alone, in the same XML. <mac>/owner records the hardware of the Mac the folder
 // belongs to: another Mac, such as a replacement given the same name, never
 // captures into it, and settings bound to one Mac are never restored onto
 // other hardware.
@@ -96,11 +98,12 @@ type Restored struct {
 }
 
 // Lists are kit-config's lists for prefs: the settings files saved besides
-// the domains; the domains never saved; the apps domains belong to when
-// their names don't say, each a pattern and a bundle id; and the settings
-// bound to one Mac.
+// the domains; the domains kept by some of their keys alone; the domains
+// never saved; the apps domains belong to when their names don't say, each
+// a pattern and a bundle id; and the settings bound to one Mac.
 type Lists struct {
 	Files        []string
+	Keys         []Keys
 	Deny         []string
 	Apps         [][2]string
 	MachineBound []string

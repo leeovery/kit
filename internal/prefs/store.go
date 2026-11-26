@@ -509,6 +509,9 @@ func (p *Prefs) History(ctx context.Context, mac, target string, count int) ([]C
 	path := mac
 	if target != "" {
 		path = filepath.Join(mac, "domains", target+".plist")
+		if _, byKeys := p.keysOf(target); byKeys {
+			path = filepath.Join(mac, keysDir, target+".plist")
+		}
 		if strings.HasPrefix(target, "~") || strings.HasPrefix(target, "/") {
 			path = p.storedPath(filepath.Join(mac, "files"), p.expand(target))
 		}

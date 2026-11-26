@@ -17,15 +17,37 @@ prefs; a clone of kit-config made otherwise may fetch every branch.
   back to a date (`kit prefs history`).
 - `[prefs files]` lists settings files beside the domains: a file its
   program replaces when it saves, which a link would lose.
+- `[prefs keys]` keeps chosen keys of one domain, those alone, even a
+  domain prefs skips, as Apple's are (below).
 - `[prefs deny]` leaves domains out; `[prefs apps]` says whose a domain is
   when its name doesn't; `[prefs machine-bound]` are never copied to another
   Mac.
 
-Those four sections have no add command: edit them by hand, and commit.
+Those five sections have no add command: edit them by hand, and commit.
 Capture needs Full Disk Access for kit, which `kit status` checks.
 
 Every app's settings are captured, with nothing declared for it. Don't
 declare an app's own settings as defaults lines too.
+
+## Keys of an Apple domain
+
+The Dock's apps and folders are two keys of com.apple.dock. This section
+keeps them:
+
+    [prefs keys]
+    com.apple.dock persistent-apps persistent-others --restart Dock
+
+- A line is the domain, the keys kept, then --restart and a process to
+  restart once they're restored, if one needs it. It may name any domain.
+- Capture saves those keys alone, in `<mac>/keys/<domain>.plist` on the
+  prefs branch, and never the domain's other keys: declare those as
+  `kit defaults` lines, such as the Dock's size. Never declare a whole
+  Apple domain.
+- Restore merges the keys into the domain as it stands, then restarts the
+  process. An item pointing at a file not on this Mac, such as the Dock
+  tile of an app not installed, is left out, and the summary counts it.
+- On a new Mac this happens with the rest of the restore, once the run's
+  apps are installed.
 
 ## Restoring
 

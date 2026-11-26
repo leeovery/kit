@@ -58,6 +58,9 @@ type RestoreReport struct {
 	Failed, FilesFailed map[string]string
 	// Apps are the apps of the domains not restored, where kit found them.
 	Apps map[string]App
+	// LeftOut counts the items of the domains kept by their keys left out,
+	// pointing at files not on this Mac, as the Dock's tiles at apps.
+	LeftOut int
 	// Saved is where the live settings replaced were saved.
 	Saved  string
 	DryRun bool
@@ -99,6 +102,9 @@ func (r RestoreReport) Says() []string {
 	}
 	if n := r.Failures(); n > 0 {
 		says = append(says, fmt.Sprintf("%d failed", n))
+	}
+	if r.LeftOut > 0 {
+		says = append(says, fmt.Sprintf("%d %s left out, not on this Mac", r.LeftOut, look.Plural(r.LeftOut, "item", "items")))
 	}
 	if r.Saved != "" {
 		says = append(says, "previous settings saved in "+r.Saved)
@@ -244,14 +250,8 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 	if err != nil {
 		return errors.New("its live settings couldn't be read, to save them first")
 	}
-	if len(current) > 0 {
-		backup, err := plist.Encode(current)
-		if err == nil {
-			err = writeIfChanged(filepath.Join(saved, target+".plist"), backup)
-		}
-		if err != nil {
-			return errors.New("its live settings couldn't be saved first")
-		}
+	if err := p.saveLive(target, current, saved); err != nil {
+		return err
 	}
 	// Import merges: deleted first, for an exact restore.
 	_, _ = p.Run.Run(ctx, runner.Command{Name: "defaults", Args: []string{"delete", target}})
@@ -265,10 +265,27 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 	return nil
 }
 
+// saveLive saves a domain's live settings, current, in saved, before a
+// restore changes them: nothing, for none.
+func (p *Prefs) saveLive(domain string, current map[string]any, saved string) error {
+	if len(current) == 0 {
+		return nil
+	}
+	backup, err := plist.Encode(current)
+	if err == nil {
+		err = writeIfChanged(filepath.Join(saved, domain+".plist"), backup)
+	}
+	if err != nil {
+		return errors.New("its live settings couldn't be saved first")
+	}
+	return nil
+}
+
 // Restore puts settings from the store back on the Mac: every stored domain
-// whose app is installed and closed (the rest wait, pending), then the
-// settings files that differ, each live copy saved first. A full restore
-// switches capture on, what it couldn't restore held aside, so capture
+// whose app is installed and closed (the rest wait, pending), then each
+// domain's kept keys merged into it, its process restarted (restoreKeys),
+// then the settings files that differ, each live copy saved first. A full
+// restore switches capture on, what it couldn't restore held aside, so capture
 // leaves it be: kept till its app is installed; waiting for its app to
 // quit; its app for the person to open once; or, failed otherwise, for kit
 // prefs restore --pending. Domains named are held as they wait, kept, or
@@ -330,16 +347,9 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		defer cleanup()
 		store, report.Commit, report.At = dir, commit, date
 	}
-	domainsDir, filesDir := filepath.Join(store, "domains"), filepath.Join(store, "files")
-	var stored []string
-	if entries, err := os.ReadDir(domainsDir); err == nil {
-		for _, e := range entries {
-			if d, ok := strings.CutSuffix(e.Name(), ".plist"); ok {
-				stored = append(stored, d)
-			}
-		}
-	}
-	if len(stored) == 0 {
+	domainsDir, keyedDir, filesDir := filepath.Join(store, "domains"), filepath.Join(store, keysDir), filepath.Join(store, "files")
+	stored, storedKeyed := storedIn(domainsDir), storedIn(keyedDir)
+	if len(stored)+len(storedKeyed) == 0 {
 		return report, fmt.Errorf("no settings stored for %s", report.From)
 	}
 	saved := filepath.Join(p.State, backupsDir, p.Now().Format("2006-01-02-150405"))
@@ -361,23 +371,16 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 	if err != nil {
 		return report, err
 	}
-	domains := named
-	if full {
-		for _, d := range stored {
-			if !matches(d, p.Lists.Deny) && !matches(d, bound) {
-				domains = append(domains, d)
-			}
-		}
-	} else if !opts.Pending {
-		var missing []string
-		for _, d := range named {
-			if !slices.Contains(stored, d) {
-				missing = append(missing, d)
-			}
-		}
-		if len(missing) > 0 {
+	domains, keyed := p.byKeys(named)
+	switch {
+	case full:
+		domains, keyed = p.allStored(stored, storedKeyed, bound)
+	case !opts.Pending:
+		if missing := notStored(domains, keyed, stored, storedKeyed); len(missing) > 0 {
 			return report, fmt.Errorf("not in the store: %s", strings.Join(missing, ", "))
 		}
+	case opts.Unattended:
+		keyed = slices.DeleteFunc(keyed, func(k Keys) bool { return before.failed[k.Domain] })
 	}
 
 	installed, containers, restart := p.installedApps(), map[string]error{}, map[string]bool{}
@@ -401,6 +404,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		})
 	}
 	p.restartHelpers(ctx, restart)
+	p.restoreKeys(ctx, &report, keyed, keyedDir, saved, opts.DryRun)
 
 	if full || len(files) > 0 {
 		report.Files, report.FilesFailed = p.restoreFiles(filesDir, bound, files, saved, opts.DryRun)
@@ -603,6 +607,19 @@ func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain 
 		return
 	}
 	report.Restored = append(report.Restored, domain)
+}
+
+// storedIn are the domains with a stored copy in dir, sorted: none when
+// there's no dir.
+func storedIn(dir string) []string {
+	entries, _ := os.ReadDir(dir)
+	var stored []string
+	for _, e := range entries {
+		if d, ok := strings.CutSuffix(e.Name(), ".plist"); ok {
+			stored = append(stored, d)
+		}
+	}
+	return stored
 }
 
 // savedIfAny is saved when a restore saved anything there, else "".
