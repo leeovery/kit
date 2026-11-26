@@ -127,7 +127,7 @@ func TestLogRun(t *testing.T) {
 }
 
 // A run's log names each thing a step left to do, as applying's record and
-// its panels do: its name in orange, what to do about it under it when it
+// its panels do: its name in yellow, what to do about it under it when it
 // says, a step by hand with nothing more to say its name alone.
 func TestLogRunNamesWhatsLeft(t *testing.T) {
 	manual := check.Result{State: check.Attention, Summary: "2 to do", Items: []check.Item{
@@ -154,8 +154,8 @@ func TestLogRunNamesWhatsLeft(t *testing.T) {
 		t.Errorf("the log is\n%s\nwant By hand's row, each thing to do by name under it\n%s", got, want)
 	}
 	for _, name := range []string{"Allow remote users Full Disk Access", "Install the editor from its site (no Homebrew cask)"} {
-		if !strings.Contains(out.String(), look.Orange(name)) {
-			t.Errorf("%q isn't named in orange in\n%s", name, out.String())
+		if !strings.Contains(out.String(), look.Yellow(name)) {
+			t.Errorf("%q isn't named in yellow in\n%s", name, out.String())
 		}
 	}
 }

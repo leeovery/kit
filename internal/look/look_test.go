@@ -31,7 +31,7 @@ func same(t *testing.T, got []string, want ...string) {
 func TestRowsAndTimelines(t *testing.T) {
 	same(t, look.Rows("  ", look.Width,
 		look.Row{State: look.Done, Name: "jq", Says: look.Says(look.Muted("installed 1.8.1"), look.Muted("declared in laptop"))},
-		look.Row{State: look.NeedsYou, Name: "ffmpeg", Says: look.Orange("installed, not declared"), Under: []string{look.Todo(look.Cmd("kit reconcile"))}},
+		look.Row{State: look.NeedsYou, Name: "ffmpeg", Says: look.Yellow("installed, not declared"), Under: []string{look.Todo(look.Cmd("kit reconcile"))}},
 		look.Row{State: look.Skipped, Name: "kit-config", Says: look.Muted("skipped")},
 	),
 		"  ● jq  installed 1.8.1 · declared in laptop",
@@ -83,7 +83,7 @@ func TestRowsNeverBreak(t *testing.T) {
 // what it keeps, wrapped under it, on a timeline's line in a timeline;
 // what belongs to it goes under that.
 func TestWholeRowsWrap(t *testing.T) {
-	names := look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep", Says: look.Orange("need an administrator's password"), Whole: true}
+	names := look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep", Says: look.Yellow("need an administrator's password"), Whole: true}
 	same(t, look.Rows("  ", 90, names), "  ▲ charger:hibernatemode, charger:networkoversleep  need an administrator's password")
 	same(t, look.Rows("  ", 40, names),
 		"  ▲ charger:hibernatemode,",
@@ -109,7 +109,7 @@ func TestWholeRowsWrap(t *testing.T) {
 // goes on to, no line ending or starting with a dot; what belongs to it
 // under that, cut, as Timeline draws it.
 func TestStacked(t *testing.T) {
-	r := look.Row{State: look.Queued, Name: "~/Library/Application Support/Some App/Cache_Data", Says: look.Says(look.Muted("exclusion"), look.Orange("installed, not declared")), Under: look.Output("a line of output past the end")}
+	r := look.Row{State: look.Queued, Name: "~/Library/Application Support/Some App/Cache_Data", Says: look.Says(look.Muted("exclusion"), look.Yellow("installed, not declared")), Under: look.Output("a line of output past the end")}
 	got := look.Stacked("  ", 30, r)
 	same(t, got,
 		"  ○ ~/Library/Application",
@@ -124,7 +124,7 @@ func TestStacked(t *testing.T) {
 			t.Errorf("%q is %d wide", ansi.Strip(l), w)
 		}
 	}
-	if !strings.Contains(got[2], look.White("Cache_Data")) || !strings.Contains(got[4], look.Orange("declared")) {
+	if !strings.Contains(got[2], look.White("Cache_Data")) || !strings.Contains(got[4], look.Yellow("declared")) {
 		t.Errorf("drew %q; want each line in the style it goes on in", got)
 	}
 	same(t, look.Stacked("  ", 30, look.Row{State: look.Done, Name: "jq", Says: look.Pink("declare")}), "  ● jq", "  │ declare")
@@ -178,7 +178,7 @@ func TestFold(t *testing.T) {
 		look.Says(look.White("com.example.agent"), look.Muted("not installed: install the app, or open it")),
 		look.Todo(look.Muted("install the app it comes with, or remove it")),
 		look.Muted("fits"),
-		look.Says(look.Orange("a-name"), look.Muted("installed"), look.Muted("2 days"), look.Muted("then more")),
+		look.Says(look.Yellow("a-name"), look.Muted("installed"), look.Muted("2 days"), look.Muted("then more")),
 		look.Todo(look.Cmd("kit apply a-step-with-a-very-long-name-indeed")),
 	)
 	same(t, got,
@@ -196,7 +196,7 @@ func TestFold(t *testing.T) {
 			t.Errorf("%q is %d wide, past the room after the row's prefix", ansi.Strip(l), w)
 		}
 	}
-	same(t, look.Fold("  ", 30, look.Says(look.Orange("a-name"), look.Muted("installed"), look.Muted("2 days"))),
+	same(t, look.Fold("  ", 30, look.Says(look.Yellow("a-name"), look.Muted("installed"), look.Muted("2 days"))),
 		"a-name · installed · 2",
 		"days",
 	)
@@ -292,15 +292,13 @@ func TestStatesMarks(t *testing.T) {
 		t.Error("marks and words: want each state its colour, the words kept")
 	}
 	if look.Mark(look.ToDo) != look.White("△") || look.Words(look.ToDo, "no backup disk") != look.White("no backup disk") {
-		t.Error("what's left to do: want its mark and its words white, never orange")
+		t.Error("what's left to do: want its mark and its words white, never yellow")
 	}
 }
 
 // Words take the terminal's own colours, its theme's, so they read on a
-// light background as on a dark one: white its text colour, names bold;
-// muted faint and dim its bright black; needs you its yellow, mark and
-// words alike; failed its red, running its cyan. Only kit's accent, pink,
-// keeps a colour of its own, and a pill, dark on kit's own colour.
+// light background as on a dark one; only kit's pink and its pills keep
+// colours of their own.
 func TestWordsTakeTheTheme(t *testing.T) {
 	for _, tt := range []struct {
 		name, got, want string
@@ -309,8 +307,8 @@ func TestWordsTakeTheTheme(t *testing.T) {
 		{"Cmd", look.Cmd("a"), "a"},
 		{"Strong", look.Strong("a"), "\x1b[1ma\x1b[m"},
 		{"Muted", look.Muted("a"), "\x1b[2ma\x1b[m"},
-		{"Dim", look.Dim("a"), "\x1b[90ma\x1b[m"},
-		{"Orange", look.Orange("a"), "\x1b[33ma\x1b[m"},
+		{"Dim", look.Dim("a"), "\x1b[2ma\x1b[m"},
+		{"Yellow", look.Yellow("a"), "\x1b[33ma\x1b[m"},
 		{"Urgent", look.Urgent("a"), "\x1b[1;33ma\x1b[m"},
 		{"Red", look.Red("a"), "\x1b[31ma\x1b[m"},
 		{"Cyan", look.Cyan("a"), "\x1b[36ma\x1b[m"},
@@ -412,7 +410,7 @@ func TestBlocksAndSummaries(t *testing.T) {
 		"  MAC",
 		"  ● Disk  48% free",
 	)
-	same(t, []string{look.Header("Reconcile", "3 of 5"), look.Summary(look.Orange("1 needs you"), look.White("23 fine"), look.Muted("1.8s"))},
+	same(t, []string{look.Header("Reconcile", "3 of 5"), look.Summary(look.Yellow("1 needs you"), look.White("23 fine"), look.Muted("1.8s"))},
 		"  RECONCILE  3 of 5",
 		"  1 needs you · 23 fine · 1.8s",
 	)

@@ -786,14 +786,14 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 		return nil
 	}
 	s, err := askpass.Start("", self, func(ctx context.Context, asked int) (string, error) {
-		about := look.Row{State: look.NeedsYou, Name: "sudo", Says: look.Orange("needs an administrator's password")}
+		about := look.Row{State: look.NeedsYou, Name: "sudo", Says: look.Yellow("needs an administrator's password")}
 		if f, ok := face.(interface{ Running() []string }); ok {
 			if running := f.Running(); len(running) > 0 {
 				about.Name = strings.Join(running, ", ")
 			}
 		}
 		if asked > 0 {
-			about.Says = look.Orange("that wasn't it: try again")
+			about.Says = look.Yellow("that wasn't it: try again")
 		}
 		defer stepAside(face)()
 		return a.ReadSecret(ctx, about)

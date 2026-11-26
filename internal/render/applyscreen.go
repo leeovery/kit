@@ -146,7 +146,7 @@ func (p *Pretty) cardUpLines(w int) []string {
 	case c.Tells:
 		under = look.Todo(look.Muted("a bigger window shows how"), look.Muted("kit carries on by itself once it's done"))
 	}
-	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: c.Title, Says: look.Orange("needs you"), Under: look.Fold("  ", w, under)})
+	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: c.Title, Says: look.Yellow("needs you"), Under: look.Fold("  ", w, under)})
 }
 
 // window is the terminal's size as it is now, all of it: no size when the
@@ -344,7 +344,7 @@ func (p *Pretty) stateLine() string {
 	}
 	parts := []string{look.Cyan("◐ working"), look.White("nothing needs you")}
 	if waits := p.waitsOnYou(); len(waits) > 0 {
-		parts = append([]string{look.Orange("▲ waiting for you")}, waits...)
+		parts = append([]string{look.Yellow("▲ waiting for you")}, waits...)
 	}
 	if n := p.failedSteps(); n > 0 {
 		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
@@ -482,7 +482,7 @@ func (p *Pretty) paneTop(w int) (top []string, rule int) {
 const panelAt = "      "
 
 // panel is the card up, as the panel over the log has it, w wide: its
-// title, orange, how many more wait after it and how long it's waited at
+// title, yellow, how many more wait after it and how long it's waited at
 // the right, as far as there's room; why it's there (cardWhy); then
 // panelBody's, ending with that kit carries on by itself, when it tells,
 // and, while another card waits, the key moving on to it.

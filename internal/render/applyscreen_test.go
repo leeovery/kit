@@ -510,7 +510,7 @@ func TestApplyingRowSays(t *testing.T) {
 			finished(3, "brew", check.Result{State: check.Failed, Reason: "couldn't install jq"})}, look.Red("✗"), ""},
 		{"needs you", "Secrets", "  ▲ Secrets  waits for you: Sign in to 1Password", []event.Event{
 			event.StepStarted{Time: after(2), Step: "1password", Doing: "applying"},
-			event.NeedsYou{Time: after(2), Step: "1password", Item: "1password", Title: "Sign in to 1Password"}}, look.Orange("▲"), ""},
+			event.NeedsYou{Time: after(2), Step: "1password", Item: "1password", Title: "Sign in to 1Password"}}, look.Yellow("▲"), ""},
 		{"at work", "Homebrew formulae", "  ◐ Homebrew formulae  installing jq · 67 of 129", append(applying(10, "brew"),
 			event.Doing{Time: after(20), Step: "brew", Says: "installing jq", Done: 67, Of: 129}), look.Cyan("◐"), "    ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  50.0s"},
 		{"at work, a step of several", "Your steps", "  ◐ Your steps  applying valet", applying(10, "valet"), look.Cyan("◐"), ""},
@@ -536,7 +536,7 @@ func TestApplyingRowSays(t *testing.T) {
 					{ID: "brew:owner/tools/fetcher", Name: "owner/tools/fetcher", State: "missing", Action: "install"},
 					{ID: "brew:owner/tools/viewer", Name: "owner/tools/viewer", State: "missing", Action: "install"},
 				},
-			})}, look.Orange("▲"), ""},
+			})}, look.Yellow("▲"), ""},
 		{"not started", "Your steps", "  ○ Your steps  waiting", nil, look.Cyan("○"), ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -921,7 +921,7 @@ func TestApplyingHasNoLater(t *testing.T) {
 // a kind installed, dim +; a step finished well, pink, and what it did; one
 // left to do at the end, pink too, as there's nothing to do till then, the
 // to-do mark nowhere mid-run; one failed, red, why and what to run on the
-// spine under it; one not checked, grey; a card up, orange ▲, and done
+// spine under it; one not checked, grey; a card up, yellow ▲, and done
 // with, how long it was up, or left to do. Steps starting and their checks
 // have no line. What's under way is at its foot, the time now on its first
 // line.
@@ -1253,7 +1253,7 @@ func TestApplyingLogOfARow(t *testing.T) {
 }
 
 // While a card's up, it's a panel over the log, ruled off: its title,
-// orange, how long it's waited at the right, how many more are after it;
+// yellow, how long it's waited at the right, how many more are after it;
 // why it's there, muted and wrapped, as its notes say; its steps, numbered, a subheading muted and unnumbered after a blank line,
 // the numbering carrying on across it; that kit carries on by itself, when
 // it tells, and no key to answer it. The header says the run's waiting for
@@ -1292,7 +1292,7 @@ func TestApplyingPanel(t *testing.T) {
 		t.Errorf("the state line is %q; want it waiting for you, the card's title", state)
 	}
 	frame := strings.Join(lastFrame(out.String()), "\n")
-	for _, styled := range []string{look.Orange("▲") + " " + look.Urgent("Sign in to 1Password"), look.Urgent("1") + "  ", look.Muted("command line turned on."), look.Muted("If kit still waits with both done:"), look.Orange("▲ waiting for you")} {
+	for _, styled := range []string{look.Yellow("▲") + " " + look.Urgent("Sign in to 1Password"), look.Urgent("1") + "  ", look.Muted("command line turned on."), look.Muted("If kit still waits with both done:"), look.Yellow("▲ waiting for you")} {
 		if !strings.Contains(frame, styled) {
 			t.Errorf("the screen has no %q, styled as it should be", ansi.Strip(styled))
 		}

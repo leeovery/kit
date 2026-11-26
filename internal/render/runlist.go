@@ -124,7 +124,7 @@ func foldLine(runs []logs.Run) ask.Line {
 		case look.Failed:
 			colour = look.Red
 		case look.NeedsYou:
-			colour = look.Orange
+			colour = look.Yellow
 		}
 		how = look.Dim("each ") + colour(words)
 	}

@@ -18,8 +18,7 @@
 //     is never the only sign;
 //   - words take the terminal's own colours, its theme's, so they read on
 //     whatever background it has, light or dark: white is its text colour,
-//     grey its faint text or its bright black, red, yellow and cyan its
-//     own. Only what kit paints for itself has colours of its own, exact:
+//     grey its text faint, red, yellow and cyan its own. Only what kit paints for itself has colours of its own, exact:
 //     the wordmark and the bar along kit's gradient, pink for what's done
 //     or chosen, and a pill.
 package look
@@ -38,7 +37,8 @@ import (
 const Width = 80
 
 // kit's own colours, exact, for what it paints itself: pink to orange, its
-// gradient; scarlet, a failure's pill; dark, a pill's text.
+// gradient; scarlet, a failure's pill and the boot's FAIL; dark, a pill's
+// text.
 var (
 	pink    = lipgloss.Color("#FF4F9A")
 	orange  = lipgloss.Color("#FFA24C")
@@ -46,13 +46,12 @@ var (
 	dark    = lipgloss.Color("#1B1D24")
 )
 
-// The words' styles, in the terminal's own colours: its text colour, plain
-// or bold; faint; its bright black; its yellow, red and cyan.
+// The words' styles, in the terminal's own colours: its text colour, plain,
+// bold or faint; its yellow, red and cyan.
 var (
 	plain  = lipgloss.NewStyle()
 	bold   = plain.Bold(true)
-	muted  = plain.Faint(true)
-	dim    = fg(lipgloss.BrightBlack)
+	faint  = plain.Faint(true)
 	yellow = fg(lipgloss.Yellow)
 	red    = fg(lipgloss.Red)
 	cyan   = fg(lipgloss.Cyan)
@@ -61,10 +60,12 @@ var (
 func fg(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
 
 // Muted is words that say something: a row's text, a note.
-func Muted(s string) string { return muted.Render(s) }
+func Muted(s string) string { return faint.Render(s) }
 
 // Dim is what's there to be found, not read: a command run, a time, a dot.
-func Dim(s string) string { return dim.Render(s) }
+// It's faint, as Muted is: the terminal's bright black is its background in
+// some themes, Solarized Dark's, and without colour only faint is left.
+func Dim(s string) string { return faint.Render(s) }
 
 // White is what's typed or counted: a command to run, a figure.
 func White(s string) string { return plain.Render(s) }
@@ -72,15 +73,14 @@ func White(s string) string { return plain.Render(s) }
 // Strong is a name.
 func Strong(s string) string { return bold.Render(s) }
 
-// Pink, Orange, Red and Cyan are words in a state's colour: done, needs
-// you, failed, running. Orange is the terminal's yellow, which a light
-// theme darkens towards orange.
+// Pink, Yellow, Red and Cyan are words in a state's colour: done, needs
+// you, failed, running.
 func Pink(s string) string   { return fg(pink).Render(s) }
-func Orange(s string) string { return yellow.Render(s) }
+func Yellow(s string) string { return yellow.Render(s) }
 func Red(s string) string    { return red.Render(s) }
 func Cyan(s string) string   { return cyan.Render(s) }
 
-// Urgent is what needs you now, Orange and bold: what's to be done, and
+// Urgent is what needs you now, yellow and bold: what's to be done, and
 // the numbers and keys that do it.
 func Urgent(s string) string { return yellow.Bold(true).Render(s) }
 
@@ -141,7 +141,7 @@ var marks = map[State]string{Done: "●", NeedsYou: "▲", Failed: "✗", Runnin
 func Mark(s State) string {
 	switch s {
 	case NeedsYou:
-		return Orange(marks[s])
+		return Yellow(marks[s])
 	case Failed:
 		return Red(marks[s])
 	case Running, Queued:
@@ -158,7 +158,7 @@ func Mark(s State) string {
 func Words(s State, text string) string {
 	switch s {
 	case NeedsYou:
-		return Orange(text)
+		return Yellow(text)
 	case Failed:
 		return Red(text)
 	case Running:

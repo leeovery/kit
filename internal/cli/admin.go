@@ -404,12 +404,12 @@ func (a *app) readyToAsk(r *run, wanted map[string][]string) look.Row {
 	for _, kindName := range slices.Sorted(maps.Keys(wanted)) {
 		names = append(names, wanted[kindName]...)
 	}
-	about := look.Row{State: look.NeedsYou, Name: strings.Join(names, ", "), Says: look.Orange("needs an administrator's password")}
+	about := look.Row{State: look.NeedsYou, Name: strings.Join(names, ", "), Says: look.Yellow("needs an administrator's password")}
 	switch {
 	case len(names) > 3:
-		about.Name, about.Says = fmt.Sprintf("%d installs", len(names)), look.Orange("need an administrator's password")
+		about.Name, about.Says = fmt.Sprintf("%d installs", len(names)), look.Yellow("need an administrator's password")
 	case len(names) > 1:
-		about.Says = look.Orange("need an administrator's password")
+		about.Says = look.Yellow("need an administrator's password")
 	}
 	return about
 }
@@ -422,7 +422,7 @@ func (a *app) giveAdmin(ctx context.Context, r *run, about look.Row) (took bool)
 	ask := func(ctx context.Context, asked int) (string, error) {
 		row := about
 		if asked > 0 {
-			row.Says = look.Orange("that wasn't it: try again")
+			row.Says = look.Yellow("that wasn't it: try again")
 		}
 		return a.ReadSecret(ctx, row)
 	}

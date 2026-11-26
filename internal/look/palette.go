@@ -22,7 +22,7 @@ type palette struct {
 // terminal's text colour, pink for what's chosen, the wordmark along the
 // gradient.
 var kit = palette{
-	name: bold, key: plain, says: muted, dim: dim, label: fg(pink).Bold(true),
+	name: bold, key: plain, says: faint, dim: faint, label: fg(pink).Bold(true),
 	cursor: fg(pink).Bold(true), chosen: lipgloss.NewStyle().Foreground(dark).Background(pink).Bold(true),
 	field:    lipgloss.NewStyle().Foreground(dark).Background(pink),
 	wordmark: func(k string) string { return along(k, 0, ansi.StringWidth(k)) },

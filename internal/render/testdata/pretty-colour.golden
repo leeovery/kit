@@ -1,7 +1,7 @@
 
-  [38;2;255;79;154m█[m  [38;2;255;95;139m▄[m[38;2;255;100;135m▀[m  [38;2;255;115;120m▀[m[38;2;255;121;115m█[m[38;2;255;126;110m▀[m  [38;2;255;141;96m▀[m[38;2;255;146;91m▀[m[38;2;255;152;86m█[m[38;2;255;157;81m▀[m[38;2;255;162;76m▀[m  [90m│[m  [1mstatus[m
-  [38;2;255;79;154m█[m[38;2;255;84;149m▀[m[38;2;255;89;144m▀[m[38;2;255;95;139m▄[m    [38;2;255;121;115m█[m     [38;2;255;152;86m█[m    [90m│[m  [2mlaptop[m
-  [38;2;255;79;154m█[m   [38;2;255;100;135m█[m  [38;2;255;115;120m▄[m[38;2;255;121;115m█[m[38;2;255;126;110m▄[m    [38;2;255;152;86m█[m    [90m│[m  [2mFri 2 Jan · 03:04[m
+  [38;2;255;79;154m█[m  [38;2;255;95;139m▄[m[38;2;255;100;135m▀[m  [38;2;255;115;120m▀[m[38;2;255;121;115m█[m[38;2;255;126;110m▀[m  [38;2;255;141;96m▀[m[38;2;255;146;91m▀[m[38;2;255;152;86m█[m[38;2;255;157;81m▀[m[38;2;255;162;76m▀[m  [2m│[m  [1mstatus[m
+  [38;2;255;79;154m█[m[38;2;255;84;149m▀[m[38;2;255;89;144m▀[m[38;2;255;95;139m▄[m    [38;2;255;121;115m█[m     [38;2;255;152;86m█[m    [2m│[m  [2mlaptop[m
+  [38;2;255;79;154m█[m   [38;2;255;100;135m█[m  [38;2;255;115;120m▄[m[38;2;255;121;115m█[m[38;2;255;126;110m▄[m    [38;2;255;152;86m█[m    [2m│[m  [2mFri 2 Jan · 03:04[m
 
   [1;38;2;255;79;154mBACKUPS[m
   [38;2;255;79;154m●[m [1mTime Machine[m  [2mlast backup 02:35[m
@@ -12,16 +12,16 @@
     [2m→ [m[2mfree some space: kit status says where it went[m
 
   [1;38;2;255;79;154mCONFIG[m
-  [33m▲[m [1mjq[m  [33mdeclared, not installed[m[90m · [m[2m→ [mkit apply
-  [33m▲[m [1mffmpeg[m  [33minstalled, not declared[m[90m · [m[2m2 days[m[90m · [m[2m→ [mkit reconcile
+  [33m▲[m [1mjq[m  [33mdeclared, not installed[m[2m · [m[2m→ [mkit apply
+  [33m▲[m [1mffmpeg[m  [33minstalled, not declared[m[2m · [m[2m2 days[m[2m · [m[2m→ [mkit reconcile
   [31m✗[m [1mSync[m  [31mcouldn't check[m
     [2mnot a git repository[m
-  [2m–[m [2mApp Store[m  [2mnot checked[m[90m · [m[2mneeds Homebrew[m
-  [38;2;255;79;154m●[m [1mPackages[m  [2m7 installed[m[90m · [m[90m1 new[m
+  [2m–[m [2mApp Store[m  [2mnot checked[m[2m · [m[2mneeds Homebrew[m
+  [38;2;255;79;154m●[m [1mPackages[m  [2m7 installed[m[2m · [m[2m1 new[m
   [38;2;255;79;154m●[m [1mSettings[m  [2m9 set[m
   [38;2;255;79;154m●[m [1mkit-config[m  [2mprivate[m
 
   [1;38;2;255;79;154mSTEPS[m
   [38;2;255;79;154m●[m [1mfonts[m  [2m16 installed[m
 
-  [31m1 failed[m[90m · [m[33m2 need you[m[90m · [m[2m1 not checked[m[90m · [m6 fine[90m · [m[2m1.8s[m
+  [31m1 failed[m[2m · [m[33m2 need you[m[2m · [m[2m1 not checked[m[2m · [m6 fine[2m · [m[2m1.8s[m
