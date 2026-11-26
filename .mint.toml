@@ -36,4 +36,4 @@ pre_tag = ['scripts/gates', 'press prepare']
 post_release = ['press upload']
 
 [release]
-diff_exclude = [".gitignore", "art/", "cmd/capturetool/", "cmd/kitapp/", "demo/", "internal/capture/", "internal/boot/boottest/", "internal/render/rendertest/", "internal/runner/runnertest/", "internal/testguard/", ".press.toml"]
+diff_exclude = [".gitignore", "art/", "cmd/capturetool/", "cmd/kitapp/", "demo/", "internal/capture/", "internal/boot/boottest/", "internal/render/rendertest/", "internal/runner/runnertest/", "internal/testguard/", ".press.toml", "internal/screen/screentest/"]
