@@ -50,7 +50,7 @@ func (a *app) help(plain func(*cobra.Command, []string)) func(*cobra.Command, []
 // commands, each with what it does, then the nouns of each group, a line
 // a group, and the flags.
 func (a *app) kitHelp(root *cobra.Command) []string {
-	width := min(max(a.Width(root.OutOrStdout()), 40), look.Width)
+	width := look.Fit(a.Width(root.OutOrStdout()))
 	out := []string{""}
 	if !a.underHome {
 		out = append(append(out, look.Head(look.Meta("help", a.machineName(), a.Now().Format("Mon 2 Jan · 15:04"))...)...), "")
@@ -86,7 +86,7 @@ func (a *app) kitHelp(root *cobra.Command) []string {
 // commandHelp is a command's page: how it's used and what it does, then its
 // own commands, each with what it does, and its flags.
 func (a *app) commandHelp(cmd *cobra.Command) []string {
-	width := min(max(a.Width(cmd.OutOrStdout()), 40), look.Width)
+	width := look.Fit(a.Width(cmd.OutOrStdout()))
 	out := []string{"", "  " + look.Strong(cmd.UseLine()), ""}
 	for para := range strings.SplitSeq(cmp.Or(cmd.Long, cmd.Short), "\n\n") {
 		for l := range strings.SplitSeq(ansi.Wordwrap(strings.Join(strings.Fields(para), " "), width-2, ""), "\n") {
@@ -265,7 +265,7 @@ func (e *errOut) show(cmd *cobra.Command, args []string, err error, status int) 
 		return
 	}
 	_, needsYou := errors.AsType[notFound](err)
-	width := min(max(e.a.Width(e.Writer), 40), look.Width)
+	width := look.Fit(e.a.Width(e.Writer))
 	state, says := look.Failed, look.Red
 	switch {
 	case errors.Is(err, ask.ErrCancelled):

@@ -1,0 +1,11 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  status
+  █▀▀▄    █     █    │  laptop
+  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
+
+  CONFIG
+  ▲ owner/kit-config
+    make it private: gh repo edit owner/kit-config --visibility private --accept-visibility-change-consequences
+  ▲ kit-config  it must be private · pushed
+
+  1 needs you · 1 fine · 1.0s

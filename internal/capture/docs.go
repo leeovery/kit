@@ -16,7 +16,6 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/render/rendertest"
 )
@@ -102,20 +101,24 @@ func result(name, about, command string, steps ...said) Fixture {
 }
 
 // fit is the window events are drawn in on kit's face, as small as what
-// the face draws at kit's widest: a few columns wider than its widest line,
-// no wider than kit's width and a column either side, and as high, the
+// the face draws at stillColumns: a few columns wider than its widest line,
+// no wider than stillColumns and a column either side, and as high, the
 // line its cursor ends on too.
 func fit(events []event.Event) (width, height int) {
 	var out bytes.Buffer
-	if err := draw(&out, func() (int, int) { return look.Width, 0 }, events); err != nil {
+	if err := draw(&out, func() (int, int) { return stillColumns, 0 }, events); err != nil {
 		panic(fmt.Errorf("draw a still's run: %w", err))
 	}
 	lines := strings.Split(strings.TrimSuffix(ansi.Strip(out.String()), "\n"), "\n")
 	for _, l := range lines {
 		width = max(width, ansi.StringWidth(strings.TrimRight(l, " ")))
 	}
-	return min(width+stillMargin, look.Width+2), len(lines) + 1
+	return min(width+stillMargin, stillColumns+2), len(lines) + 1
 }
+
+// stillColumns is the widest a docs still draws kit's lines, not kit's
+// widest: a page's still shrinks to a phone's width, its words with it.
+const stillColumns = 80
 
 // stillMargin is how many columns a docs still's window has past its
 // widest line.
@@ -182,12 +185,12 @@ func (s *stage) holdLines(lines []string) error {
 }
 
 // sectionOf is the still name of one section of what kit prints for run,
-// at kit's widest, the one headed title, alone, showing shows, in a window
+// at stillColumns, the one headed title, alone, showing shows, in a window
 // columns by rows.
 func sectionOf(name, about, title, shows string, columns, rows int, run func() []event.Event) Fixture {
 	return Fixture{Name: name, About: about, Width: columns, Height: rows, Shows: shows, at: docsAt, draw: func(s *stage) error {
 		var all bytes.Buffer
-		if err := draw(&all, func() (int, int) { return look.Width, rows }, run()); err != nil {
+		if err := draw(&all, func() (int, int) { return stillColumns, rows }, run()); err != nil {
 			return err
 		}
 		return s.holdLines(section(all.String(), title))

@@ -471,13 +471,13 @@ func TerminalHeight(out io.Writer) int {
 	return 24
 }
 
-// TerminalWidth is how many columns wide the terminal out is: 80 when it
-// can't tell.
+// TerminalWidth is how many columns wide the terminal out is:
+// look.Unmeasured when it can't tell.
 func TerminalWidth(out io.Writer) int {
 	if f, ok := out.(*os.File); ok {
 		if width, _, err := term.GetSize(f.Fd()); err == nil && width > 0 {
 			return width
 		}
 	}
-	return 80
+	return look.Unmeasured
 }

@@ -32,17 +32,7 @@ func (p *Pretty) runningRow(r runningStep, w int) look.Row {
 	case p.needsYou(r):
 		return look.Row{State: look.NeedsYou, Name: r.title, Says: look.Yellow("needs you")}
 	}
-	return look.Row{State: look.Running, Name: r.title, Says: p.workSays(r), Under: look.Output(lastOf(p.output[r.step], keptRunning)...)}
-}
-
-// workSays is what a step at work says: what it's doing, in cyan, how far
-// it's got, when it counts, and the command running.
-func (p *Pretty) workSays(r runningStep) string {
-	says := r.counted(look.Cyan(r.doing))
-	if c := p.command[r.step]; c != "" {
-		says = append(says, look.Dim(look.OneLine(c)))
-	}
-	return look.Says(says...)
+	return look.Row{State: look.Running, Name: r.title, Says: look.Says(r.counted(look.Cyan(r.doing))...), Command: p.command[r.step], Under: look.Output(lastOf(p.output[r.step], keptRunning)...)}
 }
 
 // failedRow is a failed step's row in applying's record: what applying did,
@@ -143,13 +133,13 @@ func (p *Pretty) workRow(f event.StepFinished) look.Row {
 	row := resultRow(p.title(f.Step), f.Result, p.step(f.Step), p.start.Time)
 	if f.Result.State == check.Failed && len(p.output[f.Step]) > 0 {
 		var printed failing
-		row.Says, printed = p.printedFailing(f, keptFailing)
+		row, printed = p.printedFailing(row, f, keptFailing)
 		row.Under = printed.lines()
 	}
 	did := did(f.Result.Done, p.step(f.Step), f.Result.Summary != "")
 	switch {
 	case len(did) > 0 && declaredAll.MatchString(f.Result.Summary):
-		row.Says = look.Says(did...)
+		row.Says, row.Command = look.Says(did...), ""
 	case len(did) > 0:
 		row.Says = look.Says(append(did, row.Says)...)
 	}

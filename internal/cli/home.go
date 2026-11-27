@@ -35,7 +35,7 @@ func (a *app) home(cmd *cobra.Command) error {
 	if says, does := a.setupUnfinished(); says != "" {
 		return a.offerSetup(cmd.Context(), says, does)
 	}
-	width := min(max(a.Width(a.Stdout), 40), look.Width)
+	width := look.Fit(a.Width(a.Stdout))
 	choices := []look.Choice{
 		{Label: "Status", Does: "every check", Cmd: "kit status"},
 		{Label: "Apply", Does: "install what's missing", Cmd: "kit apply"},
@@ -96,7 +96,7 @@ func (a *app) setupUnfinished() (says, does string) {
 // other key leaves.
 func (a *app) offerSetup(ctx context.Context, says, does string) error {
 	lines := append([]string{""}, look.Head(look.Muted(a.Now().Format("Mon 2 Jan · 15:04")))...)
-	lines = append(lines, "", look.Rows("  ", look.Width, look.Row{State: look.NeedsYou, Name: "This Mac", Says: look.Words(look.NeedsYou, says)})[0])
+	lines = append(lines, "", look.Rows("  ", look.Fit(a.Width(a.Stdout)), look.Row{State: look.NeedsYou, Name: "This Mac", Says: look.Words(look.NeedsYou, says)})[0])
 	taken, err := a.Offer(ctx, lines, []look.Key{{Key: "enter", Does: does}, {Key: "any other key", Does: "leaves"}})
 	if err != nil || !taken {
 		return err

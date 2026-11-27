@@ -183,7 +183,7 @@ type Pretty struct {
 // wide: its lines go no wider than kit's look allows. It animates while
 // steps run when animate is true.
 func NewPretty(w io.Writer, width int, animate bool) *Pretty {
-	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate, now: time.Now, turning: everySpin}
+	return &Pretty{w: w, width: look.Fit(width), animate: animate, now: time.Now, turning: everySpin}
 }
 
 // everySpin are the spinner's turns, one each spinEvery.
@@ -199,7 +199,7 @@ func (p *Pretty) fit() {
 		return
 	}
 	w, _ := p.size()
-	p.width = min(max(w, 40), look.Width)
+	p.width = look.Fit(w)
 }
 
 // Clocked has the face tell the time by now, for how long a run has taken
@@ -489,7 +489,7 @@ func (p *Pretty) row(f event.StepFinished) look.Row {
 	row.Whole, row.Under = true, look.Fold("  ", p.width, row.Under...)
 	if out := p.output[f.Step]; r.State == check.Failed && len(out) > 0 {
 		var printed failing
-		row.Says, printed = p.printedFailing(f, len(out))
+		row, printed = p.printedFailing(row, f, len(out))
 		printed.why, printed.left = look.Fold("  ", p.width, printed.why...), look.Fold("  ", p.width, printed.left...)
 		row.Under = printed.lines()
 	}
@@ -509,23 +509,19 @@ type failing struct{ why, printed, left []string }
 // lines are what's under the row, in order.
 func (f failing) lines() []string { return slices.Concat(f.why, f.printed, f.left) }
 
-// printedFailing is the words of the row of f, a step that failed having
-// printed something, and what's under it, of part: what went wrong, then
-// the command that printed, dim, on one line; why, then the last kept of
-// the lines it printed, but for the last when it's why said whole (as with
-// a path before it, which a row too narrow for it would cut off), then
-// what's left of it.
-func (p *Pretty) printedFailing(f event.StepFinished, kept int) (string, failing) {
+// printedFailing is row, the row of f, a step that failed having printed
+// something, saying what went wrong, then the command that printed; and
+// what's under it: why, then the last kept of the lines it printed, but
+// for the last when it's why said whole (as with a path before it, which a
+// row too narrow for it would cut off), then what's left of it.
+func (p *Pretty) printedFailing(row look.Row, f event.StepFinished, kept int) (look.Row, failing) {
 	head, why := failure(f.Result)
-	says := look.Red(head)
-	if c := p.command[f.Step]; c != "" {
-		says = look.Says(says, look.Dim(look.OneLine(c)))
-	}
+	row.Says, row.Command = look.Red(head), p.command[f.Step]
 	out := lastOf(p.output[f.Step], kept)
 	if why != "" && strings.HasSuffix(out[len(out)-1], why) {
 		out = out[:len(out)-1]
 	}
-	return says, failing{why: whyFailed(f.Result), printed: look.Output(out...), left: whatsLeft(f.Result, p.step(f.Step), p.start.Time)}
+	return row, failing{why: whyFailed(f.Result), printed: look.Output(out...), left: whatsLeft(f.Result, p.step(f.Step), p.start.Time)}
 }
 
 // saying is a result's words as a row says them: the parts of a summary

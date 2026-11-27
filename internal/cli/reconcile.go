@@ -158,7 +158,7 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 		if slices.ContainsFunc(items, func(it driftItem) bool { return toAsk(it, opts) }) {
 			said = "Nothing decided"
 		}
-		_, err := fmt.Fprint(a.colors(a.Stdout), look.Rows("  ", look.Width, look.Row{State: look.Done, Name: said})[0]+"\n")
+		_, err := fmt.Fprint(a.colors(a.Stdout), look.Rows("  ", look.Fit(a.Width(a.Stdout)), look.Row{State: look.Done, Name: said})[0]+"\n")
 		return err
 	}
 	return a.carryOut(ctx, r, decisions, opts.note)

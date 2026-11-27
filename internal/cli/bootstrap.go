@@ -322,7 +322,7 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 // it waits for word it's been resized, then for it to settle, a moment at
 // most.
 func (a *app) settled(out io.Writer) {
-	if a.Width(out) >= look.Width && a.Height(out) >= settledHeight {
+	if a.Width(out) >= look.Designed && a.Height(out) >= settledHeight {
 		return
 	}
 	resized := make(chan os.Signal, 1)

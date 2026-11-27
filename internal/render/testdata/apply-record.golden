@@ -15,8 +15,7 @@
 
   FAILED  1
   ✗ Homebrew casks  couldn't install tailscale-app
-  │ installer: The install failed. (The Installer encountered an error that
-  │ caused the installation to fail.)
+  │ installer: The install failed. (The Installer encountered an error that caused the installation to fail.)
   │ → kit apply cask
 
   DIDN'T RUN  1

@@ -1246,8 +1246,10 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   drawn from; the rules signed off in the look's design, round 4): colour brought down to what
   the terminal shows, words in the terminal's own colours, so they read on a light theme as on
   a dark one (only kit's own colour exact: the wordmark and the bar along its gradient, its
-  pink, a pill), no glyphs that need a particular font, and no line past 80 columns but
-  on applying's screen, which takes the window. Commands looking at the whole Mac (`status`,
+  pink, a pill), no glyphs that need a particular font, and no line past the terminal's width,
+  120 columns at most (80 when kit can't tell it, as in a pipe), but on applying's screen,
+  which takes the window, and the boot's screens, drawn to 80. A command a row shows, too long
+  for its line, is cut in the middle, so its end shows. Commands looking at the whole Mac (`status`,
   `apply`, `nightly`, `reconcile`) open with the wordmark, what ran, the Mac and when stacked
   beside it; their steps show a block an area (Backups, Jobs, Mac, Config, Steps, Manual,
   Checks), a row a step: its mark, its title, then what it says, the parts after dots, what to

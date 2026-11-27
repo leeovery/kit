@@ -1459,8 +1459,8 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 			got := screen(raw)
 			golden(t, tt.golden, got+"\n")
 			for _, l := range lines(got) {
-				if w := ansi.StringWidth(l); w > look.Width {
-					t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
+				if w := ansi.StringWidth(l); w > look.Widest {
+					t.Errorf("%q is %d columns, want at most %d", l, w, look.Widest)
 				}
 			}
 			if strings.Count(got, "█  ▄▀") != 1 {
@@ -1494,7 +1494,7 @@ func TestApplyingRecordSections(t *testing.T) {
 			"       → Download it from editor.example.com\n" +
 			"       Once it's downloaded, in Finder:\n" +
 			"       → Drag it to Applications\n\n",
-		"\n  FAILED  1\n  ✗ Homebrew casks  couldn't install tailscale-app\n  │ installer: The install failed. (The Installer encountered an error that\n  │ caused the installation to fail.)\n  │ → kit apply cask\n\n",
+		"\n  FAILED  1\n  ✗ Homebrew casks  couldn't install tailscale-app\n  │ installer: The install failed. (The Installer encountered an error that caused the installation to fail.)\n  │ → kit apply cask\n\n",
 		"\n  DONE  9\n  ● This Mac  all 6 done\n  ● Files and shell  all 2 done\n  ● Mac settings  all 3 done\n  ● Secrets  fine\n  ● Homebrew formulae  all 2 done\n  ● App Store apps  fine\n",
 	} {
 		if !strings.Contains(record, want) {
@@ -1528,15 +1528,15 @@ func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
 		"│ ~/Code · added to Spotlight's list",
 		"│ owner/private/fetcher · needs Secrets, which isn't there yet",
 		"│ Monitor · not installed",
-		"  │ com.example.helper-agent · not installed: install the app, or open the app\n  │ it comes with\n",
+		"  │ com.example.helper-agent · not installed: install the app, or open the app it comes with\n",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant it to keep %q", record, want)
 		}
 	}
 	for _, l := range lines(record) {
-		if w := ansi.StringWidth(l); w > look.Width {
-			t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
+		if w := ansi.StringWidth(l); w > look.Widest {
+			t.Errorf("%q is %d columns, want at most %d", l, w, look.Widest)
 		}
 	}
 	for _, gone := range []string{"no project folder yet"} {
