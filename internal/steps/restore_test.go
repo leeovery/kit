@@ -790,7 +790,7 @@ func TestRestoreSourceShortcomings(t *testing.T) {
 	write(t, c.old, "~/Code/a", beforeIt)
 	c.copies("~/Code", 1, 1_000)
 	err := c.apply(t.Context())
-	if want := "couldn't restore ~/.local/state/newtool: Time Machine's backup of 8 Nov 2026 14:19 hasn't it: " +
+	if want := "couldn't restore ~/.local/state/newtool: not present in Time Machine's backup of 8 Nov 2026 14:19: " +
 		"kit apply --restore-from mac|time-machine|arq restores ~/.local/state/newtool from another source, or kit restore remove ~/.local/state/newtool drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v; want %q", err, want)
 	}
@@ -818,7 +818,7 @@ func TestRestoreSourceShortcomings(t *testing.T) {
 // it, as a line added after the restore settled.
 func TestRestoreAPathTheSourceHadnt(t *testing.T) {
 	quiet := check.Item{ID: "restore:~/.local/state/newtool", Name: "~/.local/state/newtool", State: "not restored",
-		Detail: "Time Machine's backup of 8 Nov 2026 14:19 hadn't it; kit apply --restore-from mac|time-machine|arq brings it from another", Quiet: "not in its source"}
+		Detail: "not present in Time Machine's backup of 8 Nov 2026 14:19; kit apply --restore-from mac|time-machine|arq brings it from another", Quiet: "not in its source"}
 	hadnt := func(t *testing.T) *restoring {
 		t.Helper()
 		c := newRestoring(t, "~/Code", "~/.local/state/newtool")
@@ -831,7 +831,7 @@ func TestRestoreAPathTheSourceHadnt(t *testing.T) {
 		if tool := rec.Paths["~/.local/state/newtool"]; tool.State != restore.NotThere || tool.From != c.src.origin || rec.Settled.IsZero() {
 			t.Fatalf("the record = %+v; want ~/.local/state/newtool not there, from the backup, settled", rec)
 		}
-		if want := "Nothing to restore in ~/.local/state/newtool: Time Machine's backup of 8 Nov 2026 14:19 hasn't it"; !slices.Contains(c.logged, want) {
+		if want := "Nothing to restore in ~/.local/state/newtool: not present in Time Machine's backup of 8 Nov 2026 14:19"; !slices.Contains(c.logged, want) {
 			t.Errorf("the log says %q, want %q", c.logged, want)
 		}
 		if res := c.step().Check(t.Context()); res.State != check.OK || res.Summary != "2 declared, 1 restored, 1 not restored" || !reflect.DeepEqual(res.Items, []check.Item{quiet}) {

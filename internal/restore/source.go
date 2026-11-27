@@ -130,6 +130,14 @@ func (o Origin) Says() string {
 	return o.Detail
 }
 
+// NotPresent says a path isn't in o: on a Mac, in a backup.
+func (o Origin) NotPresent() string {
+	if o.Kind == FromTimeMachine || o.Kind == FromArq {
+		return "not present in " + o.Says()
+	}
+	return "not present on " + o.Says()
+}
+
 // dayLayout is when a backup was taken, as kit says it, years apart as
 // backups can be.
 const dayLayout = "2 Jan 2006 15:04"

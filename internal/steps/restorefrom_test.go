@@ -127,7 +127,7 @@ func TestRestoreFromTheOldMac(t *testing.T) {
 	if rec.From != laptop || rec.Paths["~/Code"].State != restore.Done || rec.Paths["~/.zsh_history"].State != restore.Done || rec.Paths["~/Gone"].State != restore.NotThere || rec.Paths["~/Gone"].From != laptop || rec.Settled.IsZero() {
 		t.Errorf("the record = %+v; want the two restored from laptop, ~/Gone not there, settled", rec)
 	}
-	if want := "Nothing to restore in ~/Gone: laptop hasn't it"; !slices.Contains(c.logged, want) {
+	if want := "Nothing to restore in ~/Gone: not present on laptop"; !slices.Contains(c.logged, want) {
 		t.Errorf("the log says %q, want %q", c.logged, want)
 	}
 	if !slices.ContainsFunc(c.doing, func(d said) bool { return d.Says == "reaching laptop" }) {
@@ -606,11 +606,11 @@ func TestRestoreThroughArq(t *testing.T) {
 	if entries, err := os.ReadDir(filepath.Join(c.state, "restore", "arq")); err != nil || len(entries) > 0 {
 		t.Errorf("Arq's holding folders hold %v, %v; want each gone", entries, err)
 	}
-	if want := "Nothing to restore in ~/Gone: Arq's restore in ~/.local/state/kit/restore/arq hasn't it"; !slices.Contains(c.logged, want) {
+	if want := "Nothing to restore in ~/Gone: not present in Arq's restore in ~/.local/state/kit/restore/arq"; !slices.Contains(c.logged, want) {
 		t.Errorf("the log says %q, want %q", c.logged, want)
 	}
 	c.r.Flag = steps.RestoreFrom{}
-	if res := c.step().Check(t.Context()); len(res.Items) != 1 || res.Items[0].Detail != "Arq's restore in ~/.local/state/kit/restore/arq hadn't it; kit apply --restore-from mac|time-machine|arq brings it from another" {
+	if res := c.step().Check(t.Context()); len(res.Items) != 1 || res.Items[0].Detail != "not present in Arq's restore in ~/.local/state/kit/restore/arq; kit apply --restore-from mac|time-machine|arq brings it from another" {
 		t.Errorf("the check's items = %+v; want ~/Gone's, its source said from ~", res.Items)
 	}
 }
@@ -1171,7 +1171,7 @@ func TestRestoreStandInLackingAPath(t *testing.T) {
 			c.on(copyingOp, "~/Code").Does(cancel).Hangs()
 		}
 		err := c.apply(ctx)
-		if want := "couldn't restore ~/Documents: Time Machine's backup of 8 Nov 2026 14:19 hasn't it"; err == nil || !strings.Contains(err.Error(), want) {
+		if want := "couldn't restore ~/Documents: not present in Time Machine's backup of 8 Nov 2026 14:19"; err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("standing in, apply = %v; want ~/Documents failing: %q", err, want)
 		}
 		rec := c.record()
@@ -1245,7 +1245,7 @@ func TestRestoreThroughArqHasntAPartWayPath(t *testing.T) {
 	}
 	k.answer(t, "restore", "n")
 	err := ended(t, applied)
-	if want := "couldn't restore ~/Documents: Arq's restore in " + filepath.Join(c.state, "restore", "arq") + " hasn't it: " +
+	if want := "couldn't restore ~/Documents: not present in Arq's restore in " + filepath.Join(c.state, "restore", "arq") + ": " +
 		"kit apply --restore-from mac|time-machine|arq restores ~/Documents from another source, or kit restore remove ~/Documents drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v; want %q", err, want)
 	}
