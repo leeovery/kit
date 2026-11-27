@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-11-27
+
+🔧 Changed
+- Output now uses wider terminals, up to 120 columns instead of stopping at 80 — help, status, apply and log views fill the extra room; the boot screens stay at 80.
+- Long commands shown in running and failed step rows are now cut in the middle to fit the line, keeping the end (such as a package or file name) visible.
+
+🐛 Fixed
+- Truncating long commands no longer splits wide characters, so cut text stays intact.
+- The setup offer and the "nothing decided" row now fit the terminal width instead of a fixed 80 columns.
+
 ## [0.5.7] - 2026-11-27
 
 🔧 Changed
