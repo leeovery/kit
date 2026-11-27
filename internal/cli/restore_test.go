@@ -459,8 +459,8 @@ func TestRestoreComesBeforeWhatWritesIntoItsPaths(t *testing.T) {
 	}
 }
 
-// A step of the user's own placed after the restore, or before it, on a Mac that restores nothing is placed without it, and
-// runs all the same, never failing; a thing of the restore's, which has
+// A step of the user's own placed after the restore, or before it, on a Mac
+// that restores nothing is placed without it, and runs all the same, never failing; a thing of the restore's, which has
 // none, is no step.
 func TestAfterTheRestoreWithoutOne(t *testing.T) {
 	w := orderWorld(t)

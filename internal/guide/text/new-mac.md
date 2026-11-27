@@ -109,7 +109,7 @@ just named, in one of two cases:
   a Mac in set-up, whatever a listed path holds before its copy, however
   old, as a shell's history, is set aside in kit's state first, never
   deleted.
-- Projects' dependencies the backups leave out, as `node_modules` or
+- Projects' dependencies the backups leave out, such as `node_modules` or
   `vendor`, stay out: kit never installs them again. The person installs
   them when working on the project.
 
