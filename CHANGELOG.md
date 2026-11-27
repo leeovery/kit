@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-11-27
+
+🔧 Changed
+- Long rows in the run record, logs, setup and boot output now wrap in full instead of being cut at the terminal width — names, details and commands stay readable once the screen is in scrollback.
+
+🐛 Fixed
+- Wrapped lines no longer end with stray trailing spaces.
+
 ## [0.5.6] - 2026-11-27
 
 Keep chosen keys of any settings domain, Apple's included, such as the Dock's apps and folders, across Macs.
