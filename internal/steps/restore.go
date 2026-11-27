@@ -272,7 +272,7 @@ func (r Restoring) awaitingSource(path string, p restore.Path) check.Item {
 	case p.State == restore.NotThere && p.From == ownBackups:
 		it.Detail, it.Quiet = "nothing restored, as asked; "+r.bringsIt("")+" brings it", "nothing restored, as asked"
 	case p.State == restore.NotThere:
-		it.Detail, it.Quiet = p.From.Says()+" hadn't it; "+r.bringsIt(p.From.Kind)+" brings it from another", "not in its source"
+		it.Detail, it.Quiet = p.From.NotPresent()+"; "+r.bringsIt(p.From.Kind)+" brings it from another", "not in its source"
 	}
 	return it
 }
@@ -628,7 +628,7 @@ var errNotThere = errors.New("not in the source")
 // still finish it, the error naming the ways on (waysOut).
 func (r Restoring) hasntIt(ctx context.Context, j judged, from restore.Origin) error {
 	if j.Verdict == restore.VerdictResume {
-		return fmt.Errorf("couldn't restore %s: %s hasn't it: %s", j.Path, from.Says(), r.waysOut(from.Kind, []string{j.Path}))
+		return fmt.Errorf("couldn't restore %s: %s: %s", j.Path, from.NotPresent(), r.waysOut(from.Kind, []string{j.Path}))
 	}
 	return r.recordNotThere(ctx, j.Path, from)
 }
@@ -638,7 +638,7 @@ func (r Restoring) recordNotThere(ctx context.Context, path string, from restore
 	if err := r.markNotThere(path, from, false); err != nil {
 		return err
 	}
-	event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s hasn't it", path, from.Says())})
+	event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s", path, from.NotPresent())})
 	return nil
 }
 

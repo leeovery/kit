@@ -210,7 +210,7 @@ func TestStatusShowsTheDataRestore(t *testing.T) {
 			{ID: "restore:~/Documents", Name: "~/Documents", State: "missing", Detail: "2 files differed from Time Machine's backup of 8 Nov 2026 14:19, copied again; compared again next run", Action: "restore"},
 		}}},
 		{"status-restore-settled.golden", check.Result{State: check.OK, Summary: "5 declared, 3 restored, 2 not restored", Items: []check.Item{
-			{ID: "restore:~/.config/tool", Name: "~/.config/tool", State: "not restored", Detail: "Time Machine's backup of 8 Nov 2026 14:19 hadn't it; kit apply --restore-from time-machine|arq brings it from another", Quiet: "not in its source"},
+			{ID: "restore:~/.config/tool", Name: "~/.config/tool", State: "not restored", Detail: "not present in Time Machine's backup of 8 Nov 2026 14:19; kit apply --restore-from time-machine|arq brings it from another", Quiet: "not in its source"},
 			{ID: "restore:~/.local/state/newtool", Name: "~/.local/state/newtool", State: "not restored", Detail: "kit apply --restore-from time-machine|arq brings it", Quiet: "listed since the restore settled"},
 		}}},
 	} {
