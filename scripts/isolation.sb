@@ -75,8 +75,7 @@
   ;; Composer, as Homebrew installs it, and Node (so npm), as mise does.
   (regex #"/Cellar/composer/")
   (home-subpath "/.local/share/mise/installs/node")
-  ;; The package managers a restored project's dependencies reinstall
-  ;; with, as Homebrew installs them.
+  ;; Other package managers, as Homebrew installs them.
   (regex #"/Cellar/pnpm/")
   (regex #"/Cellar/yarn/")
   (regex #"/Cellar/bun/")

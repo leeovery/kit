@@ -90,10 +90,10 @@ just named, in one of two cases:
   for a Mac already in use, or one starting afresh.
 
 - When: once Homebrew's rsync is installed and, copying from the old Mac,
-  the secrets have synced. Claude Code's MCP servers and skills, the
-  reinstall, and a step declared `--after restore` wait for it; nothing
-  else does, so a step of your own that writes into a listed folder must
-  say `--after restore`. Linked files and apps' settings don't wait: the
+  the secrets have synced. Claude Code's MCP servers and skills, and a
+  step declared `--after restore` wait for it; nothing else does, so a
+  step of your own that writes into a listed folder must say
+  `--after restore`. Linked files and apps' settings don't wait: the
   copy leaves them out. It runs beside the rest, so the long copy holds up
   nothing quick. Once it's done, it leaves `kit apply` and `kit status`. A
   Mac whose `[restore]` lists nothing at the boot is done at its first
@@ -109,12 +109,9 @@ just named, in one of two cases:
   a Mac in set-up, whatever a listed path holds before its copy, however
   old, as a shell's history, is set aside in kit's state first, never
   deleted.
-- Then the reinstall: each restored project's dependencies are installed
-  again from its lockfile (Composer, npm, pnpm, Yarn, Bun, uv), in main
-  checkouts and the person's own worktrees, never agents' or submodules.
-  Yarn Berry projects are the person's to install; Go, Cargo, Swift and
-  Terraform are left alone. `kit apply reinstall` tries those that failed
-  again.
+- Projects' dependencies the backups leave out, as `node_modules` or
+  `vendor`, stay out: kit never installs them again. The person installs
+  them when working on the project.
 
 A new Mac started fresh, a Mac in use (whatever its `from`), a line added
 once the restore's done, or one restored nothing on the card, restores

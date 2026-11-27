@@ -1749,7 +1749,7 @@ refuses a line the restore would refuse, before writing anything, and copies not
   nothing listed, which settles at its first `kit apply`: set-up's window closes whatever the
   list holds, so a line added later waits for `--restore-from`, never setting aside what's
   there. Once the restore settles it leaves `kit apply` and `kit status`, no
-  row, as the reinstall does, coming back only for a path part-way or `--restore-from`. That
+  row, coming back only for a path part-way or `--restore-from`. That
   flag is an override, on any Mac: a particular backup or date, a change of source part-way, a
   line added later or one restored nothing (`time-machine` or `arq`; `mac`, the Mac in `from`,
   on a Mac that has one), and then only a path absent or holding nothing but kit's: one
@@ -1825,16 +1825,13 @@ refuses a line the restore would refuse, before writing anything, and copies not
   result; and when the restore first settled.
 - **Order.** The restore waits for Homebrew's rsync and, copying from the old Mac, the secrets;
   what writes into listed paths (Claude Code's MCP servers and skills), steps declared
-  `--after restore` and the reinstall come after it. Linked files and prefs needn't wait, as
+  `--after restore` come after it. Linked files and prefs needn't wait, as
   it never carries what's theirs. Everything else runs alongside, so the long copy blocks
   nothing quick.
-- **The reinstall** (the `reinstall` step), after the restore, the kinds that install projects'
-  tools, and the secrets: each project kit restored has its dependencies installed again from
-  its lockfile (Composer, npm, pnpm, Yarn, Bun, uv), in main checkouts and the person's own
-  worktrees beside them, never agents' (in `.claude/worktrees`, copied whole) or submodules. A
-  project whose tool isn't installed is listed, not failed; one that fails is named, and tried
-  again only when the run names the step (`kit apply reinstall`). Yarn Berry projects are the
-  person's to install; Terraform, Swift, Go and Cargo are left alone.
+- **No reinstall** (removed 27 Nov 2026). Projects' dependencies the backups exclude
+  (`node_modules`, `vendor`) stay out of the restore, and kit never installs them again: a
+  project's dependencies are needed only when the person works on it, who installs them then.
+  The reinstall's old record (`reinstall.json`, in kit's state) is never read.
 
 ## Open-source hygiene
 

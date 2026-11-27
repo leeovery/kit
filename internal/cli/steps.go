@@ -248,8 +248,8 @@ func (r *run) place(after, before []string, names map[string]bool) (ordered []st
 }
 
 // sometimes are kit's own steps a run has only on a Mac restoring its data:
-// the data restore, and the reinstall of the projects it brings back.
-var sometimes = []string{steps.RestoreName, steps.ReinstallName}
+// the data restore.
+var sometimes = []string{steps.RestoreName}
 
 // ofKinds reports whether the step called name is a kind's, or one a kind
 // needs, whether or not this run has it.

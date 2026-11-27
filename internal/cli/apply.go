@@ -52,8 +52,7 @@ whatever it was, as --restore-from time-machine does from another backup
 should the one it began from have gone. A path the source hasn't is left
 out: --restore-from brings it later from one that has it, while it's still
 absent, as it does a path left as it was, holding files of its own, once
-it's absent. The projects restored have their dependencies installed again:
-kit apply reinstall tries those that failed again.`,
+it's absent.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := a.restoring.chosen(); err != nil {
 				return err

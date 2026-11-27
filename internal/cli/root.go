@@ -167,8 +167,7 @@ type app struct {
 	// restoring are kit apply's flags naming the data restore's source;
 	// newMacRun has the run a new Mac's started from this one, as kit agent
 	// order places steps, the data restore in it wherever [restore] has
-	// lines, and the reinstall after it; named are the steps kit apply
-	// names, to apply those alone.
+	// lines; named are the steps kit apply names, to apply those alone.
 	restoring restoreFlags
 	newMacRun bool
 	named     []string
