@@ -520,13 +520,6 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 	if restoring != nil {
 		checks = append(checks, *restoring)
 	}
-	reinstalling, err := a.reinstallStep(r, dirs, restoring != nil)
-	if err != nil {
-		return nil, err
-	}
-	if reinstalling != nil {
-		checks = append(checks, *reinstalling)
-	}
 	if restoring == nil {
 		settling, err := a.settleStep(r, dirs)
 		if err != nil {

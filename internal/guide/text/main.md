@@ -205,8 +205,7 @@ another, from that Mac, reached at the local hostname kit-config records
 for it and known by the SSH host key recorded beside it (kit apply on that
 Mac records both), once the secrets have synced, else a backup of it; on a Mac
 clean-installed under its own name, from its own backups, or nothing, as
-the person says on its card. Claude Code's MCP
-servers and skills, the reinstall of restored projects' dependencies, and a
+the person says on its card. Claude Code's MCP servers and skills, and a
 step declared `--after restore` wait for it; nothing else does. A step of
 your own that writes into a listed folder must say `--after restore`.
 Linked files and apps' settings don't wait: the copy leaves them out.

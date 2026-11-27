@@ -98,16 +98,16 @@ func TestRestoreIsThereInSetUp(t *testing.T) {
 }
 
 // A Mac whose boot named it with nothing in [restore] closes set-up at its
-// first kit apply, the restore settling with nothing listed, and no
-// reinstall: so a line added later never finds set-up's window open. The
-// restore is gone from the Mac then, kit status showing none; kit apply
-// --restore-from brings it back, leaving a path holding what was written
-// since the boot as it is, never setting it aside.
+// first kit apply, the restore settling with nothing listed: so a line
+// added later never finds set-up's window open. The restore is gone from
+// the Mac then, kit status showing none; kit apply --restore-from brings
+// it back, leaving a path holding what was written since the boot as it
+// is, never setting it aside.
 func TestSetUpClosesWithNothingListed(t *testing.T) {
 	w := laptopWorld(t)
 	w.settingUp(t)
-	if got := w.statusSteps(t); !slices.Contains(got, "restore") || slices.Contains(got, "reinstall") {
-		t.Fatalf("in set-up, listing nothing, kit status has %q; want the restore, no reinstall", got)
+	if got := w.statusSteps(t); !slices.Contains(got, "restore") {
+		t.Fatalf("in set-up, listing nothing, kit status has %q; want the restore", got)
 	}
 	if out, errOut, code := w.run(t, "apply", "restore"); code != 0 || !strings.Contains(w.read(t, restoreRecord), `"settled"`) {
 		t.Fatalf("kit apply restore printed\n%s%s\nexit %d, the record %s; want it settled", out, errOut, code, w.read(t, restoreRecord))
@@ -459,22 +459,19 @@ func TestRestoreComesBeforeWhatWritesIntoItsPaths(t *testing.T) {
 	}
 }
 
-// A step of the user's own placed after the restore or the reinstall, or
-// before either, on a Mac that restores nothing is placed without it, and
+// A step of the user's own placed after the restore, or before it, on a Mac that restores nothing is placed without it, and
 // runs all the same, never failing; a thing of the restore's, which has
 // none, is no step.
 func TestAfterTheRestoreWithoutOne(t *testing.T) {
 	w := orderWorld(t)
 	w.writeSection(t, "laptop", "steps", `uses-code "uses the code" --after restore
 before-it "comes before it" --before restore
-uses-deps "uses the projects" --after reinstall
-tool-first "puts a tool in place" --before reinstall
 typo "names a thing of the restore's" --after restore:code
 `)
-	for _, name := range []string{"uses-code", "before-it", "uses-deps", "tool-first"} {
+	for _, name := range []string{"uses-code", "before-it"} {
 		doc := w.order(t, name)
-		if all := names(slices.Concat(doc.Before, doc.After, doc.Unordered, doc.Absent)); slices.Contains(all, "restore") || slices.Contains(all, "reinstall") || doc.Fails != "" {
-			t.Errorf("kit agent order %s placed it among %q, failing %q; want it placed, the restore and the reinstall nowhere", name, all, doc.Fails)
+		if all := names(slices.Concat(doc.Before, doc.After, doc.Unordered, doc.Absent)); slices.Contains(all, "restore") || doc.Fails != "" {
+			t.Errorf("kit agent order %s placed it among %q, failing %q; want it placed, the restore nowhere", name, all, doc.Fails)
 		}
 	}
 	if got := w.order(t, "typo").Fails; !strings.HasSuffix(got, ": it comes after restore:code, which isn't a step") {

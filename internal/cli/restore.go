@@ -15,10 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/kind/brew"
-	"github.com/leeovery/kit/internal/kind/devtool"
 	"github.com/leeovery/kit/internal/kind/secret"
-	"github.com/leeovery/kit/internal/reinstall"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/restore/oldmac"
 	"github.com/leeovery/kit/internal/steps"
@@ -218,40 +215,4 @@ func fetchedRecord(ctx context.Context, repo gitrepo.Repo, from string) (key, lo
 	}
 	mac, err := config.MacIn(data, from)
 	return mac.HostKey, mac.LocalHostName, err
-}
-
-// reinstallStep is the step reinstalling the dependencies of the projects
-// the restore brought back, when the Mac has one (steps.ReinstallOn),
-// restoring saying the data restore's in the run, as on a new Mac's first,
-// before anything's recorded; for kit agent order, wherever the restore
-// is. Failed installs run again when kit apply names it. It comes after
-// the restore, and the kinds that install the tools it runs and the
-// secrets private packages need (reinstallAfter).
-func (a *app) reinstallStep(r *run, dirs config.Dirs, restoring bool) (*engine.Step, error) {
-	on, err := steps.ReinstallOn(dirs.State, restoring)
-	if err != nil {
-		return nil, err
-	}
-	if !on && (!restoring || !a.newMacRun) {
-		return nil, nil
-	}
-	step := steps.Reinstall(reinstall.Reinstaller{Run: r.run, Home: r.homeDir, StateDir: dirs.State, Now: a.Now, Retry: slices.Contains(a.named, steps.ReinstallName)})
-	if restoring {
-		step.After = append(step.After, steps.RestoreName)
-	}
-	for _, name := range r.kinds {
-		if slices.Contains(reinstallAfter, name) {
-			step.After = append(step.After, name)
-		}
-	}
-	return &step, nil
-}
-
-// reinstallAfter are the kinds the reinstall comes after, those the run
-// has: the kinds that install the tools projects use, and the secrets,
-// which write what private packages need. Never the App Store's, whose
-// sign-in is by hand, nor login items.
-var reinstallAfter = []string{
-	brew.FormulaeDescriptor.Name, brew.CasksDescriptor.Name, devtool.NPMDescriptor.Name, devtool.ComposerDescriptor.Name,
-	devtool.GHDescriptor.Name, secret.Descriptor.Name,
 }

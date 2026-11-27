@@ -37,8 +37,8 @@ rsync takes one. Quote a pattern, so your shell leaves it for kit.
   `--after restore`.
 - **Nothing here is lost.** What a listed path holds already is set aside in kit's state,
   never deleted.
-- **Projects get their dependencies** from their lockfiles: Composer, npm, pnpm, Yarn, Bun or
-  uv. Yarn Berry, Go, Cargo, Swift and Terraform projects are left alone.
+- **Backup exclusions stay out.** If your backups leave out `node_modules` or `vendor`, the
+  restore does too: you install them when you next work on the project.
 - **A stopped restore carries on** at the next `kit apply`.
 
 ## Where the data comes from
@@ -100,7 +100,6 @@ it leaves out folders excluded from its backups, unless one holds a git checkout
 | `kit restore remove <path>...` | Takes paths off the list |
 | `kit apply --restore-from <src>` | Restores from `mac`, `time-machine` or `arq` |
 | `apply --at <date>` | The latest backup by that date |
-| `kit apply reinstall` | Retries the reinstalls that failed |
 
 ## Related
 
