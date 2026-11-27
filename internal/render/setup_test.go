@@ -93,13 +93,13 @@ func TestSetupScreenFitsEveryWidth(t *testing.T) {
 	done := rendertest.SetupDone(rendertest.At)
 	whole := setupFace(nil, done...)
 	whole.Finish("kit apply", "carries on now")
-	ends := rowEnds(whole.Leaves(look.Width))
+	ends := rowEnds(whole.Leaves(look.Widest))
 	for _, width := range []int{52, 73, 80, 108, 138} {
 		f := setupFace(nil, done...)
 		f.Finish("kit apply", "carries on now")
 		check := func(what string, lines []string) {
 			for _, l := range lines {
-				if w := ansi.StringWidth(l); w > min(width, look.Width) {
+				if w := ansi.StringWidth(l); w > min(width, look.Widest) {
 					t.Errorf("at %d columns, %s drew %d: %q", width, what, w, ansi.Strip(l))
 				}
 			}
@@ -112,7 +112,7 @@ func TestSetupScreenFitsEveryWidth(t *testing.T) {
 			t.Errorf("at %d columns, left\n%s\nwant what to do whole", width, text)
 		}
 		if got := rowEnds(left); !slices.Equal(got, ends) {
-			t.Errorf("at %d columns, the rows end %q; want %q, as at %d", width, got, ends, look.Width)
+			t.Errorf("at %d columns, the rows end %q; want %q, as at %d", width, got, ends, look.Widest)
 		}
 
 		asked := setupFace(func() {}, setupTill(setup.DataStep)...)

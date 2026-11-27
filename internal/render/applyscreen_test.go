@@ -1459,8 +1459,8 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 			got := screen(raw)
 			golden(t, tt.golden, got+"\n")
 			for _, l := range lines(got) {
-				if w := ansi.StringWidth(l); w > look.Width {
-					t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
+				if w := ansi.StringWidth(l); w > look.Widest {
+					t.Errorf("%q is %d columns, want at most %d", l, w, look.Widest)
 				}
 			}
 			if strings.Count(got, "█  ▄▀") != 1 {
@@ -1535,8 +1535,8 @@ func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
 		}
 	}
 	for _, l := range lines(record) {
-		if w := ansi.StringWidth(l); w > look.Width {
-			t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
+		if w := ansi.StringWidth(l); w > look.Widest {
+			t.Errorf("%q is %d columns, want at most %d", l, w, look.Widest)
 		}
 	}
 	for _, gone := range []string{"no project folder yet"} {

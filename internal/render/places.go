@@ -29,8 +29,9 @@ func (p Place) Plain() string {
 	return p.Title() + "  " + strings.Join(p.Says(), " · ")
 }
 
-// Places are places as kit's face draws them in width: a row each, by its
-// name, or its item, its store, item, file and count after it.
+// Places are places as kit's face draws them in a terminal width wide: a
+// row each, by its name, or its item, its store, item, file and count
+// after it.
 func Places(width int, places []Place) []string {
 	rows := make([]look.Row, len(places))
 	for i, p := range places {
@@ -40,7 +41,7 @@ func Places(width int, places []Place) []string {
 		}
 		rows[i] = look.Row{State: look.Done, Name: p.Title(), Says: look.Says(says...), Whole: true}
 	}
-	return look.Rows("  ", width, rows...)
+	return look.Rows("  ", look.Fit(width), rows...)
 }
 
 // Title is what a block's called: the name its header gives it, else its

@@ -201,7 +201,7 @@ func (f *SetupFace) Changes() <-chan struct{} { return f.changed }
 func (f *SetupFace) View(width, height int) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	width = min(width, look.Width)
+	width = look.Fit(width)
 	lines := fit(f.blocks(width, height, true), f.foot(width, true), height, true)
 	spin := look.Cyan(spinning[f.frame%len(spinning)])
 	for i, l := range lines {
@@ -215,7 +215,7 @@ func (f *SetupFace) Leaves(width int) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []string
-	width = min(width, look.Width)
+	width = look.Fit(width)
 	for _, b := range f.blocks(width, 0, false) {
 		out = append(out, b.lines...)
 	}

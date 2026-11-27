@@ -183,7 +183,7 @@ type Pretty struct {
 // wide: its lines go no wider than kit's look allows. It animates while
 // steps run when animate is true.
 func NewPretty(w io.Writer, width int, animate bool) *Pretty {
-	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate, now: time.Now, turning: everySpin}
+	return &Pretty{w: w, width: look.Fit(width), animate: animate, now: time.Now, turning: everySpin}
 }
 
 // everySpin are the spinner's turns, one each spinEvery.
@@ -199,7 +199,7 @@ func (p *Pretty) fit() {
 		return
 	}
 	w, _ := p.size()
-	p.width = min(max(w, 40), look.Width)
+	p.width = look.Fit(w)
 }
 
 // Clocked has the face tell the time by now, for how long a run has taken

@@ -160,7 +160,7 @@ func (t Terminal) size() (width, height int) {
 	if t.Size != nil {
 		width, height = t.Size()
 	}
-	return min(max(width, 40), look.Width), max(height, 8)
+	return look.Fit(width), max(height, 8)
 }
 
 // whole is the terminal's columns and lines, all of them, as a model taking
@@ -170,7 +170,7 @@ func (t Terminal) whole() (width, height int) {
 	if t.Size != nil {
 		width, height = t.Size()
 	}
-	return max(width, 40), max(height, 8)
+	return max(width, look.Narrowest), max(height, 8)
 }
 
 // raw puts the terminal in raw mode, when In is one, and returns what puts

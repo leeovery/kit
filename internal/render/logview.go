@@ -128,7 +128,7 @@ func duration(ms int64) string { return took(time.Duration(ms) * time.Millisecon
 // time it started, the commands it ran on the line under it, each with how
 // it ended and how long it took; then the run's summary.
 func LogRun(w io.Writer, width int, records []logs.Record) error {
-	width = min(max(width, 40), look.Width)
+	width = look.Fit(width)
 	var run logs.Record
 	var finished *logs.Record
 	results := map[string]logs.Record{}

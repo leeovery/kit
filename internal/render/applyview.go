@@ -139,7 +139,7 @@ func (p *Pretty) workRow(f event.StepFinished) look.Row {
 	did := did(f.Result.Done, p.step(f.Step), f.Result.Summary != "")
 	switch {
 	case len(did) > 0 && declaredAll.MatchString(f.Result.Summary):
-		row.Says = look.Says(did...)
+		row.Says, row.Command = look.Says(did...), ""
 	case len(did) > 0:
 		row.Says = look.Says(append(did, row.Says)...)
 	}

@@ -2,7 +2,7 @@
 // drawn from, so each rule lives in one place.
 //
 // The rules, in brief:
-//   - content starts at column 3, and no line passes Width;
+//   - content starts at column 3, and no line passes Widest;
 //   - a row is its mark, a space, its name, two spaces, then what it says,
 //     extras after a dim " · ": nothing padded into columns, nothing pushed
 //     to an edge;
@@ -28,14 +28,21 @@ import (
 	"image/color"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Width is the widest a line goes, however wide the terminal: a narrower
-// one narrows it.
-const Width = 120
+// Widest is the widest a line goes, however wide the terminal.
+const Widest = 120
+
+// Narrowest is the narrowest kit draws, however narrow the terminal.
+const Narrowest = 40
+
+// Fit is how wide kit draws in a terminal w columns wide: as wide, but
+// never past Widest nor under Narrowest.
+func Fit(w int) int { return min(max(w, Narrowest), Widest) }
 
 // Unmeasured is how wide kit draws where it can't tell a terminal's width,
 // as in a pipe or a test.
@@ -763,16 +770,37 @@ func Ran(command string, exit int, took string, w int) string {
 }
 
 // Squeeze is s on one line (OneLine), cut to n cells in the middle,
-// keeping its start and its end.
+// keeping its start and its end: its last word whole, where that fits
+// beside a cell of its start, as a command's package or a path's file.
 func Squeeze(s string, n int) string {
 	s = OneLine(s)
-	r := []rune(s)
-	if len(r) <= n || n < 2 {
+	width := ansi.StringWidth(s)
+	if width <= n || n < 2 {
 		return s
 	}
-	head := n * 2 / 5
-	return string(r[:head]) + "…" + string(r[len(r)-(n-head-1):])
+	tail := n - n*2/5 - 1
+	if last := ansi.StringWidth(lastWord(s)); last > tail && last <= n-2 {
+		tail = last
+	}
+	return ansi.Truncate(s, n-1-tail, "") + "…" + ending(s, tail)
 }
+
+// ending is the end of s, at most n cells: a wide character the cut would
+// split left out, as ansi.TruncateLeft keeps it whole.
+func ending(s string, n int) string {
+	i := len(s)
+	for i > 0 {
+		_, size := utf8.DecodeLastRuneInString(s[:i])
+		if ansi.StringWidth(s[i-size:]) > n {
+			break
+		}
+		i -= size
+	}
+	return s[i:]
+}
+
+// lastWord is what follows the last space or slash in s.
+func lastWord(s string) string { return s[strings.LastIndexAny(s, " /")+1:] }
 
 // OneLine is s on one line, each run of white space in it, line breaks
 // and all, a space: a command, or what one said, shown in a row or a rule,

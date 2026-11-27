@@ -303,8 +303,8 @@ func TestPrettyStatusWrapsDetails(t *testing.T) {
 		}
 	}
 	for l := range strings.Lines(out.String()) {
-		if w := ansi.StringWidth(strings.TrimSuffix(l, "\n")); w > look.Width {
-			t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
+		if w := ansi.StringWidth(strings.TrimSuffix(l, "\n")); w > look.Widest {
+			t.Errorf("%q is %d columns, want at most %d", l, w, look.Widest)
 		}
 	}
 }
@@ -689,8 +689,8 @@ func TestPrettyRunningRowCutsItsCommandInTheMiddle(t *testing.T) {
 			face.Turn()
 			got := turned(screen(out.String()))
 			row := strings.Split(got, "\n")[1]
-			if !strings.HasSuffix(row, "-connect") || ansi.StringWidth(row) > min(c.width, look.Width) {
-				t.Errorf("at %d columns the row is %q: want it no wider than %d, ending as the command ends", c.width, row, min(c.width, look.Width))
+			if !strings.HasSuffix(row, "-connect") || ansi.StringWidth(row) > min(c.width, look.Widest) {
+				t.Errorf("at %d columns the row is %q: want it no wider than %d, ending as the command ends", c.width, row, min(c.width, look.Widest))
 			}
 			golden(t, c.name, got)
 			face.Emit(event.StepFinished{Step: "jump-desktop-connect", Result: check.Result{State: check.OK, Summary: "added"}})
@@ -1065,12 +1065,29 @@ func TestPrettyStatusUpToItsWidth(t *testing.T) {
 			var out bytes.Buffer
 			show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, c.width, false), events)
 			for l := range strings.Lines(out.String()) {
-				if w := ansi.StringWidth(strings.TrimSuffix(l, "\n")); strings.Contains(l, "…") || w > look.Width {
-					t.Errorf("printed %q at %d columns: want it no wider than %d, never cut", l, c.width, look.Width)
+				if w := ansi.StringWidth(strings.TrimSuffix(l, "\n")); strings.Contains(l, "…") || w > look.Widest {
+					t.Errorf("printed %q at %d columns: want it no wider than %d, never cut", l, c.width, look.Widest)
 				}
 			}
 			golden(t, c.name, out.String())
 		})
+	}
+}
+
+// Secrets' places take the terminal's width, up to kit's: wider than that,
+// a block too long for a line wraps at kit's width.
+func TestPlacesUpToItsWidth(t *testing.T) {
+	places := []render.Place{{Name: "tokens", Store: "1Password", Item: "op://vault/A Very Long Item Name For Every Token Kit Reads On This Mac", Scope: "shared", File: "shared/declarations", Secrets: 12, Sections: []string{"Deploy", "Registry", "Search", "Telemetry"}}}
+	for _, width := range []int{60, 200} {
+		lines := render.Places(width, places)
+		if len(lines) < 2 {
+			t.Errorf("at %d columns, Places drew %q: want it wrapped", width, lines)
+		}
+		for _, l := range lines {
+			if n := ansi.StringWidth(l); n > min(width, look.Widest) {
+				t.Errorf("at %d columns, Places drew %q, %d wide", width, ansi.Strip(l), n)
+			}
+		}
 	}
 }
 

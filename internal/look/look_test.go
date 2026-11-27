@@ -29,7 +29,7 @@ func same(t *testing.T, got []string, want ...string) {
 // after dots; what belongs to it goes under its name, on a timeline's line
 // when it has one.
 func TestRowsAndTimelines(t *testing.T) {
-	same(t, look.Rows("  ", look.Width,
+	same(t, look.Rows("  ", look.Widest,
 		look.Row{State: look.Done, Name: "jq", Says: look.Says(look.Muted("installed 1.8.1"), look.Muted("declared in laptop"))},
 		look.Row{State: look.NeedsYou, Name: "ffmpeg", Says: look.Yellow("installed, not declared"), Under: []string{look.Todo(look.Cmd("kit reconcile"))}},
 		look.Row{State: look.Skipped, Name: "kit-config", Says: look.Muted("skipped")},
@@ -39,7 +39,7 @@ func TestRowsAndTimelines(t *testing.T) {
 		"    → kit reconcile",
 		"  – kit-config  skipped",
 	)
-	same(t, look.Timeline("  ", look.Width,
+	same(t, look.Timeline("  ", look.Widest,
 		look.Row{State: look.Running, Name: "jq", Says: look.Says(look.Cyan("installing"), look.Dim("brew install --formula jq")), Under: look.Output("==> Pouring jq", "✔ jq")},
 		look.Row{State: look.Queued, Name: "kit-config", Says: look.Muted("waiting")},
 	),
@@ -408,7 +408,7 @@ func TestHead(t *testing.T) {
 }
 
 func TestBlocksAndSummaries(t *testing.T) {
-	same(t, look.Block("Mac", look.Width, look.Row{State: look.Done, Name: "Disk", Says: look.Muted("48% free")}),
+	same(t, look.Block("Mac", look.Widest, look.Row{State: look.Done, Name: "Disk", Says: look.Muted("48% free")}),
 		"  MAC",
 		"  ● Disk  48% free",
 	)
@@ -564,7 +564,7 @@ func TestRanOnOneLine(t *testing.T) {
 // running, the Mac and when beside it.
 func TestBootRows(t *testing.T) {
 	b := look.NewBoot(true)
-	same(t, b.Rows(look.Width,
+	same(t, b.Rows(look.Widest,
 		look.Row{State: look.Done, Name: "GitHub", Says: b.Says(b.Mid("someone"), b.Mid("kit-config has laptop and studio"))},
 		look.Row{State: look.NeedsYou, Name: "This Mac", Says: b.Words(look.NeedsYou, "which of your Macs is this?"), Under: b.Answers([]look.Choice{{Label: "laptop"}, {Label: "studio"}, {Label: "new", Does: "a Mac kit-config doesn't have yet"}}, 0)},
 		look.Row{State: look.Running, Name: "Homebrew", Says: b.Says(b.Words(look.Running, "installing"), b.Mid("2m14s")), Under: b.Output("==> Installing Command Line Tools")},
@@ -703,7 +703,7 @@ func TestARowsCommandIsCutInTheMiddle(t *testing.T) {
 		want []string
 	}{
 		{"fits", running, 120, []string{"  ◐ jump-desktop-connect  adding · " + command}},
-		{"too long", running, 60, []string{"  ◐ jump-desktop-connect  adding · brew insta…esktop-connect"}},
+		{"too long", running, 60, []string{"  ◐ jump-desktop-connect  adding · brew…jump-desktop-connect"}},
 		{"saying nothing else", look.Row{State: look.Running, Name: "jump-desktop-connect", Command: command}, 60, []string{"  ◐ jump-desktop-connect  brew install …jump-desktop-connect"}},
 		{"keeping how far", look.Row{State: look.Running, Name: "jump-desktop-connect", Says: look.Cyan("adding"), Command: command, Kept: "2 of 3"}, 60, []string{"  ◐ jump-desktop-connect  adding · brew i…p-connect · 2 of 3"}},
 		{"whole", look.Row{State: look.Failed, Name: "jump-desktop-connect", Says: look.Red("couldn't add"), Command: command, Whole: true}, 60, []string{"  ✗ jump-desktop-connect", "    couldn't add · brew install --cask --adopt", "    jump-desktop-connect"}},
@@ -717,5 +717,27 @@ func TestARowsCommandIsCutInTheMiddle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Squeeze cuts in the middle, measuring in cells, so a wide character
+// never pushes the end past the room; the last word stays whole where it
+// fits beside a cell of the start.
+func TestSqueeze(t *testing.T) {
+	for _, tt := range []struct {
+		s    string
+		n    int
+		want string
+	}{
+		{"brew install jq", 20, "brew install jq"},
+		{"brew install --cask --adopt jump-desktop-connect", 30, "brew inst…jump-desktop-connect"},
+		{"brew install --cask --adopt jump-desktop-connect", 15, "brew i…-connect"},
+		{"cp ~/写真/休暇/海辺の写真.jpg", 20, "cp ~/…海辺の写真.jpg"},
+		{"cp ~/写真/休暇/海辺の写真.jpg", 12, "cp ~…真.jpg"},
+	} {
+		got := look.Squeeze(tt.s, tt.n)
+		if got != tt.want || ansi.StringWidth(got) > tt.n {
+			t.Errorf("Squeeze(%q, %d) = %q (%d cells), want %q, at most %d cells", tt.s, tt.n, got, ansi.StringWidth(got), tt.want, tt.n)
+		}
 	}
 }
