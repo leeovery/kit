@@ -238,7 +238,7 @@ func named(r Row) string {
 // lines under it, wrapped too, then what belongs to it, as Timeline draws
 // it.
 func Stacked(indent string, w int, r Row) []string {
-	r = r.unbroken()
+	r = r.unbroken().kept()
 	under := indent + Dim("│") + " "
 	out := stack(indent, under, w, r)
 	for _, u := range r.Under {
@@ -250,18 +250,24 @@ func Stacked(indent string, w int, r Row) []string {
 // whole is r's line after indent, w wide, never cut: on one line, what it
 // keeps and all, when it fits; else stacked.
 func whole(indent, under string, w int, r Row) []string {
-	if r.Kept != "" {
-		r.Says, r.Kept = Says(r.Says, r.Kept), ""
-	}
+	r = r.kept()
 	if l := line(indent, r); ansi.StringWidth(l) <= w {
 		return []string{l}
 	}
 	return stack(indent, under, w, r)
 }
 
+// kept is r with what it keeps said after what it says, as a row drawn
+// whole says it.
+func (r Row) kept() Row {
+	if r.Kept != "" {
+		r.Says, r.Kept = Says(r.Says, r.Kept), ""
+	}
+	return r
+}
+
 // stack is r's line stacked after indent, w wide: its mark and its name,
-// wrapped, then what it says, and what it keeps, wrapped on the lines
-// after under.
+// wrapped, then what it says wrapped on the lines after under.
 func stack(indent, under string, w int, r Row) []string {
 	head := indent + Mark(r.State) + " "
 	room := w - ansi.StringWidth(head)
@@ -273,12 +279,8 @@ func stack(indent, under string, w int, r Row) []string {
 			out = append(out, under+l)
 		}
 	}
-	says := r.Says
-	if r.Kept != "" {
-		says = Says(says, r.Kept)
-	}
-	if says != "" {
-		for _, l := range wrap(says, room, "") {
+	if r.Says != "" {
+		for _, l := range wrap(r.Says, room, "") {
 			out = append(out, under+l)
 		}
 	}

@@ -166,6 +166,7 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 	for _, c := range commands[""] {
 		head.Under = append(head.Under, ran(c, width-4)...)
 	}
+	head.Under = look.Fold("  ", width, head.Under...)
 	out := append([]string{""}, look.Rows("  ", width, head)...)
 	out = append(out, "")
 	for _, s := range run.Steps {

@@ -366,14 +366,14 @@ func (f *SetupFace) stepRow(s event.Step, width, height int, live bool) look.Row
 	r := f.rows[s.Name]
 	if s.Name == setup.ConfigStep {
 		if c := f.rows[setup.CommitStep]; c != nil && (c.running || f.reached(c.finished)) && r != nil && r.finished != nil {
-			return f.committed(s.Title, *r.finished, c, width)
+			return leftWhole(f.committed(s.Title, *r.finished, c, width), live)
 		}
 	}
 	switch {
 	case f.q != nil && f.q.step == s.Name && f.q.kind != picking:
 		return f.asking(s.Title, width, height)
 	case r != nil && r.finished != nil:
-		return f.ended(s.Title, *r.finished, width)
+		return leftWhole(f.ended(s.Title, *r.finished, width), live)
 	case r != nil && r.running:
 		row := look.Row{State: look.Running, Name: s.Title, Says: look.Words(look.Running, cmp.Or(r.doing, "working"))}
 		if live && r.code != nil {
@@ -385,6 +385,13 @@ func (f *SetupFace) stepRow(s event.Step, width, height int, live bool) look.Row
 		return look.Row{State: look.Running, Name: s.Title, Says: look.Words(look.Running, f.parts[i].Doing)}
 	}
 	return look.Row{State: look.Queued, Name: s.Title}
+}
+
+// leftWhole is an ended step's row, never cut once the screen's left in the
+// scrollback, as the record; live, cut, as a glance.
+func leftWhole(row look.Row, live bool) look.Row {
+	row.Whole = row.Whole || !live
+	return row
 }
 
 // reached reports whether a step ended as it ran to its end: done, needing

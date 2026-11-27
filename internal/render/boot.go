@@ -529,7 +529,7 @@ func (f *BootFace) stepRow(s event.Step, b look.Boot, live bool) look.Row {
 		if row.State == look.Done && r.took >= 10*time.Second && !r.asked {
 			row.Says = b.Says(row.Says, b.Mid(clock(r.took)))
 		}
-		return row
+		return leftWhole(row, live)
 	case r != nil && r.running:
 		says := []string{b.Words(look.Running, cmp.Or(r.doing, "working"))}
 		if took := f.now().Sub(r.began); took >= 10*time.Second {

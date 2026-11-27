@@ -1,5 +1,8 @@
 
   ✗ kit apply  Fri 2 Jan 03:04
+    git pull · exit 1 · 0.9s
+    fatal: unable to access the remote, as the network it was reached over has
+    gone away
 
   03:04:05  ● Homebrew  /opt/homebrew
             │ brew --prefix · exit 0 · 0.1s

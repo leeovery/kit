@@ -90,7 +90,8 @@ func TestLogRunKeepsASummarysParts(t *testing.T) {
 
 // At a terminal, a run's log is a timeline: the run as a row, then each
 // step after the time it started, what it ran on the line under it, each
-// command on one line, and what one that failed said, without the command.
+// command on one line, and what one that failed said, without the command,
+// wrapped, the run's own commands' as each step's.
 // A step that failed says what went wrong, and why under it, wrapped, unless a
 // command it ran said the same.
 func TestLogRun(t *testing.T) {
@@ -105,6 +106,7 @@ func TestLogRun(t *testing.T) {
 			{Name: "homebrew", Title: "Homebrew"}, {Name: "remote-session", Title: "remote-session"}, {Name: "gpg-key", Title: "gpg-key"},
 			{Name: "login-item", Title: "macOS login items"}, {Name: "fonts", Title: "fonts"},
 		}},
+		{Time: at, Event: "command", Command: "git pull", Exit: new(1), DurationMS: 900, Error: "git pull exited 1: fatal: unable to access the remote, as the network it was reached over has gone away"},
 		{Time: at, Event: "step_started", Step: "homebrew"},
 		{Time: at, Event: "command", Step: "homebrew", Command: "brew --prefix", Exit: new(0), DurationMS: 110},
 		{Time: at, Event: "step_finished", Step: "homebrew", Result: &ok, DurationMS: 120},

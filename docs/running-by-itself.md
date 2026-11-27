@@ -73,7 +73,7 @@ every `kit status` and every hourly run. kit runs it once when you add it:
 kit check add db -- pg_isready -h 127.0.0.1
 ```
 
-<img src="../art/running-by-itself-check.webp" alt="kit check add db at a terminal: declared in laptop, and failing now, with what the check printed" width="534">
+<img src="../art/running-by-itself-check.webp" alt="kit check add db at a terminal: declared in laptop, and failing now, with what the check printed" width="540">
 
 If a check fails, the first line it prints is what `kit status` shows. A check must change
 nothing, and finish within a minute.

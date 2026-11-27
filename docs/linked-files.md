@@ -79,7 +79,7 @@ the one in kit-config: `kit apply` leaves it alone.
 kit reconcile file:~/.zshrc --revert
 ```
 
-<img src="../art/linked-files-revert.webp" alt="kit reconcile --revert at its end: kit-config's file linked back, the Mac's copy in the Bin, 1 settled" width="573">
+<img src="../art/linked-files-revert.webp" alt="kit reconcile --revert at its end: kit-config's file linked back, the Mac's copy in the Bin, 1 settled" width="553">
 
 If the copy on this Mac is the one to keep, `--adopt` takes it into kit-config and links it.
 Then kit commits and pushes kit-config.
