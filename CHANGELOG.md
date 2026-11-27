@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-27
+
+💥 Breaking
+- The dependency reinstall step after a restore is gone, along with `kit apply reinstall` — restored projects' dependencies are no longer installed again, so run your package manager in each project yourself.
+
+🔧 Changed
+- Messages for a path missing from a restore source now read "not present on/in" the source instead of "hadn't it" or "hasn't it".
+
 ## [0.5.8] - 2026-11-27
 
 🔧 Changed
