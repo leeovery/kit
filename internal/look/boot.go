@@ -2,9 +2,11 @@ package look
 
 import (
 	"image/color"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"rsc.io/qr"
 )
 
@@ -108,7 +110,9 @@ func (b Boot) Words(s State, text string) string {
 const BootUnder = "         "
 
 // Rows are a boot log's lines: each its tag, its name, two spaces, what it
-// says; what belongs to it under its name. Every line is cut at w.
+// says; what belongs to it under its name. Every line is cut at w, but a
+// whole row's: too long for its line, its name goes on its own, and what it
+// says, and what's under it, wrapped under the name.
 func (b Boot) Rows(w int, rs ...Row) []string {
 	var out []string
 	for _, r := range rs {
@@ -116,13 +120,26 @@ func (b Boot) Rows(w int, rs ...Row) []string {
 		if r.State == Queued || r.State == Skipped {
 			name = b.Full(r.Name)
 		}
-		l := "  " + b.Tag(r.State) + " " + name
+		head := "  " + b.Tag(r.State) + " "
+		l := head + name
 		if r.Says != "" {
 			l += "  " + r.Says
 		}
-		out = append(out, Cut(l, w))
-		for _, u := range r.Under {
-			out = append(out, Cut(BootUnder+u, w))
+		if !r.Whole || ansi.StringWidth(l) <= w {
+			out = append(out, Cut(l, w))
+			for _, u := range r.Under {
+				out = append(out, Cut(BootUnder+u, w))
+			}
+			continue
+		}
+		room := w - len(BootUnder)
+		lines := wrap(name, room, "")
+		if r.Says != "" {
+			lines = append(lines, wrap(r.Says, room, "")...)
+		}
+		out = append(out, head+lines[0])
+		for _, part := range slices.Concat(lines[1:], Fold(BootUnder[2:], w, r.Under...)) {
+			out = append(out, BootUnder+part)
 		}
 	}
 	return out

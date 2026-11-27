@@ -2,6 +2,7 @@ package capture
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -45,7 +46,7 @@ var docs = []Fixture{
 		Shows: "carries on now", at: docsAt, draw: setupDone},
 	result("linked-files-add", "kit file add: the file moved into kit-config and linked back", "file add ~/.config/tool/conf",
 		said{"~/.config/tool/conf", []string{"in kit-config, linked: laptop/home/.config/tool/conf"}}, committed("laptop/home/.config/tool/conf")),
-	{Name: "linked-files-revert", About: "kit reconcile --revert: kit-config's file linked back, the Mac's in the Bin", Width: 82, Height: 10,
+	{Name: "linked-files-revert", About: "kit reconcile --revert: kit-config's file linked back, the Mac's in the Bin", Width: 79, Height: 11,
 		Shows: "1 settled", at: docsAt, draw: onFace(func(at time.Time) []event.Event {
 			return reconciled(at, 400*time.Millisecond,
 				said{"file:~/.zshrc", []string{"linked to kit-config's", "the Mac's copy is in the Bin (~/.Trash/.zshrc)"}}, said{"kit-config", []string{"nothing changed"}})
@@ -92,15 +93,33 @@ type said struct {
 func committed(what string) said { return said{"kit-config", []string{"committed and pushed " + what}} }
 
 // result is the still name of what kit command prints at a terminal once
-// done, a line a step, kit-config's last: as wide as its longest.
+// done, a row a step, kit-config's last: a window as small as what kit's
+// face draws of it, as fit sizes it.
 func result(name, about, command string, steps ...said) Fixture {
-	width := 0
-	for _, s := range steps {
-		width = max(width, ansi.StringWidth(s.step+strings.Join(s.says, "; "))+12)
-	}
-	return Fixture{Name: name, About: about, Width: min(width, look.Width+2), Height: len(steps) + 2, Shows: "kit-config",
-		at: docsAt, draw: onFace(func(at time.Time) []event.Event { return changeRun(at, command, steps) })}
+	run := func(at time.Time) []event.Event { return changeRun(at, command, steps) }
+	width, height := fit(run(docsAt))
+	return Fixture{Name: name, About: about, Width: width, Height: height, Shows: "kit-config", at: docsAt, draw: onFace(run), fitted: true}
 }
+
+// fit is the window events are drawn in on kit's face, as small as what
+// the face draws at kit's widest: a few columns wider than its widest line,
+// no wider than kit's width and a column either side, and as high, the
+// line its cursor ends on too.
+func fit(events []event.Event) (width, height int) {
+	var out bytes.Buffer
+	if err := draw(&out, func() (int, int) { return look.Width, 0 }, events); err != nil {
+		panic(fmt.Errorf("draw a still's run: %w", err))
+	}
+	lines := strings.Split(strings.TrimSuffix(ansi.Strip(out.String()), "\n"), "\n")
+	for _, l := range lines {
+		width = max(width, ansi.StringWidth(strings.TrimRight(l, " ")))
+	}
+	return min(width+stillMargin, look.Width+2), len(lines) + 1
+}
+
+// stillMargin is how many columns a docs still's window has past its
+// widest line.
+const stillMargin = 6
 
 // changeRun is a command's run that changes things a name at a time, as
 // kit runs one: a step for each name, then kit-config's, committing and

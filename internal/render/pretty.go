@@ -480,13 +480,13 @@ func worse(a, b look.State) bool {
 	return rank[a] > rank[b]
 }
 
-// row is a step's row, as resultRow has it: a run of changes with nothing
-// to commit skips that step; a step that applying did something about says
-// it was applied.
+// row is a step's row in the record, never cut, as resultRow has it: a run
+// of changes with nothing to commit skips that step; a step that applying
+// did something about says it was applied.
 func (p *Pretty) row(f event.StepFinished) look.Row {
 	r := f.Result
 	row := resultRow(p.title(f.Step), r, p.step(f.Step), p.start.Time)
-	row.Under = look.Fold("  ", p.width, row.Under...)
+	row.Whole, row.Under = true, look.Fold("  ", p.width, row.Under...)
 	if out := p.output[f.Step]; r.State == check.Failed && len(out) > 0 {
 		var printed failing
 		row.Says, printed = p.printedFailing(f, len(out))
@@ -600,7 +600,7 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 		case PartConfig:
 			repo = append(repo, look.Muted(cmp.Or(r.Glance, strings.TrimPrefix(r.Summary, "all "))))
 			if n := r.Counts[steps.BroughtIn]; n > 0 {
-				aside = append(aside, look.Row{State: look.Done, Name: "the remote's commits brought in", Says: look.Muted(fmt.Sprintf("%d %s", n, look.Plural(n, "commit", "commits")))})
+				aside = append(aside, look.Row{State: look.Done, Name: "the remote's commits brought in", Says: look.Muted(fmt.Sprintf("%d %s", n, look.Plural(n, "commit", "commits"))), Whole: true})
 			}
 			if r.State == check.Attention {
 				repoState = look.NeedsYou
@@ -628,10 +628,10 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 				says = append(says, look.Dim(fmt.Sprintf("%d %s", n, quietWords[reason])))
 			}
 		}
-		rows = append(rows, look.Row{State: look.Done, Name: ru.part, Says: look.Says(says...)})
+		rows = append(rows, look.Row{State: look.Done, Name: ru.part, Says: look.Says(says...), Whole: true})
 	}
 	if len(repo) > 0 {
-		rows = append(rows, look.Row{State: repoState, Name: PartConfig, Says: look.Says(repo...)})
+		rows = append(rows, look.Row{State: repoState, Name: PartConfig, Says: look.Says(repo...), Whole: true})
 	}
 	return append(rows, aside...)
 }

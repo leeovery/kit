@@ -1,3 +1,5 @@
 
-  ● tool  declared in laptop · its script, laptop/steps/tool/run, is a template…
+  ● tool
+  │ declared in laptop · its script, laptop/steps/tool/run, is a template: write
+  │ its check and apply
   ● kit-config  committed and pushed laptop/declarations, laptop/steps/tool/run

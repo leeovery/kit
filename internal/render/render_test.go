@@ -544,6 +544,42 @@ func TestPrettyTimeline(t *testing.T) {
 	}
 }
 
+// A row in the record is never cut: too long for the line, its name goes on
+// a line of its own, wrapped at a / or a space when it's longer still, and
+// what it says under it, wrapped, as the terminal narrows; plain prints
+// each whole on one line, whatever the width.
+func TestPrettyRecordWrapsWhatARowSays(t *testing.T) {
+	for _, c := range []struct {
+		name, path string
+		width      int
+	}{
+		{"pretty-record-wraps-80.golden", "~/Library/Application Support/Google/Chrome", 80},
+		{"pretty-record-wraps-52.golden", "~/Library/Application Support/Google/Chrome", 52},
+		{"pretty-record-wraps-long-name.golden", "~/Library/Application Support/Some Long App Name/Default/Service Worker", 52},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			events := []event.Event{
+				event.RunStarted{Command: "backup-exclusion remove", Machine: "laptop", Steps: []event.Step{{Name: c.path, Title: c.path}, {Name: "kit-config", Title: "kit-config"}}},
+				event.StepFinished{Step: c.path, Result: check.Result{State: check.OK}.Saying("no longer excluded", "out of shared/declarations and laptop/declarations")},
+				event.StepFinished{Step: "kit-config", Result: check.Result{State: check.OK}.Saying("committed and pushed shared/declarations, laptop/declarations")},
+				event.RunFinished{Counts: map[check.State]int{check.OK: 2}},
+			}
+			var plain, pretty bytes.Buffer
+			show(t, render.NewPlain(&plain), events)
+			show(t, render.NewPretty(&colorprofile.Writer{Forward: &pretty, Profile: colorprofile.NoTTY}, c.width, false), events)
+			for l := range strings.SplitSeq(pretty.String(), "\n") {
+				if strings.Contains(l, "…") || ansi.StringWidth(l) > c.width {
+					t.Errorf("printed %q at %d columns: want it wrapped, never cut", l, c.width)
+				}
+			}
+			if want := c.path + " ok no longer excluded; out of shared/declarations and laptop/declarations\n"; !strings.Contains(plain.String(), want) {
+				t.Errorf("plain printed\n%s\nwant the row whole on a line:\n%s", plain.String(), want)
+			}
+			golden(t, c.name, pretty.String())
+		})
+	}
+}
+
 // Reconciling looks at the whole Mac: the wordmark, its things on a
 // timeline, then how many were settled; run for steps named, a command is
 // aimed at those, without the wordmark.

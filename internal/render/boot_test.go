@@ -314,6 +314,27 @@ func TestBootFaceFits(t *testing.T) {
 	}
 }
 
+// A row done is a glance on the live screen, cut; in what the boot leaves
+// in the scrollback, its record, wrapped, never cut.
+func TestBootFaceLeavesRowsWhole(t *testing.T) {
+	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
+	f.Show(bootSteps)
+	said := "someone · kit-config has laptop, studio and the Mac in the next room"
+	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.OK, Summary: said}})
+	if text := plainView(f, 40); !strings.Contains(text, "…") {
+		t.Errorf("live, drew\n%s\nwant the row cut", text)
+	}
+	var left []string
+	for _, l := range f.Leaves(52) {
+		left = append(left, ansi.Strip(l))
+	}
+	text := strings.Join(left, "\n")
+	if strings.Contains(text, "…") || !strings.Contains(strings.Join(strings.Fields(text), " "), said) {
+		t.Errorf("left\n%s\nwant %q whole", text, said)
+	}
+}
+
 // A step failing with a reason of several lines, as a program's standard
 // error, draws as a line a row all the same, as the screen counts them.
 func TestBootFaceRowsNeverBreak(t *testing.T) {

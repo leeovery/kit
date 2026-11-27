@@ -51,8 +51,12 @@ func TestFixtures(t *testing.T) {
 			if widest := widestLine(got); f.Held() && !f.Whole() && (widest > f.Width-2 || widest < f.Width-6) {
 				t.Errorf("drew %d columns in a window %d wide: want it a column or two wider than what it draws", widest, f.Width)
 			}
-			if lines := strings.Count(got, "\n") + 1; f.Held() && lines > f.Height {
+			lines := strings.Count(got, "\n") + 1
+			if f.Held() && lines > f.Height {
 				t.Errorf("drew %d lines in a window %d high: its head scrolls away", lines, f.Height)
+			}
+			if f.Fitted() && lines != f.Height {
+				t.Errorf("drew %d lines in a window %d high: want it as high as what it draws, the line its cursor ends on too", lines, f.Height)
 			}
 			if f.Held() && (!plainWords.MatchString(f.Shows) || !strings.Contains(got, f.Shows)) {
 				t.Errorf("shows %q: want words its screen shows, with nothing a tape's Wait+Screen reads as a pattern", f.Shows)

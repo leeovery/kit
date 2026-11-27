@@ -66,14 +66,20 @@ func viewed(f *render.SetupFace, width, height int) string {
 	return ansi.Strip(strings.Join(f.View(width, height), "\n"))
 }
 
-// rowEnds are the last words of each row in lines, a row a line its mark
-// starts.
+// rowEnds are the last words of each row in lines: a line its mark starts,
+// and those on its timeline after it, as a row wraps.
 func rowEnds(lines []string) []string {
 	var out []string
+	row := false
 	for _, l := range lines {
 		words := strings.Fields(ansi.Strip(l))
-		if len(words) > 1 && slices.Contains([]string{"●", "▲", "✗", "–", "○"}, words[0]) {
-			out = append(out, words[len(words)-1])
+		switch {
+		case len(words) > 1 && slices.Contains([]string{"●", "▲", "✗", "–", "○"}, words[0]):
+			out, row = append(out, words[len(words)-1]), true
+		case row && len(words) > 1 && words[0] == "│":
+			out[len(out)-1] = words[len(words)-1]
+		default:
+			row = false
 		}
 	}
 	return out

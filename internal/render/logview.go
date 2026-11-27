@@ -162,10 +162,11 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 	case worse(counted(finished.Counts), worst):
 		worst = counted(finished.Counts)
 	}
-	head := look.Row{State: worst, Name: strings.Join(slices.Concat([]string{"kit"}, strings.Fields(run.Command), run.Only), " "), Says: look.Muted(run.Time.Format("Mon 2 Jan 15:04"))}
+	head := look.Row{State: worst, Name: strings.Join(slices.Concat([]string{"kit"}, strings.Fields(run.Command), run.Only), " "), Says: look.Muted(run.Time.Format("Mon 2 Jan 15:04")), Whole: true}
 	for _, c := range commands[""] {
 		head.Under = append(head.Under, ran(c, width-4)...)
 	}
+	head.Under = look.Fold("  ", width, head.Under...)
 	out := append([]string{""}, look.Rows("  ", width, head)...)
 	out = append(out, "")
 	for _, s := range run.Steps {
@@ -176,6 +177,7 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 			row = resultRow(row.Name, *r.Result, s, run.Time)
 			why = len(whyFailed(*r.Result))
 		}
+		row.Whole = true
 		var under []string
 		for _, c := range commands[s.Name] {
 			under = append(under, ran(c, width-logGutter-2)...)
@@ -186,7 +188,7 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 		if why > 0 && slices.Contains(under, row.Under[0]) {
 			lead = nil
 		}
-		row.Under = slices.Concat(lead, under, row.Under[why:])
+		row.Under = look.Fold("", width-logGutter, slices.Concat(lead, under, row.Under[why:])...)
 		at := started[s.Name]
 		if at.IsZero() {
 			at = r.Time

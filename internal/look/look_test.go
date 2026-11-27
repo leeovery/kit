@@ -62,7 +62,6 @@ func TestRowsAreCut(t *testing.T) {
 	}
 }
 
-// A whole row is never cut: one that fits is as it is; one too long for
 // A row's line is one line however what it says breaks, as an error
 // joined from several, or a program's standard error, does: whole or cut,
 // on a timeline or stacked, the breaks spaces. A screen drawn in place
@@ -79,9 +78,10 @@ func TestRowsNeverBreak(t *testing.T) {
 	}
 }
 
-// its line has its name on its own line, wrapped, and what it says, with
-// what it keeps, wrapped under it, on a timeline's line in a timeline;
-// what belongs to it goes under that.
+// A whole row is never cut: one that fits is as it is, what it keeps and
+// all; one too long for its line has its name on its own line, wrapped,
+// and what it says, with what it keeps, wrapped under it, on a timeline's
+// line in a timeline; what belongs to it goes under that.
 func TestWholeRowsWrap(t *testing.T) {
 	names := look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep", Says: look.Yellow("need an administrator's password"), Whole: true}
 	same(t, look.Rows("  ", 90, names), "  ▲ charger:hibernatemode, charger:networkoversleep  need an administrator's password")
@@ -102,6 +102,8 @@ func TestWholeRowsWrap(t *testing.T) {
 			t.Errorf("%q is %d wide", ansi.Strip(l), w)
 		}
 	}
+	kept := look.Row{State: look.Done, Name: "jq", Says: look.Muted("installed"), Kept: look.Muted("declared in laptop"), Whole: true}
+	same(t, look.Rows("  ", 24, kept), "  ● jq", "    installed · declared", "    in laptop")
 }
 
 // A row stacked is drawn whole: its name wrapped on its line, after a / in
@@ -557,8 +559,9 @@ func TestRanOnOneLine(t *testing.T) {
 }
 
 // The boot's log: a state's bracket in the mark's place, the name, then what
-// it says; what belongs to a line under its name; the wordmark plain, with
-// what's running, the Mac and when beside it.
+// it says; what belongs to a line under its name; a line too long cut, but a
+// whole row's, wrapped under its name; the wordmark plain, with what's
+// running, the Mac and when beside it.
 func TestBootRows(t *testing.T) {
 	b := look.NewBoot(true)
 	same(t, b.Rows(look.Width,
@@ -579,6 +582,16 @@ func TestBootRows(t *testing.T) {
 		"  [    ] Password  once · Touch ID after",
 		"  [ -- ] Not here  Homebrew · 1Password",
 		"  [FAIL] kit-config  couldn't clone",
+	)
+	long := look.Row{State: look.Done, Name: "kit-config", Says: b.Says(b.Mid("cloned"), b.Mid("laptop's declarations read")), Under: []string{b.Todo("open Ghostty to carry on")}}
+	same(t, b.Rows(30, long), "  [ OK ] kit-config  cloned ·…", "         → open Ghostty to ca…")
+	long.Whole = true
+	same(t, b.Rows(30, long),
+		"  [ OK ] kit-config",
+		"         cloned · laptop's",
+		"         declarations read",
+		"         → open Ghostty to",
+		"           carry on",
 	)
 	same(t, b.Head(b.Meta("bootstrap", "Some-MacBook", "Thu 8 Oct · 18:02")...),
 		"  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap",

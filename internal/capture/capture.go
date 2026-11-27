@@ -33,7 +33,12 @@ type Fixture struct {
 	Shows         string
 	at            time.Time
 	draw          func(*stage) error
+	fitted        bool
 }
+
+// Fitted is whether f's window is sized to what kit's face draws in it, as
+// fit sizes it, rather than set by hand.
+func (f Fixture) Fitted() bool { return f.fitted }
 
 // Look is the terminal a still is recorded in.
 type Look string
