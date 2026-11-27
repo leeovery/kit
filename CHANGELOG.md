@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-11-27
+
+Keep chosen keys of any settings domain, Apple's included, such as the Dock's apps and folders, across Macs.
+
+✨ Added
+- `[prefs keys]` section in kit-config — save only the keys you name from a domain, even one prefs normally skips like Apple's, and merge them back on restore without touching the domain's other keys.
+- `--restart <process>` option on a `[prefs keys]` line — restarts that process (such as Dock) after its keys are restored, only if something changed.
+- Restore leaves out items pointing at files not on this Mac, such as Dock tiles of uninstalled apps — they are put back where they were once the apps are installed, on `kit apply` or the hourly run.
+
+🔧 Changed
+- Restore, capture and status summaries now report domains waiting for apps to put their items back, and keys you changed since kit restored them are left as you arranged them, with capture saving them as they are.
+- `kit prefs history` for a domain kept by its keys shows the history of its saved keys.
+- `kit prefs pending --json` no longer includes kit's own bookkeeping about kept keys.
+
 ## [0.5.5] - 2026-11-26
 
 🔧 Changed
