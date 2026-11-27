@@ -33,8 +33,17 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Width is the widest a line goes.
-const Width = 80
+// Width is the widest a line goes, however wide the terminal: a narrower
+// one narrows it.
+const Width = 120
+
+// Unmeasured is how wide kit draws where it can't tell a terminal's width,
+// as in a pipe or a test.
+const Unmeasured = 80
+
+// Designed is how wide the boot's screens are drawn, at most: a new Mac's
+// Terminal window, and not stretched past it on a wider one.
+const Designed = 80
 
 // kit's own colours, exact, for what it paints itself: pink to orange, its
 // gradient; scarlet, a failure's pill and the boot's FAIL; dark, a pill's
@@ -177,8 +186,12 @@ type Row struct {
 	// Kept is what follows Says, after a dot, kept whole when the line's
 	// cut, the rest cut in its place: how far a thing at work has got after
 	// what it's doing.
-	Kept  string
-	Under []string
+	Kept string
+	// Command is a command it runs or ran, dim, after what it says: cut in
+	// the middle when the line's too long, so its end, often what it's
+	// about, shows.
+	Command string
+	Under   []string
 	// Whole is whether its line is never cut, as what's decided or acted
 	// on isn't: too long for it, its name goes on its own line, and what it
 	// says on the lines under it, each wrapped.
@@ -205,7 +218,7 @@ func drawRows(indent, under string, w int, rs []Row) []string {
 		if r.Whole {
 			out = append(out, whole(indent, under, w, r)...)
 		} else {
-			out = append(out, CutKeeping(line(indent, r), r.Kept, w))
+			out = append(out, CutKeeping(line(indent, r.squeezed(indent, w)), r.Kept, w))
 		}
 		for _, u := range r.Under {
 			out = append(out, Cut(under+u, w))
@@ -257,13 +270,43 @@ func whole(indent, under string, w int, r Row) []string {
 	return stack(indent, under, w, r)
 }
 
-// kept is r with what it keeps said after what it says, as a row drawn
-// whole says it.
+// squeezed is r, its line after indent w wide, with its command said
+// after what it says, cut in the middle to the room left it before what
+// the row keeps.
+func (r Row) squeezed(indent string, w int) Row {
+	if r.Command == "" {
+		return r
+	}
+	before := line(indent, r) + "  "
+	if r.Says != "" {
+		before = line(indent, r) + dot
+	}
+	room := w - ansi.StringWidth(before)
+	if r.Kept != "" {
+		room -= ansi.StringWidth(dot + r.Kept)
+	}
+	r.Says, r.Command = then(r.Says, Dim(Squeeze(r.Command, room))), ""
+	return r
+}
+
+// kept is r with its command, then what it keeps, said after what it says,
+// as a row drawn whole says them.
 func (r Row) kept() Row {
+	if r.Command != "" {
+		r.Says, r.Command = then(r.Says, Dim(OneLine(r.Command))), ""
+	}
 	if r.Kept != "" {
 		r.Says, r.Kept = Says(r.Says, r.Kept), ""
 	}
 	return r
+}
+
+// then is s, then more after a dot; more alone when s says nothing.
+func then(s, more string) string {
+	if s == "" {
+		return more
+	}
+	return Says(s, more)
 }
 
 // stack is r's line stacked after indent, w wide: its mark and its name,

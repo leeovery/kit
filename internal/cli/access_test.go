@@ -279,8 +279,7 @@ func TestApplyRaisesFullDiskAccessAtATerminal(t *testing.T) {
 	}
 	record := ansi.Strip(out[max(strings.LastIndex(out, "█  ▄▀"), 0):])
 	want := "  △ 1  " + title + "\n" +
-		"       → System Settings › Privacy & Security › Full Disk Access, turn on\n" +
-		"         Ghostty\n" +
+		"       → System Settings › Privacy & Security › Full Disk Access, turn on Ghostty\n" +
 		"       → Quit Ghostty and open it again\n" +
 		"       → Run kit apply backup-exclusion\n"
 	if !strings.Contains(record, want) {

@@ -556,6 +556,8 @@ func TestPrettyRecordWrapsWhatARowSays(t *testing.T) {
 		{"pretty-record-wraps-80.golden", "~/Library/Application Support/Google/Chrome", 80},
 		{"pretty-record-wraps-52.golden", "~/Library/Application Support/Google/Chrome", 52},
 		{"pretty-record-wraps-long-name.golden", "~/Library/Application Support/Some Long App Name/Default/Service Worker", 52},
+		{"pretty-record-wraps-120.golden", "~/Library/Application Support/Some Long App Name/Default/Service Worker", 120},
+		{"pretty-record-wraps-120.golden", "~/Library/Application Support/Some Long App Name/Default/Service Worker", 200},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			events := []event.Event{
@@ -661,6 +663,42 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 	want = "\n  ● jq  installed · declared in laptop\n  ✗ ripgrap  couldn't install · brew install --formula ripgrap\n  │ Warning: No available formula with the name \"ripgrap\".\n"
 	if got := screen(out.String()); got != want {
 		t.Errorf("once done, the screen is\n%s\nwant\n%s", got, want)
+	}
+}
+
+// A step's running row takes the terminal's width, up to kit's: its
+// command, too long for the line, is cut in the middle, so the package it
+// adds still shows at its end.
+func TestPrettyRunningRowCutsItsCommandInTheMiddle(t *testing.T) {
+	const command = "brew install --cask --adopt --no-quarantine --require-sha --appdir=/Applications --fontdir=/Library/Fonts jump-desktop-connect"
+	for _, c := range []struct {
+		name  string
+		width int
+	}{
+		{"pretty-running-52.golden", 52},
+		{"pretty-running-80.golden", 80},
+		{"pretty-running-120.golden", 120},
+		{"pretty-running-120.golden", 200},
+	} {
+		t.Run(fmt.Sprint(c.width), func(t *testing.T) {
+			var out syncBuffer
+			face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, c.width, true).Turned()
+			face.Emit(event.RunStarted{Command: "cask add", Machine: "laptop", Steps: []event.Step{{Name: "jump-desktop-connect", Title: "jump-desktop-connect"}}})
+			face.Emit(event.StepStarted{Step: "jump-desktop-connect", Doing: "adding"})
+			face.Emit(event.Output{Step: "jump-desktop-connect", Command: command, Line: "==> Downloading jump-desktop-connect"})
+			face.Turn()
+			got := turned(screen(out.String()))
+			row := strings.Split(got, "\n")[1]
+			if !strings.HasSuffix(row, "-connect") || ansi.StringWidth(row) > min(c.width, look.Width) {
+				t.Errorf("at %d columns the row is %q: want it no wider than %d, ending as the command ends", c.width, row, min(c.width, look.Width))
+			}
+			golden(t, c.name, got)
+			face.Emit(event.StepFinished{Step: "jump-desktop-connect", Result: check.Result{State: check.OK, Summary: "added"}})
+			face.Emit(event.RunFinished{Counts: map[check.State]int{check.OK: 1}})
+			if err := face.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -1002,13 +1040,47 @@ func TestPrettyConfigPull(t *testing.T) {
 	}
 }
 
+// Status takes the terminal's width, up to kit's: wider than that, it's
+// drawn as at kit's width, a row too long for it wrapped, never cut.
+func TestPrettyStatusUpToItsWidth(t *testing.T) {
+	events := []event.Event{
+		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{
+			{Name: "config-private", Title: "Privacy", Area: "Config", Part: render.PartConfig},
+			{Name: "config-sync", Title: "Sync", Area: "Config", Part: render.PartConfig},
+		}},
+		event.StepFinished{Step: "config-private", Result: check.Result{State: check.Attention, Summary: "it must be private", Items: []check.Item{
+			{ID: "config-private:owner/kit-config", Name: "owner/kit-config", State: "not-private", Detail: "make it private: gh repo edit owner/kit-config --visibility private --accept-visibility-change-consequences"},
+		}}},
+		event.StepFinished{Step: "config-sync", Result: check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}},
+		event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1, check.Attention: 1}},
+	}
+	for _, c := range []struct {
+		name  string
+		width int
+	}{
+		{"status-120.golden", 120},
+		{"status-120.golden", 200},
+	} {
+		t.Run(fmt.Sprint(c.width), func(t *testing.T) {
+			var out bytes.Buffer
+			show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, c.width, false), events)
+			for l := range strings.Lines(out.String()) {
+				if w := ansi.StringWidth(strings.TrimSuffix(l, "\n")); strings.Contains(l, "…") || w > look.Width {
+					t.Errorf("printed %q at %d columns: want it no wider than %d, never cut", l, c.width, look.Width)
+				}
+			}
+			golden(t, c.name, out.String())
+		})
+	}
+}
+
 // A kit-config that isn't private needs you, and no kit command makes it
 // private: its row says what does, naming none, and kit-config's own row is
 // marked as needing you, whatever else of it is well.
 func TestPrettyConfigNotPrivate(t *testing.T) {
 	for _, tt := range []struct{ state, detail, row string }{
 		{"not-private", "make it private: gh repo edit owner/kit-config --visibility private",
-			"  ▲ owner/kit-config\n    make it private: gh repo edit owner/kit-config --visibility private\n"},
+			"  ▲ owner/kit-config  make it private: gh repo edit owner/kit-config --visibility private\n"},
 		{"unproven", "gh isn't signed in", "  ▲ owner/kit-config  gh isn't signed in\n"},
 	} {
 		t.Run(tt.state, func(t *testing.T) {

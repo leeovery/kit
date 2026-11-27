@@ -14,6 +14,8 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/muesli/cancelreader"
+
+	"github.com/leeovery/kit/internal/look"
 )
 
 // Terminal is where kit asks: the keys come from In, what's drawn goes to
@@ -154,17 +156,17 @@ func show(ctx context.Context, t Terminal, m model) error {
 
 // size is the terminal's columns, up to kit's width, and its lines.
 func (t Terminal) size() (width, height int) {
-	width, height = 80, 24
+	width, height = look.Unmeasured, 24
 	if t.Size != nil {
 		width, height = t.Size()
 	}
-	return min(max(width, 40), 80), max(height, 8)
+	return min(max(width, 40), look.Width), max(height, 8)
 }
 
 // whole is the terminal's columns and lines, all of them, as a model taking
 // the whole screen has them.
 func (t Terminal) whole() (width, height int) {
-	width, height = 80, 24
+	width, height = look.Unmeasured, 24
 	if t.Size != nil {
 		width, height = t.Size()
 	}

@@ -185,7 +185,7 @@ func (s *selfTestScreen) View(width, _ int) []string {
 	s.mu.Lock()
 	frame := s.frame
 	s.mu.Unlock()
-	return s.lines(min(width, look.Width), frame/selfTestFrames, frame)
+	return s.lines(min(width, look.Designed), frame/selfTestFrames, frame)
 }
 
 // lines are the self-test with done lines finished, the one at done working.
@@ -215,7 +215,7 @@ func (s *selfTestScreen) lines(width, done, frame int) []string {
 func (s *selfTestScreen) Key(ask.Key) bool { return false }
 
 func (s *selfTestScreen) Leaves(width int) []string {
-	return append(s.lines(min(width, look.Width), len(s.test.Tests), 0), "")
+	return append(s.lines(min(width, look.Designed), len(s.test.Tests), 0), "")
 }
 
 func (s *selfTestScreen) Changes() <-chan struct{} { return s.changed }
@@ -391,7 +391,7 @@ func revealed(steps []event.Step, rows map[string]*bootRow) []area {
 func (f *BootFace) View(width, height int) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	width = min(width, look.Width)
+	width = min(width, look.Designed)
 	return fit(f.blocks(width, true), f.foot(width, true), height, false)
 }
 
@@ -454,7 +454,7 @@ func fit(blocks []block, foot []string, height int, lead bool) []string {
 func (f *BootFace) Leaves(width int) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	width = min(width, look.Width)
+	width = min(width, look.Designed)
 	var out []string
 	for _, b := range f.blocks(width, false) {
 		out = append(out, b.lines...)
@@ -716,7 +716,7 @@ func (f *BootFace) asked() []string {
 // spaces to fit beside it.
 func (f *BootFace) todo(text string) []string {
 	b := f.look
-	lines := look.Wrap(text, look.Width-len(look.BootUnder)-4)
+	lines := look.Wrap(text, look.Designed-len(look.BootUnder)-4)
 	out := make([]string, len(lines))
 	for i, l := range lines {
 		if i == 0 {

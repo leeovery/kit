@@ -689,3 +689,33 @@ func TestCutKeeping(t *testing.T) {
 		}
 	}
 }
+
+// A row's command too long for its line is cut in the middle, so its end,
+// the package or file it's about, still shows; what the row keeps stays
+// whole after it; a row drawn whole says the command whole.
+func TestARowsCommandIsCutInTheMiddle(t *testing.T) {
+	command := "brew install --cask --adopt jump-desktop-connect"
+	running := look.Row{State: look.Running, Name: "jump-desktop-connect", Says: look.Cyan("adding"), Command: command}
+	for _, tt := range []struct {
+		name string
+		row  look.Row
+		w    int
+		want []string
+	}{
+		{"fits", running, 120, []string{"  ◐ jump-desktop-connect  adding · " + command}},
+		{"too long", running, 60, []string{"  ◐ jump-desktop-connect  adding · brew insta…esktop-connect"}},
+		{"saying nothing else", look.Row{State: look.Running, Name: "jump-desktop-connect", Command: command}, 60, []string{"  ◐ jump-desktop-connect  brew install …jump-desktop-connect"}},
+		{"keeping how far", look.Row{State: look.Running, Name: "jump-desktop-connect", Says: look.Cyan("adding"), Command: command, Kept: "2 of 3"}, 60, []string{"  ◐ jump-desktop-connect  adding · brew i…p-connect · 2 of 3"}},
+		{"whole", look.Row{State: look.Failed, Name: "jump-desktop-connect", Says: look.Red("couldn't add"), Command: command, Whole: true}, 60, []string{"  ✗ jump-desktop-connect", "    couldn't add · brew install --cask --adopt", "    jump-desktop-connect"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := look.Rows("  ", tt.w, tt.row)
+			same(t, got, tt.want...)
+			for _, l := range got {
+				if w := ansi.StringWidth(l); w > tt.w {
+					t.Errorf("%q is %d wide, want at most %d", ansi.Strip(l), w, tt.w)
+				}
+			}
+		})
+	}
+}

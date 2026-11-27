@@ -182,8 +182,7 @@ func TestTheRecordAfterStoppingAtTheToDos(t *testing.T) {
 		"\n  TO DO  2 · kit apply brings them back\n" +
 			"  △ 1  Add a Time Machine disk\n" +
 			"       → Plug in your backup disk\n" +
-			"       → System Settings › General › Time Machine › Add Backup Disk, and choose\n" +
-			"         it\n" +
+			"       → System Settings › General › Time Machine › Add Backup Disk, and choose it\n" +
 			"  △ 2  Set up Arq's backup plan\n" +
 			"       → Open Arq\n",
 	} {
