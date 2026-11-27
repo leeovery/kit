@@ -202,10 +202,10 @@ func drawRows(indent, under string, w int, rs []Row) []string {
 	var out []string
 	for _, r := range rs {
 		r = r.unbroken()
-		if l := line(indent, r); !r.Whole || ansi.StringWidth(l) <= w {
-			out = append(out, CutKeeping(l, r.Kept, w))
+		if r.Whole {
+			out = append(out, whole(indent, under, w, r)...)
 		} else {
-			out = append(out, stack(indent, under, w, r)...)
+			out = append(out, CutKeeping(line(indent, r), r.Kept, w))
 		}
 		for _, u := range r.Under {
 			out = append(out, Cut(under+u, w))
@@ -245,6 +245,18 @@ func Stacked(indent string, w int, r Row) []string {
 		out = append(out, Cut(under+u, w))
 	}
 	return out
+}
+
+// whole is r's line after indent, w wide, never cut: on one line, what it
+// keeps and all, when it fits; else stacked.
+func whole(indent, under string, w int, r Row) []string {
+	if r.Kept != "" {
+		r.Says, r.Kept = Says(r.Says, r.Kept), ""
+	}
+	if l := line(indent, r); ansi.StringWidth(l) <= w {
+		return []string{l}
+	}
+	return stack(indent, under, w, r)
 }
 
 // stack is r's line stacked after indent, w wide: its mark and its name,
@@ -322,7 +334,7 @@ func wrap(s string, w int, hang string) []string {
 	body := wholeWords(unbreaking.Replace(ansi.TruncateLeft(s, n, "")), room)
 	lines := strings.Split(lipgloss.Wrap(body, room, "/"), "\n")
 	for i, l := range lines {
-		l = breaking.Replace(l)
+		l = endSpaces.ReplaceAllString(breaking.Replace(l), "$1")
 		if i == 0 {
 			lines[i] = ansi.Truncate(s, n, "") + l
 		} else {
@@ -350,6 +362,10 @@ func wholeWords(s string, w int) string {
 
 // dashes are the dashes leading a word, after any styles it opens with.
 var dashes = regexp.MustCompile(`^(?:\x1b\[[0-9;]*m)*-+`)
+
+// endSpaces are the spaces lipgloss leaves ending a line it breaks at a
+// word, before any styles the line closes with.
+var endSpaces = regexp.MustCompile(` +((?:\x1b\[[0-9;]*m)*)$`)
 
 // Output is a tool's lines, as it printed them.
 func Output(lines ...string) []string { return kit.Output(lines...) }

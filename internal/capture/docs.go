@@ -45,7 +45,7 @@ var docs = []Fixture{
 		Shows: "carries on now", at: docsAt, draw: setupDone},
 	result("linked-files-add", "kit file add: the file moved into kit-config and linked back", "file add ~/.config/tool/conf",
 		said{"~/.config/tool/conf", []string{"in kit-config, linked: laptop/home/.config/tool/conf"}}, committed("laptop/home/.config/tool/conf")),
-	{Name: "linked-files-revert", About: "kit reconcile --revert: kit-config's file linked back, the Mac's in the Bin", Width: 82, Height: 10,
+	{Name: "linked-files-revert", About: "kit reconcile --revert: kit-config's file linked back, the Mac's in the Bin", Width: 79, Height: 11,
 		Shows: "1 settled", at: docsAt, draw: onFace(func(at time.Time) []event.Event {
 			return reconciled(at, 400*time.Millisecond,
 				said{"file:~/.zshrc", []string{"linked to kit-config's", "the Mac's copy is in the Bin (~/.Trash/.zshrc)"}}, said{"kit-config", []string{"nothing changed"}})
@@ -92,13 +92,20 @@ type said struct {
 func committed(what string) said { return said{"kit-config", []string{"committed and pushed " + what}} }
 
 // result is the still name of what kit command prints at a terminal once
-// done, a line a step, kit-config's last: as wide as its longest.
+// done, a row a step, kit-config's last: as wide as its longest; or, with a
+// row too long for a line, as wide as kit draws, that row stacked, as it
+// wraps under its name.
 func result(name, about, command string, steps ...said) Fixture {
-	width := 0
+	width, height := 0, 2
 	for _, s := range steps {
-		width = max(width, ansi.StringWidth(s.step+strings.Join(s.says, "; "))+12)
+		says := strings.Join(s.says, " · ")
+		if ansi.StringWidth("  ● "+s.step+"  "+says) <= look.Width {
+			width, height = max(width, ansi.StringWidth(s.step+strings.Join(s.says, "; "))+12), height+1
+			continue
+		}
+		width, height = look.Width+2, height+1+len(look.Wrap(says, look.Width-4))
 	}
-	return Fixture{Name: name, About: about, Width: min(width, look.Width+2), Height: len(steps) + 2, Shows: "kit-config",
+	return Fixture{Name: name, About: about, Width: min(width, look.Width+2), Height: height, Shows: "kit-config",
 		at: docsAt, draw: onFace(func(at time.Time) []event.Event { return changeRun(at, command, steps) })}
 }
 

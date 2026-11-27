@@ -38,7 +38,7 @@ func Places(width int, places []Place) []string {
 		for j, s := range says {
 			says[j] = look.Muted(s)
 		}
-		rows[i] = look.Row{State: look.Done, Name: p.Title(), Says: look.Says(says...)}
+		rows[i] = look.Row{State: look.Done, Name: p.Title(), Says: look.Says(says...), Whole: true}
 	}
 	return look.Rows("  ", width, rows...)
 }

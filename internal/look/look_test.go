@@ -62,7 +62,6 @@ func TestRowsAreCut(t *testing.T) {
 	}
 }
 
-// A whole row is never cut: one that fits is as it is; one too long for
 // A row's line is one line however what it says breaks, as an error
 // joined from several, or a program's standard error, does: whole or cut,
 // on a timeline or stacked, the breaks spaces. A screen drawn in place
@@ -79,8 +78,9 @@ func TestRowsNeverBreak(t *testing.T) {
 	}
 }
 
-// its line has its name on its own line, wrapped, and what it says, with
-// what it keeps, wrapped under it, on a timeline's line in a timeline;
+// A whole row is never cut: one that fits is as it is, what it keeps and
+// all; one too long for its line has its name on its own line, wrapped, and
+// what it says, with what it keeps, wrapped under it, on a timeline's line in a timeline;
 // what belongs to it goes under that.
 func TestWholeRowsWrap(t *testing.T) {
 	names := look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep", Says: look.Yellow("need an administrator's password"), Whole: true}
@@ -102,6 +102,8 @@ func TestWholeRowsWrap(t *testing.T) {
 			t.Errorf("%q is %d wide", ansi.Strip(l), w)
 		}
 	}
+	kept := look.Row{State: look.Done, Name: "jq", Says: look.Muted("installed"), Kept: look.Muted("declared in laptop"), Whole: true}
+	same(t, look.Rows("  ", 24, kept), "  ● jq", "    installed · declared", "    in laptop")
 }
 
 // A row stacked is drawn whole: its name wrapped on its line, after a / in

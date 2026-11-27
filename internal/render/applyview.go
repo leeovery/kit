@@ -370,10 +370,10 @@ func (p *Pretty) unwellSection(st look.State) []string {
 	return out
 }
 
-// recorded is a row as the record draws it on its timeline: its line cut,
-// as a glance, what's under it wrapped, never cut, as what's acted on.
+// recorded is a row as the record draws it on its timeline: its line and
+// what's under it wrapped, never cut.
 func (p *Pretty) recorded(row look.Row) []string {
-	row.Under = look.Fold("  ", p.width, row.Under...)
+	row.Whole, row.Under = true, look.Fold("  ", p.width, row.Under...)
 	return look.Timeline("  ", p.width, row)
 }
 

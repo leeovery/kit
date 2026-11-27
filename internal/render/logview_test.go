@@ -91,12 +91,12 @@ func TestLogRunKeepsASummarysParts(t *testing.T) {
 // At a terminal, a run's log is a timeline: the run as a row, then each
 // step after the time it started, what it ran on the line under it, each
 // command on one line, and what one that failed said, without the command.
-// A step that failed says what went wrong, and why under it, unless a
+// A step that failed says what went wrong, and why under it, wrapped, unless a
 // command it ran said the same.
 func TestLogRun(t *testing.T) {
 	ok := check.Result{State: check.OK, Summary: "/opt/homebrew"}
 	failed := check.Result{State: check.Failed, Reason: "couldn't apply: sudo: a password is required"}
-	unbelieved := check.Result{State: check.Failed, Reason: "couldn't apply: its check still says not imported"}
+	unbelieved := check.Result{State: check.Failed, Reason: "couldn't apply: its check still says not imported, though gpg said it imported the key from op://vault/item/field"}
 	timedOut := check.Result{State: check.Failed, Reason: "execution error: Error: AppleEvent timed out. (-1712)"}
 	session := "/Users/someone/.config/kit/shared/steps/remote-session/run apply"
 	script := "osascript -l JavaScript -e 'function run() {\n  return 1;\n}'"
