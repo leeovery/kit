@@ -173,6 +173,13 @@ func ScreenSharing(run runner.Runner) engine.Step {
 	}
 }
 
+// ScreenSharingOn reports whether Screen Sharing's service is on, as the
+// person switched it: whether viewers can take control aside, which needs
+// Full Disk Access to tell.
+func ScreenSharingOn(ctx context.Context, run runner.Runner) (bool, error) {
+	return serviceOn(ctx, run, screenSharingLabel)
+}
+
 // controlGranted reports whether macOS grants Screen Sharing's agent each
 // of controlGrants, every row of each allowed: none, or one denied, isn't.
 // The database holding them can't be read without Full Disk Access.
@@ -184,7 +191,7 @@ func controlGranted(ctx context.Context, run runner.Runner) (bool, error) {
 		return false, fmt.Errorf("can't tell whether viewers can take control: %w", prefs.ErrNoAccess)
 	}
 	if err != nil {
-		return false, fmt.Errorf("read what macOS grants Screen Sharing: %w", err)
+		return false, fmt.Errorf("can't tell whether viewers can take control: %w", err)
 	}
 	granted := map[string]bool{}
 	for line := range strings.Lines(out) {

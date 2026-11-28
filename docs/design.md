@@ -1240,7 +1240,7 @@ them: launchctl alone, as kit once did, starts a service whose viewers can only 
 `screen-sharing` has no apply: off, or on without control, it's a to-do (Checks above), its
 card opening System Settings at Sharing and kit watching for control; turning the feature off
 only undeclares it. The database unreadable, without Full Disk Access, its check fails, saying
-so, never ok. A step whose apply needs an administrator's password says so (`Admin`), and
+so, never ok. A snapshot declares it as its service is, as the person switched it, reading no grants; a feature it can't look at is left out, saying why, the rest declared. A step whose apply needs an administrator's password says so (`Admin`), and
 `kit apply` asks for the password as the run starts, the step waiting for the answer, and
 `kit reconcile` before anything is applied, as for the kinds whose installs need it: asked once
 at a terminal; without one, the step waits.

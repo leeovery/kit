@@ -175,7 +175,7 @@ func TestScreenSharingUnreadable(t *testing.T) {
 	}
 
 	fake.On("/usr/bin/sqlite3", readGrants...).PrintsToStderr("Error: in prepare, no such table: access\n").Exits(1)
-	if res := steps.ScreenSharing(fake).Check(t.Context()); res.State != check.Failed || !strings.Contains(res.Reason, "no such table") || strings.Contains(res.Reason, "Full Disk Access") {
+	if res := steps.ScreenSharing(fake).Check(t.Context()); res.State != check.Failed || !strings.HasPrefix(res.Reason, "can't tell whether viewers can take control: ") || !strings.Contains(res.Reason, "no such table") || strings.Contains(res.Reason, "Full Disk Access") {
 		t.Errorf("another failure = %+v; want it failed, saying what sqlite3 said", res)
 	}
 

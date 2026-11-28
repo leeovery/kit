@@ -63,7 +63,7 @@ func (s *Setup) snapshot() (*snapshot.Snapshot, snapshot.Mac) {
 
 // counted says what each of the snapshot's parts declares, as a count, by
 // its kind: those with none left out of the summary, and those that
-// couldn't be looked at each an item, saying why.
+// couldn't be looked at, whole or in part, each an item, saying why.
 func counted(ps []snapshot.Part) check.Result {
 	res := check.Result{State: check.OK, Counts: map[string]int{}}
 	var parts []string
@@ -72,6 +72,9 @@ func counted(ps []snapshot.Part) check.Result {
 		if p.Err != nil {
 			res.Items = append(res.Items, check.Item{ID: SnapshotStep + ":" + p.Kind, Name: p.Label, State: "not looked at", Detail: p.Err.Error()})
 			continue
+		}
+		if p.Missed != nil {
+			res.Items = append(res.Items, check.Item{ID: SnapshotStep + ":" + p.Kind, Name: p.Label, State: "partly looked at", Detail: p.Missed.Error()})
 		}
 		n := len(p.Lines)
 		res.Counts[p.Kind] = n

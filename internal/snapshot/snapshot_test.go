@@ -147,7 +147,6 @@ func TestASnapshotDeclaresTheMacAsItStands(t *testing.T) {
 	fake.On("git", "config", "--global", "--list", "-z").Prints("user.name\nSome One\x00core.editor\nmicro\x00include.path\na\x00include.path\nb\x00")
 	setting(fake, "com.apple.dock", "<key>tilesize</key><integer>60</integer><key>version</key><integer>1</integer>")
 	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.openssh.sshd\" => enabled\n\t\"com.apple.smbd\" => disabled\n\t\"com.apple.screensharing\" => enabled\n}\n")
-	fake.On("/usr/bin/sqlite3", "-readonly", "/Library/Application Support/com.apple.TCC/TCC.db", "select service, auth_value from access where client='com.apple.screensharing.agent'").Prints("kTCCServicePostEvent|2\nkTCCServiceScreenCapture|2\n")
 	write(t, filepath.Dir(m.SudoLocal), map[string]string{"sudo_local": "auth       sufficient     pam_tid.so\n"})
 	fake.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>AutoBackup</key><true/><key>Destinations</key><array><dict/></array></dict></plist>")
 	fake.On("tmutil", "status").Prints("Running = 0;\n")
@@ -166,6 +165,43 @@ func TestASnapshotDeclaresTheMacAsItStands(t *testing.T) {
 	git := s.Parts[2]
 	if len(git.Refused) != 1 || git.Refused[0].Entry.Name != "include.path" || !strings.Contains(git.Refused[0].Err.Error(), "set 2 times") {
 		t.Errorf("git's refused = %+v, want include.path, set twice, left out saying so", git.Refused)
+	}
+}
+
+// A feature that can't be looked at is left out, and says why, the rest of
+// [features] declared: Screen Sharing on as its service is, with no look at
+// what macOS grants, which needs Full Disk Access (the fake fails a test
+// on any command it hasn't scripted, sqlite3's read of the grants
+// included); Touch ID as its file says, launchctl failing for the rest.
+func TestAFeatureThatCantBeLookedAtLeavesTheRest(t *testing.T) {
+	for _, tt := range []struct {
+		name, listed string
+		exit         int
+		want, missed string
+	}{
+		{"Screen Sharing on, its grants unread", "\t\"com.apple.screensharing\" => enabled\n", 0, "[features]\nscreen-sharing\ntouch-id-sudo\n", ""},
+		{"launchctl failing", "", 1, "[features]\ntouch-id-sudo\n", "Remote Login: launchctl exited 1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, fake := newMac(t, "")
+			homebrew(fake, "", "", "")
+			fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n" + tt.listed + "}\n").Exits(tt.exit)
+			write(t, filepath.Dir(m.SudoLocal), map[string]string{"sudo_local": "auth       sufficient     pam_tid.so\n"})
+			s := take(t, m)
+			if got := declarations(t, m); !strings.Contains(got, tt.want) {
+				t.Errorf("laptop/declarations =\n%s\nwant it to hold\n%s", got, tt.want)
+			}
+			i := slices.IndexFunc(s.Parts, func(p snapshot.Part) bool { return p.Kind == config.FeaturesKind })
+			p := s.Parts[i]
+			switch {
+			case p.Err != nil:
+				t.Errorf("features' part failed whole: %v", p.Err)
+			case tt.missed == "" && p.Missed != nil:
+				t.Errorf("missed %v, want nothing", p.Missed)
+			case tt.missed != "" && (p.Missed == nil || !strings.Contains(p.Missed.Error(), tt.missed)):
+				t.Errorf("missed %v, want %q", p.Missed, tt.missed)
+			}
+		})
 	}
 }
 
