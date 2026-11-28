@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-11-28
+
+🐛 Fixed
+
+- Secrets and other entries whose names contain spaces, such as a path under `~/Library/Application Support`, are now accepted, quoted on their config line and read back correctly.
+- Suggested commands in messages (`kit reconcile`, `kit secret add`) now quote names with spaces or special characters, so you can paste them straight into a shell.
+
 ## [0.6.1] - 2026-11-28
 
 ✨ Added
