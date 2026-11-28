@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -51,7 +54,6 @@ func TestSystemServices(t *testing.T) {
 	}{
 		{"Remote Login", "com.openssh.sshd", "/System/Library/LaunchDaemons/ssh.plist", steps.RemoteLogin},
 		{"File Sharing", "com.apple.smbd", "/System/Library/LaunchDaemons/com.apple.smbd.plist", steps.FileSharing},
-		{"Screen Sharing", "com.apple.screensharing", "/System/Library/LaunchDaemons/com.apple.screensharing.plist", steps.ScreenSharing},
 	} {
 		t.Run(tc.title, func(t *testing.T) {
 			held := &steps.Admin{Held: func(context.Context) bool { return true }}
@@ -103,6 +105,149 @@ func TestSystemServices(t *testing.T) {
 				t.Errorf("ran\n%s", strings.Join(calls, "\n"))
 			}
 		})
+	}
+}
+
+// tcc is where the tests' privacy database is.
+const tcc = "/Library/Application Support/com.apple.TCC/TCC.db"
+
+// The command reading what macOS grants Screen Sharing's agent, at tcc:
+// its output pinned, ~/.sqliterc unread (-init /dev/null), as the fake
+// answers only these arguments, so a test fails should one go.
+var readGrants = []string{"-init", "/dev/null", "-batch", "-readonly", "-list", "-noheader", "-separator", "|", tcc, "select service, auth_value from access where client='com.apple.screensharing.agent'"}
+
+// screenSharingRunner is a runner whose launchd lists Screen Sharing's
+// service as listed says, and whose privacy database holds grants.
+func screenSharingRunner(t *testing.T, listed, grants string) *runnertest.Fake {
+	fake := runnertest.New(t)
+	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.apple.screensharing\" => " + listed + "\n}\n")
+	fake.On("/usr/bin/sqlite3", readGrants...).Prints(grants)
+	return fake
+}
+
+// Screen Sharing is on only with its service enabled and both of control's
+// grants allowed: off, or either grant missing or denied, is the person's
+// to do, kit watching for viewers to take control. The step needs no
+// password, as it has no apply: only System Settings grants control.
+func TestScreenSharing(t *testing.T) {
+	const both = "kTCCServicePostEvent|2\nkTCCServiceScreenCapture|2\n"
+	for _, tt := range []struct {
+		name, listed, grants string
+		want                 check.State
+		summary, item, title string
+	}{
+		{"on, control granted", "enabled", both, check.OK, "on", "", ""},
+		{"on, listed false", "false", both, check.OK, "on", "", ""},
+		{"posting events denied", "enabled", "kTCCServicePostEvent|0\nkTCCServiceScreenCapture|2\n", check.Attention, "on, but viewers can only watch", "screen-sharing:watch-only", "Turn Screen Sharing off and on again"},
+		{"screen capture denied", "enabled", "kTCCServicePostEvent|2\nkTCCServiceScreenCapture|0\n", check.Attention, "on, but viewers can only watch", "screen-sharing:watch-only", "Turn Screen Sharing off and on again"},
+		{"one of two rows denied", "enabled", both + "kTCCServicePostEvent|0\n", check.Attention, "on, but viewers can only watch", "screen-sharing:watch-only", "Turn Screen Sharing off and on again"},
+		{"one grant missing", "enabled", "kTCCServiceScreenCapture|2\n", check.Attention, "on, but viewers can only watch", "screen-sharing:watch-only", "Turn Screen Sharing off and on again"},
+		{"no grants", "enabled", "", check.Attention, "on, but viewers can only watch", "screen-sharing:watch-only", "Turn Screen Sharing off and on again"},
+		{"service disabled", "disabled", both, check.Attention, "off", "screen-sharing:off", "Turn on Screen Sharing"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			step := steps.ScreenSharing(screenSharingRunner(t, tt.listed, tt.grants), tcc)
+			if step.Admin || step.Apply != nil {
+				t.Errorf("admin %t, apply %t; want neither: only System Settings turns it on", step.Admin, step.Apply != nil)
+			}
+			res := step.Check(t.Context())
+			if res.State != tt.want || res.Summary != tt.summary {
+				t.Fatalf("Check() = %+v; want %s, %q", res, tt.want, tt.summary)
+			}
+			if tt.item == "" {
+				return
+			}
+			if !res.ToDo() || len(res.Items) != 1 || res.Items[0].ID != tt.item || res.Items[0].ToDo == nil {
+				t.Fatalf("items = %+v; want the to-do %s", res.Items, tt.item)
+			}
+			if todo := res.Items[0].ToDo; todo.Title != tt.title || todo.Watch != "viewers can take control" || !strings.Contains(todo.Why, "only once Screen Sharing is turned on in System Settings") {
+				t.Errorf("to-do = %+v; want %q, watching for control", todo, tt.title)
+			}
+		})
+	}
+}
+
+// The grants are read by the system's sqlite3, its output as kit reads it
+// whatever ~/.sqliterc says: no rc file, a list without headers, | between
+// columns.
+func TestScreenSharingPinsSqlite(t *testing.T) {
+	fake := screenSharingRunner(t, "enabled", "kTCCServicePostEvent|2\nkTCCServiceScreenCapture|2\n")
+	if res := steps.ScreenSharing(fake, tcc).Check(t.Context()); res.State != check.OK {
+		t.Fatalf("Check() = %+v", res)
+	}
+	read := fake.Commands()[1]
+	if read.Name != "/usr/bin/sqlite3" || !slices.Equal(read.Args, readGrants) {
+		t.Errorf("read the grants with %s %q; want /usr/bin/sqlite3 %q", read.Name, read.Args, readGrants)
+	}
+}
+
+// A privacy database kit can't read, as without Full Disk Access, leaves
+// Screen Sharing never ok: it can't tell, and says why. Disabled, it's off
+// without reading it.
+func TestScreenSharingUnreadable(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.apple.screensharing\" => enabled\n}\n")
+	fake.On("/usr/bin/sqlite3", readGrants...).PrintsToStderr(`Error: unable to open database "/Library/Application Support/com.apple.TCC/TCC.db": authorization denied` + "\n").Exits(1)
+	res := steps.ScreenSharing(fake, tcc).Check(t.Context())
+	if res.State != check.Failed || !strings.HasPrefix(res.Reason, "can't tell whether viewers can take control: no Full Disk Access") {
+		t.Errorf("unreadable = %+v; want it failed, saying it can't tell for want of Full Disk Access", res)
+	}
+
+	fake.On("/usr/bin/sqlite3", readGrants...).PrintsToStderr("Error: in prepare, no such table: access\n").Exits(1)
+	if res := steps.ScreenSharing(fake, tcc).Check(t.Context()); res.State != check.Failed || !strings.HasPrefix(res.Reason, "can't tell whether viewers can take control: ") || !strings.Contains(res.Reason, "no such table") || strings.Contains(res.Reason, "Full Disk Access") {
+		t.Errorf("another failure = %+v; want it failed, saying what sqlite3 said", res)
+	}
+
+	off := runnertest.New(t)
+	off.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n}\n")
+	if res := steps.ScreenSharing(off, tcc).Check(t.Context()); res.State != check.Attention || res.Summary != "off" {
+		t.Errorf("disabled = %+v; want off", res)
+	}
+	if calls := off.Calls(); len(calls) != 1 {
+		t.Errorf("disabled ran\n%s\nwant launchctl alone", strings.Join(calls, "\n"))
+	}
+}
+
+// Applied at a terminal, Screen Sharing's to-do goes up at the run's end,
+// opening System Settings at Sharing, and is done once kit sees viewers can
+// take control: never through launchctl.
+func TestScreenSharingToDoOpensSharing(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	var mu sync.Mutex
+	grants := "kTCCServicePostEvent|0\nkTCCServiceScreenCapture|2\n"
+	c.fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.apple.screensharing\" => enabled\n}\n")
+	c.fake.On("/usr/bin/sqlite3", readGrants...).Filters(func(string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return grants, nil
+	})
+	c.fake.On("open", steps.SharingSettings)
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), steps.ScreenSharing(c.fake, tcc)))
+	}()
+	up := c.cards(t, 1)[0]
+	if up.Title != "Turn Screen Sharing off and on again" || !up.Tells || !slices.Equal(up.Steps, []string{"System Settings is open at Sharing", "Turn Screen Sharing off, then on again"}) {
+		t.Fatalf("card = %+v; want the toggle, watched", up)
+	}
+	mu.Lock()
+	grants = "kTCCServicePostEvent|2\nkTCCServiceScreenCapture|2\n"
+	mu.Unlock()
+	if report := <-done; report.Results[steps.FeatureScreenSharing].State != check.OK {
+		t.Errorf("screen-sharing stands %+v; want it ok once control's granted", report.Results[steps.FeatureScreenSharing])
+	}
+	var opened int
+	for _, call := range c.fake.Calls() {
+		switch {
+		case call == "open "+steps.SharingSettings:
+			opened++
+		case strings.HasPrefix(call, "sudo"), strings.HasPrefix(call, "launchctl") && call != "launchctl print-disabled system":
+			t.Errorf("ran %s; want no change through launchctl", call)
+		}
+	}
+	if opened != 1 {
+		t.Errorf("opened System Settings at Sharing %d times; want once", opened)
 	}
 }
 

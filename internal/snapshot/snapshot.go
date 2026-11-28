@@ -72,14 +72,15 @@ type Mac struct {
 // Look is how a part of a snapshot stands as Find looks at the Mac: its
 // label; what's being done, while it's looked at; once Looked, how many
 // things it found, by name when they have names of their own (the features
-// on, the backup tools set up), or why it couldn't be looked at.
+// on, the backup tools set up), or why it couldn't be looked at (Err), or
+// why some of it couldn't (Missed).
 type Look struct {
-	Label  string
-	Doing  string
-	Looked bool
-	Found  int
-	Names  []string
-	Err    error
+	Label       string
+	Doing       string
+	Looked      bool
+	Found       int
+	Names       []string
+	Err, Missed error
 }
 
 // FoldersLabel is the label of the home folder's folders, as Find tells
@@ -98,7 +99,7 @@ func (m Mac) look(l Look) {
 func (m Mac) lookAt(label string, find func() Part) Part {
 	m.look(Look{Label: label, Doing: "reading what's here"})
 	p := find()
-	m.look(Look{Label: label, Looked: true, Found: len(p.Lines), Names: p.names, Err: p.Err})
+	m.look(Look{Label: label, Looked: true, Found: len(p.Lines), Names: p.names, Err: p.Err, Missed: p.Missed})
 	return p
 }
 
@@ -134,8 +135,9 @@ type Part struct {
 	// Unchecked are those of Lines declared as they are, as whether they
 	// need a secret couldn't be told, as without the network.
 	Unchecked []Unchecked
-	// Err is why it couldn't be looked at: none of it is declared.
-	Err error
+	// Err is why it couldn't be looked at: none of it is declared. Missed
+	// is why some of it couldn't be: the rest is.
+	Err, Missed error
 	// section is whether it declares its section with nothing in it: a
 	// kind's, whose program is here.
 	section bool
@@ -331,8 +333,12 @@ func macOSVersion(ctx context.Context, run runner.Runner) (string, error) {
 	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
-// featuresPart is the features that change the system that are on, each
-// as its own check finds it, and not declared already.
+// featuresPart is the features that change the system that are on, and
+// not declared already: each as its own check finds it, but Screen
+// Sharing, on once its service is (steps.ScreenSharingOn), as the person
+// switched it on whether or not viewers can take control, which its check
+// says once it's declared. One that can't be looked at is left out, the
+// rest declared, and why is the part's Missed.
 func (m Mac) featuresPart(ctx context.Context) Part {
 	p := Part{Kind: config.FeaturesKind, Label: featuresLabel}
 	declared, err := m.Config.List(config.FeaturesKind, m.Name)
@@ -342,18 +348,37 @@ func (m Mac) featuresPart(ctx context.Context) Part {
 	}
 	admin := &steps.Admin{}
 	var errs []error
-	for _, s := range []engine.Step{steps.TouchIDSudo(m.Run, admin, m.SudoLocal), steps.RemoteLogin(m.Run, admin), steps.FileSharing(m.Run, admin), steps.ScreenSharing(m.Run, admin)} {
-		res := s.Check(ctx)
+	for _, f := range []struct {
+		name, title string
+		on          func(context.Context) (bool, error)
+	}{
+		{steps.FeatureTouchIDSudo, "Touch ID for sudo", checkedOn(steps.TouchIDSudo(m.Run, admin, m.SudoLocal))},
+		{steps.FeatureRemoteLogin, "Remote Login", checkedOn(steps.RemoteLogin(m.Run, admin))},
+		{steps.FeatureFileSharing, "File Sharing", checkedOn(steps.FileSharing(m.Run, admin))},
+		{steps.FeatureScreenSharing, "Screen Sharing", func(ctx context.Context) (bool, error) { return steps.ScreenSharingOn(ctx, m.Run) }},
+	} {
+		on, err := f.on(ctx)
 		switch {
-		case res.State == check.Failed:
-			errs = append(errs, fmt.Errorf("%s: %s", s.Title, res.Reason))
-		case res.State == check.OK && !slices.Contains(declared.Names(), s.Name):
-			p.Lines = append(p.Lines, config.Entry{Name: s.Name})
-			p.names = append(p.names, s.Title)
+		case err != nil:
+			errs = append(errs, fmt.Errorf("%s: %w", f.title, err))
+		case on && !slices.Contains(declared.Names(), f.name):
+			p.Lines = append(p.Lines, config.Entry{Name: f.name})
+			p.names = append(p.names, f.title)
 		}
 	}
-	p.Err = errors.Join(errs...)
+	p.Missed = errors.Join(errs...)
 	return p
+}
+
+// checkedOn is whether s's feature is on, as its check finds it: ok.
+func checkedOn(s engine.Step) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		res := s.Check(ctx)
+		if res.State == check.Failed {
+			return false, errors.New(res.Reason)
+		}
+		return res.State == check.OK, nil
+	}
 }
 
 // backupsPart is the backup tools set up on the Mac, as each one's driver

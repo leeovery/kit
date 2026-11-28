@@ -458,12 +458,19 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		{steps.FeatureTouchIDSudo, func() engine.Step { return steps.TouchIDSudo(observed, r.admin, a.SudoLocal) }},
 		{steps.FeatureRemoteLogin, func() engine.Step { return steps.RemoteLogin(observed, r.admin) }},
 		{steps.FeatureFileSharing, func() engine.Step { return steps.FileSharing(observed, r.admin) }},
-		{steps.FeatureScreenSharing, func() engine.Step { return steps.ScreenSharing(observed, r.admin) }},
+		{steps.FeatureScreenSharing, func() engine.Step { return steps.ScreenSharing(observed, a.TCC) }},
 	} {
-		if features.on(system.name) {
-			step := feature(system.name, system.step())
-			addSetup(step, applyDrifter{step: step, words: kind.Words{Label: "Turn on", Does: "turn it on", Doing: "turning on"}})
+		if !features.on(system.name) {
+			continue
 		}
+		step := feature(system.name, system.step())
+		// Nothing to apply, as for Screen Sharing, is nothing to reconcile:
+		// what's wrong is the person's to do, never drift.
+		if step.Apply == nil {
+			setup = append(setup, step)
+			continue
+		}
+		addSetup(step, applyDrifter{step: step, words: kind.Words{Label: "Turn on", Does: "turn it on", Doing: "turning on"}})
 	}
 	var checks []engine.Step
 	for _, b := range backups {

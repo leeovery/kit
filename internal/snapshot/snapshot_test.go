@@ -168,6 +168,55 @@ func TestASnapshotDeclaresTheMacAsItStands(t *testing.T) {
 	}
 }
 
+// A feature that can't be looked at is left out, and says why, the rest of
+// [features] declared: Screen Sharing on as its service is, with no look at
+// what macOS grants, which needs Full Disk Access (the fake fails a test
+// on any command it hasn't scripted, sqlite3's read of the grants
+// included); Touch ID as its file says, launchctl failing for the rest.
+func TestAFeatureThatCantBeLookedAtLeavesTheRest(t *testing.T) {
+	for _, tt := range []struct {
+		name, listed string
+		exit         int
+		want, missed string
+	}{
+		{"Screen Sharing on, its grants unread", "\t\"com.apple.screensharing\" => enabled\n", 0, "[features]\nscreen-sharing\ntouch-id-sudo\n", ""},
+		{"launchctl failing", "", 1, "[features]\ntouch-id-sudo\n", "Remote Login: launchctl exited 1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, fake := newMac(t, "")
+			homebrew(fake, "", "", "")
+			fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n" + tt.listed + "}\n").Exits(tt.exit)
+			write(t, filepath.Dir(m.SudoLocal), map[string]string{"sudo_local": "auth       sufficient     pam_tid.so\n"})
+			var mu sync.Mutex
+			var told error
+			m.Looks = func(l snapshot.Look) {
+				mu.Lock()
+				defer mu.Unlock()
+				if l.Label == "Features" && l.Looked {
+					told = l.Missed
+				}
+			}
+			s := take(t, m)
+			if (told == nil) != (tt.missed == "") {
+				t.Errorf("the Features look told %v missed; want %q", told, tt.missed)
+			}
+			if got := declarations(t, m); !strings.Contains(got, tt.want) {
+				t.Errorf("laptop/declarations =\n%s\nwant it to hold\n%s", got, tt.want)
+			}
+			i := slices.IndexFunc(s.Parts, func(p snapshot.Part) bool { return p.Kind == config.FeaturesKind })
+			p := s.Parts[i]
+			switch {
+			case p.Err != nil:
+				t.Errorf("features' part failed whole: %v", p.Err)
+			case tt.missed == "" && p.Missed != nil:
+				t.Errorf("missed %v, want nothing", p.Missed)
+			case tt.missed != "" && (p.Missed == nil || !strings.Contains(p.Missed.Error(), tt.missed)):
+				t.Errorf("missed %v, want %q", p.Missed, tt.missed)
+			}
+		})
+	}
+}
+
 // tapTool scripts owner/tap/tool, a formula of a tap added already, whose
 // download answers, asked for without a token, as answer says.
 func tapTool(fake *runnertest.Fake, answer string) {

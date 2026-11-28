@@ -51,6 +51,18 @@ apps' settings (prefs), remote login, file sharing, screen sharing, Touch ID
 for sudo.
 `kit feature --help` lists them. They're kit-config's `[features]`.
 
+Screen sharing is ok only when its service is enabled and macOS grants
+viewers control: screen capture and posting events, both allowed for
+com.apple.screensharing.agent in the system's privacy database (TCC.db).
+Only System Settings grants control, so kit never turns screen sharing on
+itself. Off, or on with viewers only able to watch, it's a to-do: at the
+end of a whole `kit apply` at a terminal, kit opens System Settings at
+Sharing, and the person turns Screen Sharing on, or off and on again if it
+shows on. kit watches, and moves on once viewers can take control. Reading
+the grants needs Full Disk Access; without it, the check fails, saying so.
+`kit reconcile` has nothing to settle of it: it isn't drift. A snapshot
+(`kit setup`) declares it once its service is enabled, reading no grants.
+
 ## On a new Mac
 
 Settings are set as declared by `kit apply`, in no order with the rest, but

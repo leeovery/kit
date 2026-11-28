@@ -1511,3 +1511,14 @@ func TestTheSnapshotCountsThePath(t *testing.T) {
 		t.Errorf("counted = %q, %v; want %q, 2 paths", res.Summary, res.Counts, want)
 	}
 }
+
+// A part looked at in part counts what it found, and says what it missed,
+// as an item.
+func TestTheSnapshotSaysWhatAPartMissed(t *testing.T) {
+	res := counted([]snapshot.Part{
+		{Kind: config.FeaturesKind, Label: "features", Lines: []config.Entry{{Name: "touch-id-sudo"}}, Missed: errors.New("Remote Login: launchctl exited 1")},
+	})
+	if res.Counts[config.FeaturesKind] != 1 || len(res.Items) != 1 || res.Items[0].State != "partly looked at" || res.Items[0].Detail != "Remote Login: launchctl exited 1" {
+		t.Errorf("counted = %+v; want the feature counted, and what was missed an item", res)
+	}
+}

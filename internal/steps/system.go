@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/restore/oldmac"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -113,28 +114,114 @@ func FileSharing(run runner.Runner, admin *Admin) engine.Step {
 	return service(run, admin, FeatureFileSharing, "File Sharing", "com.apple.smbd", "/System/Library/LaunchDaemons/com.apple.smbd.plist")
 }
 
-// ScreenSharing checks the Mac shares its screen; applying turns its
-// service on, through sudo.
-func ScreenSharing(run runner.Runner, admin *Admin) engine.Step {
-	return service(run, admin, FeatureScreenSharing, "Screen Sharing", "com.apple.screensharing", "/System/Library/LaunchDaemons/com.apple.screensharing.plist")
+// The Screen Sharing that viewers can take control through: its service,
+// and the agent macOS grants control to.
+const (
+	screenSharingLabel = "com.apple.screensharing"
+	screenSharingAgent = "com.apple.screensharing.agent"
+)
+
+// SharingSettings is System Settings, opened at Sharing.
+const SharingSettings = "x-apple.systempreferences:com.apple.Sharing-Settings.extension"
+
+// controlGrants are what macOS grants Screen Sharing's agent for viewers to
+// take control: seeing the screen, and sending it keys and clicks.
+var controlGrants = []string{"kTCCServicePostEvent", "kTCCServiceScreenCapture"}
+
+// allowed is a grant's auth_value when it's allowed.
+const allowed = "2"
+
+// The words of Screen Sharing's to-dos.
+const (
+	sharingOpen  = "System Settings is open at Sharing"
+	sharingWatch = "viewers can take control"
+	sharingWhy   = "macOS lets viewers take control only once Screen Sharing is turned on in System Settings, which kit can't do for you."
+)
+
+// ScreenSharing checks the Mac shares its screen, viewers able to take
+// control: on only when launchd lists its service enabled and macOS grants
+// its agent both of controlGrants, as macOS's privacy database at tcc
+// says. Only System Settings grants them, as turning Screen Sharing on
+// there does, so the step has no apply: what's wrong is the person's to
+// do, and its card opens System Settings at Sharing.
+func ScreenSharing(run runner.Runner, tcc string) engine.Step {
+	return engine.Step{
+		Name: FeatureScreenSharing, Title: "Screen Sharing", Area: AreaDrift,
+		Choice: &engine.Choice{Open: func(ctx context.Context, _ check.Item) {
+			_, _ = run.Run(ctx, runner.Command{Name: "open", Args: []string{SharingSettings}})
+		}},
+		Check: func(ctx context.Context) check.Result {
+			on, err := serviceOn(ctx, run, screenSharingLabel)
+			if err != nil {
+				return failed(err)
+			}
+			if !on {
+				return yours(FeatureScreenSharing, "off", "off", "System Settings › General › Sharing: turn on Screen Sharing",
+					check.ToDo{Title: "Turn on Screen Sharing", Why: sharingWhy, Steps: []string{sharingOpen, "Turn on Screen Sharing"}, Watch: sharingWatch})
+			}
+			granted, err := controlGranted(ctx, run, tcc)
+			switch {
+			case err != nil:
+				return failed(err)
+			case !granted:
+				return yours(FeatureScreenSharing, "on, but viewers can only watch", "watch-only", "System Settings › General › Sharing: turn Screen Sharing off, then on again",
+					check.ToDo{Title: "Turn Screen Sharing off and on again", Why: "Screen Sharing is on, but viewers can only watch: " + sharingWhy, Steps: []string{sharingOpen, "Turn Screen Sharing off, then on again"}, Watch: sharingWatch})
+			}
+			return check.Result{State: check.OK, Summary: "on"}
+		},
+	}
+}
+
+// ScreenSharingOn reports whether Screen Sharing's service is on, as the
+// person switched it: whether viewers can take control aside, which needs
+// Full Disk Access to tell.
+func ScreenSharingOn(ctx context.Context, run runner.Runner) (bool, error) {
+	return serviceOn(ctx, run, screenSharingLabel)
+}
+
+// controlGranted reports whether macOS grants Screen Sharing's agent each
+// of controlGrants, every row of each allowed: none, or one denied, isn't.
+// The database holding them, at tcc, can't be read without Full Disk
+// Access.
+func controlGranted(ctx context.Context, run runner.Runner, tcc string) (bool, error) {
+	// The system's sqlite3, by path: Homebrew's can come first on kit's
+	// PATH. Its output is pinned, ~/.sqliterc never read, as one setting
+	// headers or columns would leave the grants unread.
+	out, err := output(ctx, run, "/usr/bin/sqlite3", "-init", "/dev/null", "-batch", "-readonly", "-list", "-noheader", "-separator", "|", tcc,
+		"select service, auth_value from access where client='"+screenSharingAgent+"'")
+	if exit := (*runner.ExitError)(nil); errors.As(err, &exit) && strings.Contains(exit.FullStderr, "unable to open database") {
+		return false, fmt.Errorf("can't tell whether viewers can take control: %w", prefs.ErrNoAccess)
+	}
+	if err != nil {
+		return false, fmt.Errorf("can't tell whether viewers can take control: %w", err)
+	}
+	granted := map[string]bool{}
+	for line := range strings.Lines(out) {
+		service, value, _ := strings.Cut(strings.TrimSpace(line), "|")
+		ok, seen := granted[service]
+		granted[service] = (ok || !seen) && value == allowed
+	}
+	for _, g := range controlGrants {
+		if !granted[g] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // service is the step of a system service that's on only when launchd lists
-// its job enabled: one it doesn't list is off, as its plist says Disabled.
-// label is its job's, and plist where launchd finds it.
+// its job enabled (serviceOn); applying turns it on, through sudo. label is
+// its job's, and plist where launchd finds it.
 func service(run runner.Runner, admin *Admin, name, title, label, plist string) engine.Step {
 	return engine.Step{
 		Name: name, Title: title, Area: AreaDrift, Admin: true,
 		Check: func(ctx context.Context) check.Result {
-			out, err := output(ctx, run, "launchctl", "print-disabled", "system")
-			if err != nil {
+			on, err := serviceOn(ctx, run, label)
+			switch {
+			case err != nil:
 				return failed(err)
-			}
-			for line := range strings.Lines(out) {
-				job, state, ok := strings.Cut(strings.TrimSpace(line), " => ")
-				if ok && strings.Trim(job, `"`) == label && (state == "enabled" || state == "false") {
-					return check.Result{State: check.OK, Summary: "on"}
-				}
+			case on:
+				return check.Result{State: check.OK, Summary: "on"}
 			}
 			return check.Result{State: check.Attention, Summary: "off", Items: []check.Item{{ID: name + ":" + name, Name: title, State: "missing", Detail: "turned off", Action: ActionInstall}}}
 		},
@@ -157,6 +244,22 @@ func service(run runner.Runner, admin *Admin, name, title, label, plist string) 
 			return nil
 		},
 	}
+}
+
+// serviceOn reports whether launchd lists the job of label enabled: one it
+// doesn't list is off, as its plist says Disabled.
+func serviceOn(ctx context.Context, run runner.Runner, label string) (bool, error) {
+	out, err := output(ctx, run, "launchctl", "print-disabled", "system")
+	if err != nil {
+		return false, err
+	}
+	for line := range strings.Lines(out) {
+		job, state, ok := strings.Cut(strings.TrimSpace(line), " => ")
+		if ok && strings.Trim(job, `"`) == label && (state == "enabled" || state == "false") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // HostKeyName names the step recording this Mac's SSH host key and local

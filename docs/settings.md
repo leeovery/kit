@@ -2,7 +2,7 @@
 
 Change a setting in System Settings as you always do, then tell kit to keep it. kit reads the
 value this Mac has and declares it in kit-config, and each Mac it's declared for gets it.
-kit also watches the Dock, Finder, the trackpad and more, so a change you forgot to keep still
+kit also watches the Dock, Finder, the trackpad and more, so a change you forgot still
 turns up. `kit power` and `kit git-config` keep power and git settings the same way. kit watches
 every git setting, but only the power settings you declare.
 
@@ -46,12 +46,11 @@ pull.rebase true
 
 - **`kit apply` sets what's missing.** On a new Mac, or for a line you wrote by hand, kit writes
   the declared value.
-- **You see the change at once.** After kit sets, unsets or puts back a setting, it restarts
-  what shows it: the Dock, Finder, Control Center or the menu bar. It reloads keyboard
-  shortcuts too.
+- **You see the change at once.** After kit changes a setting, it restarts what
+  shows it, such as the Dock, Finder, Control Center or the menu bar, and reloads keyboard shortcuts.
 - **A change by hand is never undone behind your back.** If a declared setting changes on the
-  Mac, `kit apply` leaves it. It's drift, and you choose to keep the new value or put the
-  declared one back.
+  Mac, `kit apply` leaves it. It's drift: you keep the new value or put back the
+  declared one.
 - **Removing differs by kind.** `kit defaults remove` and `kit git-config remove` unset the
   setting. `kit power remove` only takes the line out, and the value stays.
 
@@ -67,15 +66,14 @@ kit watches these domains, and every domain you declare a setting in:
 
 The first time kit looks at a domain, it takes the values as they are. After that, a setting
 you change there and haven't declared is drift. After a day, `kit status` lists it, and `kit
-reconcile` asks whether to declare it or put back what it was.
+reconcile` asks whether to declare it or put it back.
 
 A setting you never declared, removed from the Mac, shows up the same way:
 
 <img src="../art/settings-status.webp" alt="kit status under CONFIG: com.apple.dock:autohide removed, not declared, for 2 days, with kit reconcile to settle it" width="553">
 
 `kit reconcile defaults:com.apple.dock:autohide --adopt` accepts it as removed, and kit stops
-showing it. `--revert` puts the old value back. See
-[Drift: keep or undo what changed by hand](drift.md).
+showing it. `--revert` puts the old value back.
 
 ## What macOS changes by itself is ignored
 
@@ -92,15 +90,15 @@ git is different: every global setting that kit-config doesn't declare shows up.
 ## Good to know
 
 - **A name that starts `currentHost:`** is a setting macOS keeps for each Mac apart. For
-  example, `currentHost:NSGlobalDomain:com.apple.mouse.tapBehavior` writes a line that starts
+  example, `currentHost:NSGlobalDomain:com.apple.mouse.tapBehavior` writes a line starting
   `-currentHost`. It can still be declared for every Mac.
 - **Some settings need your password.** A setting in a domain under `/Library`, and every
-  power setting, is written through sudo. `kit apply` asks for the password once, at a
-  terminal.
+  power setting, is written through sudo. `kit apply` asks for the password once, at a terminal.
 - **An app keeps its own settings elsewhere.** A setting in the domain of an app is saved with
   the rest of that app: see [Apps' settings](apps-settings.md).
 - **Remote Login, File Sharing, Screen Sharing and Touch ID for sudo** are features, switched
-  on with `kit feature on`.
+  on with `kit feature on`. kit checks Screen Sharing viewers can take control,
+  which only System Settings grants: a whole `kit apply` at a terminal opens it.
 
 ## Reference
 
@@ -115,9 +113,8 @@ git is different: every global setting that kit-config doesn't declare shows up.
 | `remove --shared` | Needed to remove a shared line |
 | `kit reconcile` | Settles what changed by hand |
 
-A power source is `charger`, `battery`,
-`all` or `ups`. Each of these commands takes `--json`, and `--help` says what it needs and
-what it changes.
+A power source is `charger`, `battery`, `all` or `ups`. Each command takes `--json`, and
+`--help` says what it needs and what it changes.
 
 ## Related
 

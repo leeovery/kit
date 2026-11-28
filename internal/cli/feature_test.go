@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,9 @@ func TestFeaturesBringTheirSteps(t *testing.T) {
 		w := laptopWorld(t)
 		w.writeSection(t, "laptop", "features", feature+"\n")
 		w.fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"" + label + "\" => enabled\n}\n")
+		if feature == "screen-sharing" {
+			w.grants("kTCCServicePostEvent|2\nkTCCServiceScreenCapture|2\n")
+		}
 		if out, _, _ := w.run(t, "status", feature); !strings.Contains(out, feature+" ok on\n") {
 			t.Errorf("kit status %s printed\n%s", feature, out)
 		}
@@ -27,6 +31,28 @@ func TestFeaturesBringTheirSteps(t *testing.T) {
 		w.writeSection(t, tt.scope, tt.header, tt.line)
 		if _, errOut, code := w.run(t, "status"); !strings.Contains(errOut, tt.want) || code != 2 {
 			t.Errorf("[%s] %s: kit status printed %q, exit %d; want %q", tt.header, tt.line, errOut, code, tt.want)
+		}
+	}
+}
+
+// Screen Sharing whose viewers can only watch needs attention at once, as
+// a to-do, never drift new for a day, and kit reconcile has nothing to
+// settle of it: only System Settings grants control.
+func TestScreenSharingIsAToDoNotDrift(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "features", "screen-sharing\n")
+	w.fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.apple.screensharing\" => enabled\n}\n")
+	w.grants("kTCCServicePostEvent|0\nkTCCServiceScreenCapture|2\n")
+	out, _, _ := w.run(t, "status", "screen-sharing")
+	if want := "screen-sharing attention on, but viewers can only watch\nscreen-sharing problem Turn Screen Sharing off and on again (System Settings › General › Sharing: turn Screen Sharing off, then on again)\n"; !strings.Contains(out, want) {
+		t.Errorf("kit status screen-sharing printed\n%s\nwant\n%s", out, want)
+	}
+	if out, errOut, code := w.run(t, "reconcile", "--json"); code != 0 || strings.Contains(out, "screen-sharing") {
+		t.Errorf("kit reconcile printed\n%s%s exit %d; want nothing of screen-sharing", out, errOut, code)
+	}
+	for _, arg := range []string{"screen-sharing", "screen-sharing:watch-only"} {
+		if _, errOut, code := w.run(t, "reconcile", arg); code == 0 || !strings.Contains(errOut, "screen-sharing isn't drift, so kit reconcile has nothing to settle: kit status says how it stands, and a whole kit apply at a terminal raises what's yours to do") {
+			t.Errorf("kit reconcile %s printed %q, exit %d; want it isn't drift", arg, errOut, code)
 		}
 	}
 }
@@ -80,4 +106,11 @@ func TestAFeatureWaitingForWhatIsntThere(t *testing.T) {
 			}
 		})
 	}
+}
+
+// grants scripts what the world's privacy database says macOS grants
+// Screen Sharing's agent, as text.
+func (w *world) grants(text string) {
+	w.fake.On("/usr/bin/sqlite3", "-init", "/dev/null", "-batch", "-readonly", "-list", "-noheader", "-separator", "|", filepath.Join(w.home, "TCC.db"),
+		"select service, auth_value from access where client='com.apple.screensharing.agent'").Prints(text)
 }

@@ -240,8 +240,8 @@ its first line (a minute's timeout), each failing one an item of the `checks` st
 Config, Checks), which the status document carries. What only the person at the Mac can do
 about a check is a to-do, an item with a title, why, steps, what kit watches for, a group and,
 for a choice, its keys, raised at the end of applying (Steps by hand): restoring application
-settings (`prefs`, paused), a Time Machine disk to add, Arq's backup plan to set up; titled the
-same wherever the item shows. The rest (disk space, a stale backup, commits that won't push)
+settings (`prefs`, paused), a Time Machine disk to add, Arq's backup plan to set up, Screen
+Sharing to turn on in System Settings; titled the same wherever the item shows. The rest (disk space, a stale backup, commits that won't push)
 are how the Mac stands, not to-dos. Full Disk Access isn't one for apps' settings alone: a
 grant takes effect only once the terminal restarts, so kit couldn't watch for it. With
 backup exclusions to apply, held for want of it, at a terminal, it is one all the same, as they
@@ -1227,12 +1227,27 @@ or a `~` that doesn't start the home folder is refused. `kit path add <dir>` put
 directory last of the Mac's own (`--shared`: last of every Mac's, taking it out of the Macs'
 files), `kit path remove <dir>` takes it off; both write the file and commit.
 
-Four features change the system, each applied through sudo: `touch-id-sudo` (sudo takes a
-fingerprint, by a line in `/etc/pam.d/sudo_local`, which macOS updates leave alone),
-`remote-login` (SSH), `file-sharing` (SMB) and `screen-sharing` (VNC), each a launchd service
+Four features change the system: `touch-id-sudo` (sudo takes a fingerprint, by a line in
+`/etc/pam.d/sudo_local`, which macOS updates leave alone), `remote-login` (SSH),
+`file-sharing` (SMB) and `screen-sharing` (VNC), each but `touch-id-sudo` a launchd service
 on only when launchd lists its label enabled: one it doesn't list is off, as each one's plist
-says Disabled. A step whose apply needs an administrator's password says so (`Admin`), and
-`kit apply` asks for the password as the run starts, the step waiting for the answer, and
+says Disabled. The first three are applied through sudo. `screen-sharing` is on only when
+viewers can take control as well: macOS grants Screen Sharing's agent
+(`com.apple.screensharing.agent`) screen capture and posting events, both allowed in the
+system's TCC database (the injected `TCC` path), read with the system's `sqlite3`, its output
+pinned (`-init /dev/null -batch -readonly -list -noheader -separator '|'`), so no
+`~/.sqliterc` changes it. That database is SIP's, so only System Settings (or MDM) grants
+them, and turning Screen Sharing on there enables the service with them: launchctl alone, as
+kit once did, starts a service whose viewers can only watch. So `screen-sharing` has no
+apply: off, or on without control, it's a to-do (Checks above), its card opening System
+Settings at Sharing at the end of a whole `kit apply` at a terminal, and kit watching for
+control. It isn't drift: `kit reconcile` names it so, as any step whose items aren't drift,
+and says `kit status` tells how it stands. Turning the feature off only undeclares it. A read
+of the grants that fails says it can't tell, never ok, naming Full Disk Access when sqlite3
+couldn't open the database. A snapshot declares it as its service is, as the person switched
+it, reading no grants; a feature it can't look at is left out, the rest declared, and the
+Features row on kit setup's screen says what it missed. A step whose apply needs an
+administrator's password says so (`Admin`), and `kit apply` asks for the password as the run starts, the step waiting for the answer, and
 `kit reconcile` before anything is applied, as for the kinds whose installs need it: asked once
 at a terminal; without one, the step waits.
 

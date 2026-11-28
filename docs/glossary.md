@@ -114,6 +114,10 @@ restores them on a new Mac. It saves every preferences domain that isn't Apple's
 system's. It also saves the keys `[prefs keys]` names and the settings files `[prefs files]`
 names. They go to the `prefs` branch of kit-config, which the first save makes.
 
+**Screen Sharing.** The feature that lets another Mac see and control this one. kit checks that
+viewers can take control, which macOS grants only in System Settings. A whole `kit apply` at a
+terminal opens System Settings at Sharing for you to turn Screen Sharing on.
+
 **The hourly run.** On the hour, launchd opens kit.app, which runs `kit nightly`. It runs the jobs
 that are due, then every check. It tells no one what it finds: `kit status` and `kit log` show
 it. `kit apply` installs it.

@@ -188,6 +188,9 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 					if l.Err != nil {
 						found.Err = l.Err.Error()
 					}
+					if l.Missed != nil {
+						found.Missed = l.Missed.Error()
+					}
 					sink.Emit(found)
 				},
 			}

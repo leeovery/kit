@@ -108,6 +108,8 @@
   (literal "/bin/launchctl")
   (literal "/usr/bin/osascript")
   (literal "/usr/bin/open")
+  ;; Reading what macOS grants, in its privacy database.
+  (literal "/usr/bin/sqlite3")
   ;; Restarting apps, keyboard shortcuts taken up, power, sharing, Spotlight
   ;; and disks.
   (literal "/usr/bin/killall")

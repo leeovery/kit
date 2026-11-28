@@ -347,6 +347,7 @@ self_check() {
 	denies_running osascript /usr/bin/osascript -e 'return 1' || status=1
 	# open with nothing to open says how it's used.
 	denies_running open /usr/bin/open || status=1
+	denies_running sqlite3 /usr/bin/sqlite3 -version || status=1
 	denies_running tmux "$(installed tmux)" -V || status=1
 	# Each of these with nothing to do says how it's used.
 	denies_running diskutil /usr/sbin/diskutil || status=1
