@@ -119,8 +119,9 @@ func ScreenSharing(run runner.Runner, admin *Admin) engine.Step {
 	return service(run, admin, FeatureScreenSharing, "Screen Sharing", "com.apple.screensharing", "/System/Library/LaunchDaemons/com.apple.screensharing.plist")
 }
 
-// service is the step of a system service that's on unless launchd lists
-// it disabled: label is its job's, and plist where launchd finds it.
+// service is the step of a system service that's on only when launchd lists
+// its job enabled: one it doesn't list is off, as its plist says Disabled.
+// label is its job's, and plist where launchd finds it.
 func service(run runner.Runner, admin *Admin, name, title, label, plist string) engine.Step {
 	return engine.Step{
 		Name: name, Title: title, Area: AreaDrift, Admin: true,

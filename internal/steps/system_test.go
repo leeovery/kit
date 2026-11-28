@@ -55,19 +55,24 @@ func TestSystemServices(t *testing.T) {
 	} {
 		t.Run(tc.title, func(t *testing.T) {
 			held := &steps.Admin{Held: func(context.Context) bool { return true }}
+			if step := tc.step(nil, held); step.Title != tc.title || !step.Admin {
+				t.Errorf("step = %q, admin %t; want %q, needing an administrator", step.Title, step.Admin, tc.title)
+			}
+			line := func(label, state string) string { return "\t\t\"" + label + "\" => " + state + "\n" }
 			for _, c := range []struct {
 				listed string
 				want   check.State
 			}{
-				{"\t\t\"" + tc.label + "\" => enabled\n", check.OK},
-				{"\t\t\"" + tc.label + "\" => false\n", check.OK},
-				{"\t\t\"" + tc.label + "\" => disabled\n", check.Attention},
-				{"\t\t\"com.example.other\" => enabled\n", check.Attention},
+				{line(tc.label, "enabled"), check.OK},
+				{line(tc.label, "false"), check.OK},
+				{line(tc.label, "disabled"), check.Attention},
+				{line("com.example.other", "enabled"), check.Attention},
+				{line("com.example.other", "enabled") + line(tc.label, "enabled") + line("com.example.last", "disabled"), check.OK},
+				{line("com.example.other", "enabled") + line(tc.label, "disabled") + line("com.example.last", "enabled"), check.Attention},
 			} {
 				fake := runnertest.New(t)
 				fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n" + c.listed + "}\n")
-				step := tc.step(fake, held)
-				if res := step.Check(t.Context()); res.State != c.want || step.Title != tc.title || !step.Admin {
+				if res := tc.step(fake, held).Check(t.Context()); res.State != c.want {
 					t.Errorf("listing %q = %+v", c.listed, res)
 				}
 			}

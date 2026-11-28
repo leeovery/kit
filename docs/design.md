@@ -1229,8 +1229,9 @@ files), `kit path remove <dir>` takes it off; both write the file and commit.
 
 Four features change the system, each applied through sudo: `touch-id-sudo` (sudo takes a
 fingerprint, by a line in `/etc/pam.d/sudo_local`, which macOS updates leave alone),
-`remote-login` (SSH), `file-sharing` (SMB) and `screen-sharing` (VNC), each a launchd service on unless launchd lists
-it disabled. A step whose apply needs an administrator's password says so (`Admin`), and
+`remote-login` (SSH), `file-sharing` (SMB) and `screen-sharing` (VNC), each a launchd service
+on only when launchd lists its label enabled: one it doesn't list is off, as each one's plist
+says Disabled. A step whose apply needs an administrator's password says so (`Admin`), and
 `kit apply` asks for the password as the run starts, the step waiting for the answer, and
 `kit reconcile` before anything is applied, as for the kinds whose installs need it: asked once
 at a terminal; without one, the step waits.
