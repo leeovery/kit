@@ -99,8 +99,8 @@ git is different: every global setting that kit-config doesn't declare shows up.
   terminal.
 - **An app keeps its own settings elsewhere.** A setting in the domain of an app is saved with
   the rest of that app: see [Apps' settings](apps-settings.md).
-- **Remote Login, File Sharing and Touch ID for sudo** are features, switched on with
-  `kit feature on`.
+- **Remote Login, File Sharing, Screen Sharing and Touch ID for sudo** are features, switched
+  on with `kit feature on`.
 
 ## Reference
 

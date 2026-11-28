@@ -9,17 +9,19 @@ import (
 // know is refused, saying where and naming those it has, as scratch and
 // oh-my-zsh are now kit has them no longer.
 func TestFeaturesBringTheirSteps(t *testing.T) {
-	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "features", "remote-login\n")
-	w.fake.On("launchctl", "print-disabled", "system").Prints(`disabled services = {` + "\n" + `	"com.openssh.sshd" => enabled` + "\n}\n")
-	if out, _, _ := w.run(t, "status", "remote-login"); !strings.Contains(out, "remote-login ok on\n") {
-		t.Errorf("kit status remote-login printed\n%s", out)
+	for feature, label := range map[string]string{"remote-login": "com.openssh.sshd", "file-sharing": "com.apple.smbd", "screen-sharing": "com.apple.screensharing"} {
+		w := laptopWorld(t)
+		w.writeSection(t, "laptop", "features", feature+"\n")
+		w.fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"" + label + "\" => enabled\n}\n")
+		if out, _, _ := w.run(t, "status", feature); !strings.Contains(out, feature+" ok on\n") {
+			t.Errorf("kit status %s printed\n%s", feature, out)
+		}
 	}
 
 	for _, tt := range []struct{ scope, header, line, want string }{
 		{"laptop", "features", "time-capsule\n", "laptop/declarations:5: kit doesn't know the feature time-capsule"},
-		{"laptop", "features", "scratch\n", "laptop/declarations:5: kit doesn't know the feature scratch: one of file-sharing, prefs, remote-login, touch-id-sudo\n"},
-		{"shared", "features", "oh-my-zsh\n", "kit doesn't know the feature oh-my-zsh: one of file-sharing, prefs, remote-login, touch-id-sudo\n"},
+		{"laptop", "features", "scratch\n", "laptop/declarations:5: kit doesn't know the feature scratch: one of file-sharing, prefs, remote-login, screen-sharing, touch-id-sudo\n"},
+		{"shared", "features", "oh-my-zsh\n", "kit doesn't know the feature oh-my-zsh: one of file-sharing, prefs, remote-login, screen-sharing, touch-id-sudo\n"},
 	} {
 		w := laptopWorld(t)
 		w.writeSection(t, tt.scope, tt.header, tt.line)
@@ -47,7 +49,7 @@ func TestFeatureOnAndOff(t *testing.T) {
 		t.Errorf("[features] = %q, want it gone", got)
 	}
 	for _, name := range []string{"time-capsule", "scratch", "oh-my-zsh"} {
-		if _, errOut, code := w.run(t, "feature", "on", name); !strings.Contains(errOut, "kit doesn't know the feature "+name+": one of file-sharing, prefs, remote-login, touch-id-sudo\n") || code != 2 {
+		if _, errOut, code := w.run(t, "feature", "on", name); !strings.Contains(errOut, "kit doesn't know the feature "+name+": one of file-sharing, prefs, remote-login, screen-sharing, touch-id-sudo\n") || code != 2 {
 			t.Errorf("kit feature on %s printed %q, exit %d", name, errOut, code)
 		}
 	}

@@ -34,11 +34,12 @@ func (a *Admin) ok(ctx context.Context) bool {
 const AdminWait = "waiting for an administrator's password: kit apply at a terminal asks for it"
 
 // The features that change the Mac's system: Touch ID for sudo, Remote
-// Login and File Sharing.
+// Login, File Sharing and Screen Sharing.
 const (
-	FeatureTouchIDSudo = "touch-id-sudo"
-	FeatureRemoteLogin = "remote-login"
-	FeatureFileSharing = "file-sharing"
+	FeatureTouchIDSudo   = "touch-id-sudo"
+	FeatureRemoteLogin   = "remote-login"
+	FeatureFileSharing   = "file-sharing"
+	FeatureScreenSharing = "screen-sharing"
 )
 
 // SudoLocal is sudo's file of local settings, which macOS updates leave as
@@ -112,8 +113,15 @@ func FileSharing(run runner.Runner, admin *Admin) engine.Step {
 	return service(run, admin, FeatureFileSharing, "File Sharing", "com.apple.smbd", "/System/Library/LaunchDaemons/com.apple.smbd.plist")
 }
 
-// service is the step of a system service that's on unless launchd lists
-// it disabled: label is its job's, and plist where launchd finds it.
+// ScreenSharing checks the Mac shares its screen; applying turns its
+// service on, through sudo.
+func ScreenSharing(run runner.Runner, admin *Admin) engine.Step {
+	return service(run, admin, FeatureScreenSharing, "Screen Sharing", "com.apple.screensharing", "/System/Library/LaunchDaemons/com.apple.screensharing.plist")
+}
+
+// service is the step of a system service that's on only when launchd lists
+// its job enabled: one it doesn't list is off, as its plist says Disabled.
+// label is its job's, and plist where launchd finds it.
 func service(run runner.Runner, admin *Admin, name, title, label, plist string) engine.Step {
 	return engine.Step{
 		Name: name, Title: title, Area: AreaDrift, Admin: true,

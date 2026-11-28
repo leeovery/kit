@@ -42,7 +42,7 @@ var rowSteps = map[string][]string{
 	rowThisMac: {"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-apps", "boot-kit-config", "boot-kit",
 		"boot-full-disk-access", "boot-terminal", "disk", "memory", "load", "kit-version", "full-disk-access"},
 	rowFiles:    {"file", "path"},
-	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},
+	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing", "screen-sharing"},
 	rowGit:      {"config", "config-sync", "config-private", "new-mac"},
 	rowBackups:  {"prefs", steps.LaunchName, "nightly"},
 }

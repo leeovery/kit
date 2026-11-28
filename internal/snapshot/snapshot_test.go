@@ -146,19 +146,19 @@ func TestASnapshotDeclaresTheMacAsItStands(t *testing.T) {
 	tapTool(fake, "200")
 	fake.On("git", "config", "--global", "--list", "-z").Prints("user.name\nSome One\x00core.editor\nmicro\x00include.path\na\x00include.path\nb\x00")
 	setting(fake, "com.apple.dock", "<key>tilesize</key><integer>60</integer><key>version</key><integer>1</integer>")
-	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.openssh.sshd\" => enabled\n\t\"com.apple.smbd\" => disabled\n}\n")
+	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.openssh.sshd\" => enabled\n\t\"com.apple.smbd\" => disabled\n\t\"com.apple.screensharing\" => enabled\n}\n")
 	write(t, filepath.Dir(m.SudoLocal), map[string]string{"sudo_local": "auth       sufficient     pam_tid.so\n"})
 	fake.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>AutoBackup</key><true/><key>Destinations</key><array><dict/></array></dict></plist>")
 	fake.On("tmutil", "status").Prints("Running = 0;\n")
 	fake.On("tmutil", "destinationinfo").Prints("Mount Point   : /Volumes/Backups\n")
 
 	s := take(t, m)
-	want := "[features]\ntouch-id-sudo\n\n[backups]\ntime-machine\n\n[git config]\ncore.editor micro\nuser.name \"Some One\"\n\n" +
+	want := "[features]\nscreen-sharing\ntouch-id-sudo\n\n[backups]\ntime-machine\n\n[git config]\ncore.editor micro\nuser.name \"Some One\"\n\n" +
 		"[macos settings]\ncom.apple.dock tilesize -int 60\n\n[homebrew formulae]\nripgrep\nowner/tap/tool\n\n[homebrew casks]\nghostty\n"
 	if got := declarations(t, m); got != want {
 		t.Errorf("laptop/declarations =\n%s\nwant\n%s", got, want)
 	}
-	wantCounts := []string{"brew 2", "cask 1", "git-config 2", "defaults 1", "features 1", "backups 1"}
+	wantCounts := []string{"brew 2", "cask 1", "git-config 2", "defaults 1", "features 2", "backups 1"}
 	if got := counts(s); !slices.Equal(got, wantCounts) {
 		t.Errorf("parts = %q, want %q: no part for a kind whose program isn't here", got, wantCounts)
 	}
