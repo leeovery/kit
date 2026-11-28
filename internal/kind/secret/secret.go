@@ -321,7 +321,7 @@ func (s *Secrets) HomePaths(names []string) []string {
 
 // Value can't say where a secret found on the Mac is kept.
 func (s *Secrets) Value(_ context.Context, name string) (string, error) {
-	return "", fmt.Errorf("kit can't tell where %s is kept: declare it with kit secret add %s --ref <where its store keeps it, in full> (%s)", name, name, stores().refs())
+	return "", fmt.Errorf("kit can't tell where %s is kept: declare it with kit secret add %s --ref <where its store keeps it, in full> (%s)", name, runner.Typed(name), stores().refs())
 }
 
 // Remove takes each secret off the Mac: a variable out of ~/.secrets.zsh, a

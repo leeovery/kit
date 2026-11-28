@@ -506,7 +506,7 @@ func (f *declFile) String() string {
 // name (opts), as a list's holding its lines back, or an item's going by a
 // name.
 func matchHeader(defs []sectionDef, text string) (d sectionDef, arg, opts string, ok bool) {
-	text = strings.Join(strings.Fields(text), " ")
+	text = squeeze(text)
 	for _, d := range defs {
 		if text == d.header {
 			return d, "", "", true

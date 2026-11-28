@@ -209,7 +209,19 @@ func TestWhyOfALinkedFile(t *testing.T) {
 		t.Errorf("kit why printed\n%s\nwant\n%s", out, want)
 	}
 	out, _, _ = w.run(t, "why", filepath.Join(w.home, ".differs"))
-	if !strings.Contains(out, "~/.differs (file)\n  linked from shared/home/.differs\n  not linked here: kit status says why") {
+	if !strings.Contains(out, "~/.differs (file)\n  linked from shared/home/.differs\n  not linked here: kit status says why, kit apply or kit reconcile file:~/.differs settles it\n") {
+		t.Errorf("kit why printed\n%s", out)
+	}
+}
+
+// The command kit why gives, to paste, quotes an id a shell would split.
+func TestWhyQuotesTheIDItGives(t *testing.T) {
+	w := laptopWorld(t)
+	w.write(t, ".config/kit/shared/home/App Support/conf", "kit's\n")
+	w.write(t, "App Support/conf", "the Mac's\n")
+	w.keeps("shared/home/App Support/conf")
+	out, _, _ := w.run(t, "why", "~/App Support/conf")
+	if !strings.Contains(out, "not linked here: kit status says why, kit apply or kit reconcile 'file:~/App Support/conf' settles it\n") {
 		t.Errorf("kit why printed\n%s", out)
 	}
 }

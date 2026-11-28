@@ -111,6 +111,16 @@ func quote(w string) string {
 	return "'" + strings.ReplaceAll(w, "'", `'\''`) + "'"
 }
 
+// Typed is w as a person types it at a shell for one of kit's commands, to
+// paste: quoted as a shell needs, but a ~ left bare, as kit reads a path
+// from ~ as the shell would.
+func Typed(w string) string {
+	if w != "" && strings.IndexFunc(w, func(r rune) bool { return r != '~' && needsQuoting(r) }) < 0 {
+		return w
+	}
+	return quote(w)
+}
+
 // needsQuoting reports whether a shell would take r other than as itself.
 func needsQuoting(r rune) bool {
 	plain := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("@%+=:,./_-", r)

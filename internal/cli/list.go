@@ -17,6 +17,7 @@ import (
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/render"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // listSchema is kit list --json's document's version.
@@ -242,7 +243,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 			if w.Installed {
 				b.WriteString("  linked here\n")
 			} else {
-				fmt.Fprintf(&b, "  not linked here: kit status says why, kit apply or kit reconcile %s:%s settles it\n", w.Kind, name)
+				fmt.Fprintf(&b, "  not linked here: kit status says why, kit apply or kit reconcile %s settles it\n", runner.Typed(w.Kind+":"+name))
 			}
 			continue
 		}
@@ -259,7 +260,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		case w.ForThisMac:
 			fmt.Fprintf(&b, "  not installed here: kit apply installs it\n")
 		case w.Installed:
-			fmt.Fprintf(&b, "  installed here, not declared for this Mac: kit reconcile %s:%s\n", w.Kind, name)
+			fmt.Fprintf(&b, "  installed here, not declared for this Mac: kit reconcile %s\n", runner.Typed(w.Kind+":"+name))
 		default:
 			fmt.Fprintf(&b, "  not declared for this Mac, nor installed here\n")
 		}

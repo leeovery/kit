@@ -27,6 +27,25 @@ func TestCommandString(t *testing.T) {
 	}
 }
 
+// A word to paste is quoted only when a shell would take it otherwise, a ~
+// left bare.
+func TestTyped(t *testing.T) {
+	for w, want := range map[string]string{
+		"TOKEN":                  "TOKEN",
+		"~/.ssh/id.pem":          "~/.ssh/id.pem",
+		"secret:~/.npmrc":        "secret:~/.npmrc",
+		"brew:node@20":           "brew:node@20",
+		"~/App Support/key":      "'~/App Support/key'",
+		"secret:~/App Support/k": "'secret:~/App Support/k'",
+		"~/a[1]":                 "'~/a[1]'",
+		"":                       "''",
+	} {
+		if got := runner.Typed(w); got != want {
+			t.Errorf("Typed(%q) = %q, want %q", w, got, want)
+		}
+	}
+}
+
 func TestObservedTellsOfEveryCommand(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "leaves").Prints("jq\n")

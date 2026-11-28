@@ -85,6 +85,19 @@ func TestHomePaths(t *testing.T) {
 	}
 }
 
+// The command Value gives, to paste, quotes a path a shell would split.
+func TestValueSaysHowToDeclareIt(t *testing.T) {
+	s := secret.New(runnertest.New(t), t.TempDir(), t.TempDir())
+	for name, want := range map[string]string{
+		"TOKEN":             "kit secret add TOKEN --ref",
+		"~/App Support/key": "kit secret add '~/App Support/key' --ref",
+	} {
+		if _, err := s.Value(t.Context(), name); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Value(%q) error = %v, want %q", name, err, want)
+		}
+	}
+}
+
 func TestCheckingReadsWhatsInPlace(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)

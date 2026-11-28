@@ -2,7 +2,9 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"unicode"
 )
 
 // splitComment splits a line into what's before its comment and the comment:
@@ -55,10 +57,13 @@ func optionsAt(line string) int {
 // splitCommand splits a command's line into its name, its options and its
 // note: a # that starts a word outside quotes starts the note. The name is
 // the line's first word, as Words reads it: a name with a space in it is
-// quoted.
+// quoted. No name holds a backslash, which Words would read away.
 func splitCommand(line string) (name, value, note string, err error) {
 	text, note := splitNote(line)
 	end := unquotedAt(text, func(_ int, r rune) bool { return r == ' ' || r == '\t' })
+	if strings.ContainsRune(text[:end], '\\') {
+		return "", "", "", fmt.Errorf("%s: a name holds no backslash", text[:end])
+	}
 	words, err := Words(text[:end])
 	if err != nil {
 		return "", "", "", err
@@ -74,12 +79,20 @@ func splitCommand(line string) (name, value, note string, err error) {
 }
 
 // unquotedAt is where in text the first character outside quotes, and not
-// escaped, that at says is at: text's length when there's none. Quotes and
-// backslashes are read as Words reads them.
+// escaped, that at says is at: text's length when there's none.
 func unquotedAt(text string, at func(i int, r rune) bool) int {
+	return scan(text, func(i int, r rune, bare bool) bool { return bare && at(i, r) })
+}
+
+// scan gives visit each of text's characters in turn, and whether it's
+// bare: outside quotes, not escaped, and not itself a quote or a backslash
+// that escapes, as Words reads them. It stops where visit says to, and
+// returns where: text's length when visit never does.
+func scan(text string, visit func(i int, r rune, bare bool) (stop bool)) int {
 	quote := rune(0)
 	escaped := false
 	for i, r := range text {
+		bare := false
 		switch {
 		case escaped:
 			escaped = false
@@ -91,11 +104,34 @@ func unquotedAt(text string, at func(i int, r rune) bool) int {
 			}
 		case r == '"' || r == '\'':
 			quote = r
-		case at(i, r):
+		default:
+			bare = true
+		}
+		if visit(i, r, bare) {
 			return i
 		}
 	}
 	return len(text)
+}
+
+// squeeze is text with each run of whitespace outside quotes one space, and
+// none at its ends: what's quoted is kept as it is.
+func squeeze(text string) string {
+	var b strings.Builder
+	space := false
+	scan(text, func(_ int, r rune, bare bool) bool {
+		if bare && unicode.IsSpace(r) {
+			space = true
+			return false
+		}
+		if space && b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		space = false
+		b.WriteRune(r)
+		return false
+	})
+	return b.String()
 }
 
 // lineWord is word as a line holds it, for Words to read back: as it is

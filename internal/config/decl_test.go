@@ -144,6 +144,27 @@ func TestListASecretsPathWithSpaces(t *testing.T) {
 	}
 }
 
+// A header's spaces are one outside quotes, as kit writes it, and kept as
+// they are inside: a section held for a path with two spaces in a row is
+// held for that path, and a line declared for it goes in that section.
+func TestAHeldSectionKeepsTheSpacesItQuotes(t *testing.T) {
+	const path = "~/a  b/x"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets op://vault/item]\n\"" + path + "\" s/f\n\n[homebrew casks   --secret  \"" + path + "\"]\napp\n"})
+	got, err := cfg.List("cask", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secrets := got.Entries[0].Secrets(); !slices.Equal(secrets, []string{path}) {
+		t.Errorf("Secrets() = %q, want %q", secrets, path)
+	}
+	if err := cfg.Declare("cask", "laptop", config.Entry{Name: "other", Hold: config.SecretHold(path)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readFile(t, cfg, "laptop/declarations"), "[secrets op://vault/item]\n\""+path+"\" s/f\n\n[homebrew casks   --secret  \""+path+"\"]\napp\nother\n"; got != want {
+		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
+	}
+}
+
 // A secret's name is an environment variable's, or a file's path whose
 // only whitespace is a space: nothing else with a space in it is one.
 func TestListRefusesASecretsName(t *testing.T) {
@@ -151,6 +172,7 @@ func TestListRefusesASecretsName(t *testing.T) {
 		"a variable with a space":   `"MY TOKEN" op://vault/item/field`,
 		"a path with a tab":         "\"~/App\tSupport/licence\" op://vault/item/field",
 		"a path with a backslash":   `"~/App\\Support/licence" op://vault/item/field`,
+		"a backslash unquoted":      `~/App\Support/licence op://vault/item/field`,
 		"a path with a quote":       `"~/App \"Support\"/licence" op://vault/item/field`,
 		"a path whose quote's open": `"~/App Support/licence op://vault/item/field`,
 	} {
