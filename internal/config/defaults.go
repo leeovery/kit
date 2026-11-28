@@ -142,24 +142,11 @@ func defaultsName(line string) string {
 // splitNote splits a line into its text and its note: a # that starts a
 // word outside quotes starts the note.
 func splitNote(line string) (text, note string) {
-	text = line
-	quote := rune(0)
-	escaped := false
-	for i, r := range line {
-		switch {
-		case escaped:
-			escaped = false
-		case r == '\\' && quote != '\'':
-			escaped = true
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			}
-		case r == '"' || r == '\'':
-			quote = r
-		case r == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t'):
-			return strings.TrimSpace(line[:i]), strings.TrimSpace(line[i+1:])
-		}
+	i := unquotedAt(line, func(i int, r rune) bool {
+		return r == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t')
+	})
+	if i == len(line) {
+		return strings.TrimSpace(line), ""
 	}
-	return strings.TrimSpace(text), ""
+	return strings.TrimSpace(line[:i]), strings.TrimSpace(line[i+1:])
 }

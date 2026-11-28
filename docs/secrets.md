@@ -26,9 +26,13 @@ kit secret add OTHER_TOKEN --field GitHub/other \
   --stdin < token.txt
 # A key file, kept as an attachment
 kit secret add ~/.ssh/id.pem --from id.pem
+# A path with spaces, in quotes
+kit secret add \
+  "~/Library/Application Support/App/key" \
+  --from key
 ```
 
-Neither names an item, so both go in the one block for an item that this Mac's declarations
+None names an item, so all three go in the one block for an item that this Mac's declarations
 file has.
 
 ## What happens

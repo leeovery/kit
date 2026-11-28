@@ -454,6 +454,50 @@ func TestEditingRefuses(t *testing.T) {
 	}
 }
 
+// A secret's path with spaces is written quoted, and read back, replaced
+// and undeclared by its path; one without is written as it is, as ever.
+func TestEditASecretsPathWithSpaces(t *testing.T) {
+	const path = "~/Library/Application Support/App/Licences/Some App.licence"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets op://vault/item]\nTOKEN a/b\n"})
+	for _, e := range []config.Entry{
+		{Name: path, Value: `"section/Some App.licence" --mode 644`, Item: "op://vault/item", Note: "the licence"},
+		{Name: "~/.config/app/licence[1]", Value: "section/licence", Item: "op://vault/item"},
+	} {
+		if err := cfg.Declare("secret", "laptop", e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "[secrets op://vault/item]\nTOKEN a/b\n~/.config/app/licence[1] section/licence\n\"" + path + "\" \"section/Some App.licence\" --mode 644   # the licence\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Fatalf("laptop =\n%s\nwant\n%s", got, want)
+	}
+	list, err := cfg.List("secret", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range list.Entries {
+		names = append(names, e.Name)
+	}
+	if !slices.Equal(names, []string{"TOKEN", "~/.config/app/licence[1]", path}) {
+		t.Errorf("List() names = %q", names)
+	}
+	if err := cfg.Replace("secret", "laptop", config.Entry{Name: path, Value: `"section/Other App.licence"`}); err != nil {
+		t.Fatal(err)
+	}
+	want = "[secrets op://vault/item]\nTOKEN a/b\n~/.config/app/licence[1] section/licence\n\"" + path + "\" \"section/Other App.licence\"\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("replaced, laptop =\n%s\nwant\n%s", got, want)
+	}
+	if err := cfg.Undeclare("secret", "laptop", path); err != nil {
+		t.Fatal(err)
+	}
+	want = "[secrets op://vault/item]\nTOKEN a/b\n~/.config/app/licence[1] section/licence\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("undeclared, laptop =\n%s\nwant\n%s", got, want)
+	}
+}
+
 // A secret is declared once in a file, whichever item's section it's in.
 func TestDeclareASecretOnce(t *testing.T) {
 	before := "[secrets op://vault/A]\nTOKEN a/b\n"

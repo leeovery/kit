@@ -695,7 +695,7 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 		if strings.TrimSpace(e.Value) == "" {
 			return "", fmt.Errorf("%s needs its %s", name, map[Form]string{Commands: "options", Settings: "value", Secrets: "reference"}[d.form])
 		}
-		line += " " + strings.TrimSpace(e.Value)
+		line = lineWord(name) + " " + strings.TrimSpace(e.Value)
 	case Options:
 		if !commandName.MatchString(name) {
 			return "", fmt.Errorf("%q isn't a name", name)

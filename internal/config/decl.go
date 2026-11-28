@@ -413,8 +413,9 @@ var lineName = regexp.MustCompile(`^[A-Za-z0-9@._+/-][A-Za-z0-9@._+/:^~*<>=|,-]*
 var commandName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // secretName is what a secret fills: an environment variable's name, or a
-// file's path, from ~ or /.
-var secretName = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*|(~/|/)[^\s"'#]+)$`)
+// file's path, from ~ or /, spaces and all (a line quotes it), but no other
+// space, quote, # or backslash.
+var secretName = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*|(~/|/)[^\t\n\v\f\r"'#\\]+)$`)
 
 // settingKey is what a setting's key may be: no spaces, quotes, # or
 // backslashes, which a key such as credential.https://github.com.helper
