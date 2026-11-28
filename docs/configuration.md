@@ -193,6 +193,14 @@ A few sections take more after the header:
   what it fills, but gives only the field, such as `API_TOKEN GitHub/token`. `--as tokens`
   after the item names the block, for `kit secret add --in tokens`.
 
+A secret that fills a file whose path has spaces takes the path in double quotes. kit writes
+the quotes itself when it adds the line:
+
+```text
+[secrets op://vault/item]
+"~/Library/Application Support/App/key" key
+```
+
 ### Held sections
 
 A section of packages can hold its lines back until something is in place. The header says
@@ -212,9 +220,9 @@ firefox-helper
 | `--after step` | A step, or a thing such as `cask:firefox` |
 
 The package sections take both, each as often as you like, but `[claude mcp]` takes neither.
-`[features]` takes `--after` only. No other section takes either. A secret is named by what it fills: an environment
-variable, or a file path from `~` or `/`. [Secrets from 1Password](secrets.md) says when a
-private tap needs a section like this.
+`[features]` takes `--after` only. No other section takes either. A secret is named by what it
+fills: an environment variable, or a file path from `~` or `/`, quoted if it has spaces.
+[Secrets from 1Password](secrets.md) says when a private tap needs a section like this.
 
 ### Options on a line
 

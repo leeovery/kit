@@ -454,6 +454,50 @@ func TestEditingRefuses(t *testing.T) {
 	}
 }
 
+// A secret's path with spaces is written quoted, and read back, replaced
+// and undeclared by its path; one without is written as it is, as ever.
+func TestEditASecretsPathWithSpaces(t *testing.T) {
+	const path = "~/Library/Application Support/App/Licences/Some App.licence"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets op://vault/item]\nTOKEN a/b\n"})
+	for _, e := range []config.Entry{
+		{Name: path, Value: `"section/Some App.licence" --mode 644`, Item: "op://vault/item", Note: "the licence"},
+		{Name: "~/.config/app/licence[1]", Value: "section/licence", Item: "op://vault/item"},
+	} {
+		if err := cfg.Declare("secret", "laptop", e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "[secrets op://vault/item]\nTOKEN a/b\n~/.config/app/licence[1] section/licence\n\"" + path + "\" \"section/Some App.licence\" --mode 644   # the licence\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Fatalf("laptop =\n%s\nwant\n%s", got, want)
+	}
+	list, err := cfg.List("secret", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range list.Entries {
+		names = append(names, e.Name)
+	}
+	if !slices.Equal(names, []string{"TOKEN", "~/.config/app/licence[1]", path}) {
+		t.Errorf("List() names = %q", names)
+	}
+	if err := cfg.Replace("secret", "laptop", config.Entry{Name: path, Value: `"section/Other App.licence"`}); err != nil {
+		t.Fatal(err)
+	}
+	want = "[secrets op://vault/item]\nTOKEN a/b\n~/.config/app/licence[1] section/licence\n\"" + path + "\" \"section/Other App.licence\"\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("replaced, laptop =\n%s\nwant\n%s", got, want)
+	}
+	if err := cfg.Undeclare("secret", "laptop", path); err != nil {
+		t.Fatal(err)
+	}
+	want = "[secrets op://vault/item]\nTOKEN a/b\n~/.config/app/licence[1] section/licence\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("undeclared, laptop =\n%s\nwant\n%s", got, want)
+	}
+}
+
 // A secret is declared once in a file, whichever item's section it's in.
 func TestDeclareASecretOnce(t *testing.T) {
 	before := "[secrets op://vault/A]\nTOKEN a/b\n"
@@ -621,6 +665,10 @@ func TestDeclareSharedMovesTheBlockAsWritten(t *testing.T) {
 		"comments": {laptop: "[homebrew formulae]\n# the compiler\ngo\n", studio: "[homebrew formulae]\n# for work\ngo\n", kind: "brew", e: config.Entry{Name: "go"}, want: "different comments above them, laptop/declarations:3 (the compiler), studio/declarations:3 (for work)"},
 		"steps":    {laptop: "[manual]\nsign-in \"Sign in\"\n  Open the app\n  Sign in\n", studio: "[manual]\nsign-in \"Sign in\"\n  Open it\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in"}, want: "different steps under them, laptop/declarations:2 (Open the app; Sign in), studio/declarations:2 (Open it)"},
 		"holds":    {laptop: "[homebrew formulae --after cask:x]\ngo\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go"}, want: "different holds, laptop/declarations:2 (--after cask:x), studio/declarations:2 (none)"},
+		"a path with spaces in different words": {laptop: "[secrets op://vault/Item]\n\"~/a b/x\" Section/foo\n", studio: "[secrets op://vault/Item]\n\"~/a b/x\" Section/bar\n", kind: "secret", e: config.Entry{Name: "~/a b/x", Item: "op://vault/Item"},
+			want: `different words, laptop/declarations:2 ("~/a b/x" Section/foo), studio/declarations:2 ("~/a b/x" Section/bar)`},
+		"a path with spaces given otherwise": {laptop: "[secrets op://vault/Item]\n\"~/a b/x\" Section/foo\n", kind: "secret", e: config.Entry{Name: "~/a b/x", Value: "Section/other", Item: "op://vault/Item"},
+			want: `laptop/declarations:2 has "~/a b/x" Section/foo, where this gives "~/a b/x" Section/other`},
 		"a value given otherwise": {laptop: "[manual]\nsign-in \"Sign in\" --after cask:app\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in", Value: `"Sign in"`},
 			want: `laptop/declarations:2 has sign-in "Sign in" --after cask:app, where this gives sign-in "Sign in": give only its name to move it as written, or take that line out first`},
 		"a value from the Mac otherwise": {laptop: "[macos settings]\ncom.apple.dock tilesize -integer 60\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"},

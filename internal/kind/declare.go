@@ -8,6 +8,7 @@ import (
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // Declared is what k declares for the Mac named mac: its sections in cfg,
@@ -138,7 +139,7 @@ func secretDeclared(cfg *config.Config, scope, mac string, need Need) error {
 	case len(without) == 0:
 		return nil
 	case scope == config.Shared:
-		return fmt.Errorf("%s, so it needs %s, which no [secrets] section declares for %s: declare it for every Mac first (kit secret add %s --shared)", need.Why, need.Secret, strings.Join(without, " and "), need.Secret)
+		return fmt.Errorf("%s, so it needs %s, which no [secrets] section declares for %s: declare it for every Mac first (kit secret add %s --shared)", need.Why, need.Secret, strings.Join(without, " and "), runner.Typed(need.Secret))
 	}
-	return fmt.Errorf("%s, so it needs %s, which no [secrets] section declares: declare it first (kit secret add %s)", need.Why, need.Secret, need.Secret)
+	return fmt.Errorf("%s, so it needs %s, which no [secrets] section declares: declare it first (kit secret add %s)", need.Why, need.Secret, runner.Typed(need.Secret))
 }

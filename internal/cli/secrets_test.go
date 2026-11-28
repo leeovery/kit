@@ -286,6 +286,66 @@ func TestAddASecretFileByItsReference(t *testing.T) {
 	}
 }
 
+// A file whose path has spaces, as an app's licence in Application Support
+// has, is declared quoted, put in place with its mode, checked and synced
+// like any other, its id taken by reconcile, and removed by its path.
+func TestASecretFileWhosePathHasSpaces(t *testing.T) {
+	const path = "~/Library/Application Support/App/Licences/Some App.licence"
+	const ref = "op://vault/Item/Some App.licence"
+	const id = "secret:" + path
+	w := secretsWorld(t)
+	f := w.fake
+	f.On("op", "whoami")
+	optest.Holds(f, map[string]string{ref: "licence\n", "op://vault/Item/Section/token": "the value"})
+	optest.Attaches(f, "op://vault/Item", "Some App.licence")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit secret add "+path+" (laptop)")
+	if out, _, code := w.run(t, "secret", "add", path, "--ref", ref, "--mode", "644"); code != 0 {
+		t.Fatalf("kit secret add printed\n%s exit %d", out, code)
+	}
+	if got, want := w.readSection(t, "laptop", itemSection), "TOKEN   Section/token   # a token\n\""+path+"\" \"Some App.licence\" --mode 644\n"; got != want {
+		t.Errorf("[%s] = %q, want %q", itemSection, got, want)
+	}
+	file := filepath.Join(w.home, "Library", "Application Support", "App", "Licences", "Some App.licence")
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("the file is %v, %v; want it, 644", info, err)
+	}
+	if got := w.read(t, filepath.Join("Library", "Application Support", "App", "Licences", "Some App.licence")); got != "licence\n" {
+		t.Errorf("the file holds %q", got)
+	}
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "secret ok 2 declared, 1 synced\n") || strings.Contains(out, "App.licence") {
+		t.Errorf("kit status printed\n%s\nwant the file in place", out)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "secret missing:new TOKEN, "+path+" (to install)\n") {
+		t.Errorf("kit status printed\n%s\nwant the file missing", out)
+	}
+	out, _, _ := w.run(t, "reconcile")
+	if !strings.Contains(out, id+" missing") {
+		t.Errorf("kit reconcile printed\n%s\nwant %s missing", out, id)
+	}
+	if out, errOut, code := w.run(t, "reconcile", id, "--snooze"); code != 0 || !strings.Contains(out, id+" ok snoozed") {
+		t.Errorf("kit reconcile %s --snooze printed\n%s%s exit %d", id, out, errOut, code)
+	}
+	if out, _, code := w.run(t, "secret", "sync"); code != 0 {
+		t.Errorf("kit secret sync printed\n%s exit %d", out, code)
+	}
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("synced, the file is %v, %v; want it back, 644", info, err)
+	}
+	w.expectSync(t, []string{"laptop/declarations"}, "kit secret remove "+path+" (laptop)")
+	if out, _, code := w.run(t, "secret", "remove", path, "--keep-value"); code != 0 {
+		t.Errorf("kit secret remove printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "laptop", itemSection); got != "TOKEN   Section/token   # a token\n" {
+		t.Errorf("[%s] = %q, want the file's line gone", itemSection, got)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Errorf("the file: %v, want it gone", err)
+	}
+}
+
 // A new value goes where it's told, or, without --in or --item, in the one
 // block for an item the file it's declared in has: with none there, or
 // several, it's refused, listing the blocks, by name and item; a reference

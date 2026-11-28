@@ -413,8 +413,9 @@ var lineName = regexp.MustCompile(`^[A-Za-z0-9@._+/-][A-Za-z0-9@._+/:^~*<>=|,-]*
 var commandName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // secretName is what a secret fills: an environment variable's name, or a
-// file's path, from ~ or /.
-var secretName = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*|(~/|/)[^\s"'#]+)$`)
+// file's path, from ~ or /, spaces and all (a line quotes it), but no other
+// space, quote, # or backslash.
+var secretName = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*|(~/|/)[^\t\n\v\f\r"'#\\]+)$`)
 
 // settingKey is what a setting's key may be: no spaces, quotes, # or
 // backslashes, which a key such as credential.https://github.com.helper
@@ -505,7 +506,7 @@ func (f *declFile) String() string {
 // name (opts), as a list's holding its lines back, or an item's going by a
 // name.
 func matchHeader(defs []sectionDef, text string) (d sectionDef, arg, opts string, ok bool) {
-	text = strings.Join(strings.Fields(text), " ")
+	text = squeeze(text)
 	for _, d := range defs {
 		if text == d.header {
 			return d, "", "", true

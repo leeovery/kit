@@ -109,6 +109,82 @@ func TestListSecretsByItem(t *testing.T) {
 	}
 }
 
+// A secret's name is the line's first word: a file's path with spaces is
+// quoted, and a section may be held back for it, quoted the same.
+func TestListASecretsPathWithSpaces(t *testing.T) {
+	const path = "~/Library/Application Support/App/Licences/Some App.licence"
+	tests := []struct {
+		name, line, want string
+	}{
+		{"double quotes", `"~/Library/Application Support/App/Licences/Some App.licence" "op://vault/item/section/field" --mode 644   # the licence`, path},
+		{"single quotes", `'~/Library/Application Support/App/Licences/Some App.licence' "op://vault/item/section/field" --mode 644   # the licence`, path},
+		{"a path from /", `"/Users/someone/Some App.licence" "op://vault/item/section/field" --mode 644   # the licence`, "/Users/someone/Some App.licence"},
+		{"a path without spaces, as ever", `~/.config/app/licence "op://vault/item/section/field" --mode 644   # the licence`, "~/.config/app/licence"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets]\n" + tt.line + "\n"})
+			got, err := cfg.List("secret", "laptop")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []config.Entry{{Name: tt.want, Value: `"op://vault/item/section/field" --mode 644`, Note: "the licence", Scope: "laptop", Section: "secrets", Line: 2}}
+			if !reflect.DeepEqual(got.Entries, want) {
+				t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
+			}
+		})
+	}
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[homebrew casks --secret \"" + path + "\"]\napp\n"})
+	got, err := cfg.List("cask", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secrets := got.Entries[0].Secrets(); !slices.Equal(secrets, []string{path}) {
+		t.Errorf("Secrets() = %q, want %q", secrets, path)
+	}
+}
+
+// A header's spaces are one outside quotes, as kit writes it, and kept as
+// they are inside: a section held for a path with two spaces in a row is
+// held for that path, and a line declared for it goes in that section.
+func TestAHeldSectionKeepsTheSpacesItQuotes(t *testing.T) {
+	const path = "~/a  b/x"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets op://vault/item]\n\"" + path + "\" s/f\n\n[homebrew casks   --secret  \"" + path + "\"]\napp\n"})
+	got, err := cfg.List("cask", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secrets := got.Entries[0].Secrets(); !slices.Equal(secrets, []string{path}) {
+		t.Errorf("Secrets() = %q, want %q", secrets, path)
+	}
+	if err := cfg.Declare("cask", "laptop", config.Entry{Name: "other", Hold: config.SecretHold(path)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readFile(t, cfg, "laptop/declarations"), "[secrets op://vault/item]\n\""+path+"\" s/f\n\n[homebrew casks   --secret  \""+path+"\"]\napp\nother\n"; got != want {
+		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// A secret's name is an environment variable's, or a file's path whose
+// only whitespace is a space: nothing else with a space in it is one.
+func TestListRefusesASecretsName(t *testing.T) {
+	for name, line := range map[string]string{
+		"a variable with a space":   `"MY TOKEN" op://vault/item/field`,
+		"a path with a tab":         "\"~/App\tSupport/licence\" op://vault/item/field",
+		"a path with a backslash":   `"~/App\\Support/licence" op://vault/item/field`,
+		"a backslash unquoted":      `~/App\Support/licence op://vault/item/field`,
+		"a path with a quote":       `"~/App \"Support\"/licence" op://vault/item/field`,
+		"a path whose quote's open": `"~/App Support/licence op://vault/item/field`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets]\n" + line + "\n"})
+			if _, err := cfg.List("secret", "laptop"); err == nil || !strings.HasPrefix(err.Error(), "laptop/declarations:2: ") {
+				t.Errorf("List() error = %v, want line 2 refused", err)
+			}
+		})
+	}
+}
+
 // An item's secrets section may go by a name, --as after its item, which
 // its lines carry; a name stands for its item in the shared file and each
 // Mac's, and Places lists each section with how many it holds and, for an

@@ -93,7 +93,7 @@ func alike(e Entry, moved []movedLine) error {
 		what, given, advice string
 		of, shown           func(movedLine) string
 	}{
-		{"words", "", sameAdvice, func(m movedLine) string { return quotedWords(m.Value) }, func(m movedLine) string { return m.Name + " " + m.Value }},
+		{"words", "", sameAdvice, func(m movedLine) string { return quotedWords(m.Value) }, func(m movedLine) string { return lineWord(m.Name) + " " + m.Value }},
 		{"notes", e.Note, "make them the same, give one with --note, or take those lines out first", func(m movedLine) string { return m.Note }, nil},
 		{"comments above them", "", sameAdvice, func(m movedLine) string { return noteWords(m.comments) }, nil},
 		{"steps under them", "", sameAdvice, func(m movedLine) string { return strings.Join(m.Steps, "; ") }, nil},
@@ -122,7 +122,7 @@ func alike(e Entry, moved []movedLine) error {
 // none.
 func (m movedLine) given(d sectionDef, e Entry) error {
 	if e.Value != "" && quotedWords(e.Value) != quotedWords(m.Value) {
-		return fmt.Errorf("%s has %s %s, where this gives %s %s: %s", m.Pos(), m.Name, m.Value, m.Name, e.Value, d.givenAdvice())
+		return fmt.Errorf("%s has %s %s, where this gives %s %s: %s", m.Pos(), lineWord(m.Name), m.Value, lineWord(m.Name), e.Value, d.givenAdvice())
 	}
 	if item, hold := cmp.Or(strings.TrimSuffix(e.Item, "/"), m.Item), cmp.Or(e.Hold, m.Hold); item != m.Item || hold != m.Hold {
 		return fmt.Errorf("%s has %s in [%s], where this gives [%s]: move that line to the same section, or take it out first", m.Pos(), m.Name, sectionSaid(d, m.Item, m.Hold), sectionSaid(d, item, hold))
