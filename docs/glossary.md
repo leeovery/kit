@@ -106,8 +106,8 @@ cask, and Homebrew takes the app over or replaces an older copy. `--install`, `-
 rest.
 
 **Feature.** A piece of kit with nothing to list, switched on with `kit feature on`. The features
-are apps' settings (`prefs`), Remote Login, File Sharing and Touch ID for sudo. kit-config lists
-those on in `[features]`.
+are apps' settings (`prefs`), Remote Login, File Sharing, Screen Sharing and Touch ID for sudo.
+kit-config lists those on in `[features]`.
 
 **Apps' settings (kit prefs).** The feature that saves your apps' settings every night and
 restores them on a new Mac. It saves every preferences domain that isn't Apple's or the

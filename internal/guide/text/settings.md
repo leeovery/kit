@@ -47,7 +47,8 @@ that's a step of your own, or a note saying so.
 ## Features
 
 `kit feature on <feature>` switches on a piece of kit with nothing to list:
-apps' settings (prefs), remote login, file sharing, Touch ID for sudo.
+apps' settings (prefs), remote login, file sharing, screen sharing, Touch ID
+for sudo.
 `kit feature --help` lists them. They're kit-config's `[features]`.
 
 ## On a new Mac

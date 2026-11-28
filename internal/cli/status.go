@@ -458,6 +458,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		{steps.FeatureTouchIDSudo, func() engine.Step { return steps.TouchIDSudo(observed, r.admin, a.SudoLocal) }},
 		{steps.FeatureRemoteLogin, func() engine.Step { return steps.RemoteLogin(observed, r.admin) }},
 		{steps.FeatureFileSharing, func() engine.Step { return steps.FileSharing(observed, r.admin) }},
+		{steps.FeatureScreenSharing, func() engine.Step { return steps.ScreenSharing(observed, r.admin) }},
 	} {
 		if features.on(system.name) {
 			step := feature(system.name, system.step())
@@ -1002,7 +1003,7 @@ func partOf(name string) string {
 		return groupParts[d.Group]
 	}
 	switch name {
-	case steps.PathName, steps.FeatureTouchIDSudo, steps.FeatureRemoteLogin, steps.FeatureFileSharing:
+	case steps.PathName, steps.FeatureTouchIDSudo, steps.FeatureRemoteLogin, steps.FeatureFileSharing, steps.FeatureScreenSharing:
 		return render.PartSettings
 	case linked.StepName:
 		return render.PartFiles

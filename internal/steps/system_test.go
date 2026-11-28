@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -43,25 +44,60 @@ func TestTouchIDSudo(t *testing.T) {
 	}
 }
 
-func TestRemoteLoginAndFileSharing(t *testing.T) {
-	fake := runnertest.New(t)
-	admin := &steps.Admin{Held: func(context.Context) bool { return true }}
-	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\t\"com.openssh.sshd\" => enabled\n\t\t\"com.apple.smbd\" => disabled\n}\n")
-	if res := steps.RemoteLogin(fake, admin).Check(t.Context()); res.State != check.OK {
-		t.Errorf("Remote Login = %+v", res)
-	}
-	sharing := steps.FileSharing(fake, admin)
-	res := sharing.Check(t.Context())
-	if res.State != check.Attention || res.Items[0].Action != steps.ActionInstall {
-		t.Fatalf("File Sharing = %+v", res)
-	}
-	fake.On("sudo", "-n", "launchctl", "enable", "system/com.apple.smbd")
-	fake.On("sudo", "-n", "launchctl", "bootstrap", "system", "/System/Library/LaunchDaemons/com.apple.smbd.plist").Exits(37)
-	if err := sharing.Apply(t.Context(), res); err != nil {
-		t.Errorf("Apply() = %v; a service loaded already is no failure", err)
-	}
-	if calls := strings.Join(fake.Calls(), "\n"); !strings.Contains(calls, "sudo -n launchctl enable system/com.apple.smbd") {
-		t.Errorf("ran\n%s", calls)
+func TestSystemServices(t *testing.T) {
+	for _, tc := range []struct {
+		title, label, plist string
+		step                func(runner.Runner, *steps.Admin) engine.Step
+	}{
+		{"Remote Login", "com.openssh.sshd", "/System/Library/LaunchDaemons/ssh.plist", steps.RemoteLogin},
+		{"File Sharing", "com.apple.smbd", "/System/Library/LaunchDaemons/com.apple.smbd.plist", steps.FileSharing},
+		{"Screen Sharing", "com.apple.screensharing", "/System/Library/LaunchDaemons/com.apple.screensharing.plist", steps.ScreenSharing},
+	} {
+		t.Run(tc.title, func(t *testing.T) {
+			held := &steps.Admin{Held: func(context.Context) bool { return true }}
+			for _, c := range []struct {
+				listed string
+				want   check.State
+			}{
+				{"\t\t\"" + tc.label + "\" => enabled\n", check.OK},
+				{"\t\t\"" + tc.label + "\" => false\n", check.OK},
+				{"\t\t\"" + tc.label + "\" => disabled\n", check.Attention},
+				{"\t\t\"com.example.other\" => enabled\n", check.Attention},
+			} {
+				fake := runnertest.New(t)
+				fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n" + c.listed + "}\n")
+				step := tc.step(fake, held)
+				if res := step.Check(t.Context()); res.State != c.want || step.Title != tc.title || !step.Admin {
+					t.Errorf("listing %q = %+v", c.listed, res)
+				}
+			}
+
+			fake := runnertest.New(t)
+			fake.On("launchctl", "print-disabled", "system").Exits(1)
+			if res := tc.step(fake, held).Check(t.Context()); res.State != check.Failed {
+				t.Errorf("launchctl failing = %+v", res)
+			}
+
+			fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n}\n")
+			waiting := tc.step(fake, &steps.Admin{})
+			res := waiting.Check(t.Context())
+			if res.State != check.Attention || res.Items[0].Action != steps.ActionInstall {
+				t.Fatalf("off = %+v", res)
+			}
+			if err := waiting.Apply(t.Context(), res); err == nil || err.Error() != steps.AdminWait {
+				t.Errorf("Apply() without the password = %v", err)
+			}
+
+			fake.On("sudo", "-n", "launchctl", "enable", "system/"+tc.label)
+			fake.On("sudo", "-n", "launchctl", "bootstrap", "system", tc.plist).Exits(37)
+			if err := tc.step(fake, held).Apply(t.Context(), res); err != nil {
+				t.Errorf("Apply() = %v; a service loaded already is no failure", err)
+			}
+			calls := fake.Calls()
+			if want := []string{"sudo -n launchctl enable system/" + tc.label, "sudo -n launchctl bootstrap system " + tc.plist}; !slices.Equal(calls[len(calls)-2:], want) {
+				t.Errorf("ran\n%s", strings.Join(calls, "\n"))
+			}
+		})
 	}
 }
 

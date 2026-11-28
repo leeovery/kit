@@ -174,7 +174,7 @@ those comments, as nothing written by hand goes without being asked.
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
 entries (the kinds, `[restore]`), a piece with nothing to list by a switch
 in a Mac's `[features]` section (`prefs`, `touch-id-sudo`, `remote-login`,
-`file-sharing`), so
+`file-sharing`, `screen-sharing`), so
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
 specific to a user, or to the moment, goes in their config: checks of their own in
 `[checks]`, jobs of their own in `[hourly]` and `[nightly]`. `kit feature
@@ -1227,9 +1227,9 @@ or a `~` that doesn't start the home folder is refused. `kit path add <dir>` put
 directory last of the Mac's own (`--shared`: last of every Mac's, taking it out of the Macs'
 files), `kit path remove <dir>` takes it off; both write the file and commit.
 
-Three features change the system, each applied through sudo: `touch-id-sudo` (sudo takes a
+Four features change the system, each applied through sudo: `touch-id-sudo` (sudo takes a
 fingerprint, by a line in `/etc/pam.d/sudo_local`, which macOS updates leave alone),
-`remote-login` (SSH) and `file-sharing` (SMB), each a launchd service on unless launchd lists
+`remote-login` (SSH), `file-sharing` (SMB) and `screen-sharing` (VNC), each a launchd service on unless launchd lists
 it disabled. A step whose apply needs an administrator's password says so (`Admin`), and
 `kit apply` asks for the password as the run starts, the step waiting for the answer, and
 `kit reconcile` before anything is applied, as for the kinds whose installs need it: asked once

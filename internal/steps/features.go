@@ -12,7 +12,7 @@ import (
 const FeaturePrefs = "prefs"
 
 // Features are the features kit knows.
-var Features = []string{FeatureFileSharing, FeaturePrefs, FeatureRemoteLogin, FeatureTouchIDSudo}
+var Features = []string{FeatureFileSharing, FeaturePrefs, FeatureRemoteLogin, FeatureScreenSharing, FeatureTouchIDSudo}
 
 // fullDiskAccessProbes are folders macOS shows only to an app with Full Disk
 // Access, relative to the home.
