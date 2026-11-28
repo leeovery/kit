@@ -50,7 +50,7 @@ func TestEveryStepHasARow(t *testing.T) {
 	}
 	made = slices.Concat(made, []engine.Step{
 		steps.PathFile(nil, ""),
-		steps.TouchIDSudo(fake, admin, ""), steps.RemoteLogin(fake, admin), steps.FileSharing(fake, admin), steps.ScreenSharing(fake),
+		steps.TouchIDSudo(fake, admin, ""), steps.RemoteLogin(fake, admin), steps.FileSharing(fake, admin), steps.ScreenSharing(fake, ""),
 		steps.Prefs(nil, "", never), steps.FullDiskAccess(steps.Granting{}, &steps.Access{Home: home}), steps.Restore(steps.Restoring{}),
 		steps.ConfigEdits(gitrepo.Repo{}), steps.ConfigSync(gitrepo.Repo{Run: fake}, never, steps.Pulled{}), steps.ConfigPrivate(gitrepo.Repo{Run: fake}),
 		steps.Disk(fake), steps.Memory(fake), steps.Load(fake, never),

@@ -115,11 +115,10 @@ func FileSharing(run runner.Runner, admin *Admin) engine.Step {
 }
 
 // The Screen Sharing that viewers can take control through: its service,
-// the agent macOS grants control to, and where macOS keeps the grants.
+// and the agent macOS grants control to.
 const (
 	screenSharingLabel = "com.apple.screensharing"
 	screenSharingAgent = "com.apple.screensharing.agent"
-	privacyDatabase    = "/Library/Application Support/com.apple.TCC/TCC.db"
 )
 
 // SharingSettings is System Settings, opened at Sharing.
@@ -141,11 +140,11 @@ const (
 
 // ScreenSharing checks the Mac shares its screen, viewers able to take
 // control: on only when launchd lists its service enabled and macOS grants
-// its agent both of controlGrants. Only System Settings grants them, as
-// turning Screen Sharing on there does, so the step has no apply: what's
-// wrong is the person's to do, and its card opens System Settings at
-// Sharing.
-func ScreenSharing(run runner.Runner) engine.Step {
+// its agent both of controlGrants, as macOS's privacy database at tcc
+// says. Only System Settings grants them, as turning Screen Sharing on
+// there does, so the step has no apply: what's wrong is the person's to
+// do, and its card opens System Settings at Sharing.
+func ScreenSharing(run runner.Runner, tcc string) engine.Step {
 	return engine.Step{
 		Name: FeatureScreenSharing, Title: "Screen Sharing", Area: AreaDrift,
 		Choice: &engine.Choice{Open: func(ctx context.Context, _ check.Item) {
@@ -160,7 +159,7 @@ func ScreenSharing(run runner.Runner) engine.Step {
 				return yours(FeatureScreenSharing, "off", "off", "System Settings › General › Sharing: turn on Screen Sharing",
 					check.ToDo{Title: "Turn on Screen Sharing", Why: sharingWhy, Steps: []string{sharingOpen, "Turn on Screen Sharing"}, Watch: sharingWatch})
 			}
-			granted, err := controlGranted(ctx, run)
+			granted, err := controlGranted(ctx, run, tcc)
 			switch {
 			case err != nil:
 				return failed(err)
@@ -182,10 +181,13 @@ func ScreenSharingOn(ctx context.Context, run runner.Runner) (bool, error) {
 
 // controlGranted reports whether macOS grants Screen Sharing's agent each
 // of controlGrants, every row of each allowed: none, or one denied, isn't.
-// The database holding them can't be read without Full Disk Access.
-func controlGranted(ctx context.Context, run runner.Runner) (bool, error) {
-	// The system's sqlite3, by path: Homebrew's can come first on kit's PATH.
-	out, err := output(ctx, run, "/usr/bin/sqlite3", "-readonly", privacyDatabase,
+// The database holding them, at tcc, can't be read without Full Disk
+// Access.
+func controlGranted(ctx context.Context, run runner.Runner, tcc string) (bool, error) {
+	// The system's sqlite3, by path: Homebrew's can come first on kit's
+	// PATH. Its output is pinned, ~/.sqliterc never read, as one setting
+	// headers or columns would leave the grants unread.
+	out, err := output(ctx, run, "/usr/bin/sqlite3", "-init", "/dev/null", "-batch", "-readonly", "-list", "-noheader", "-separator", "|", tcc,
 		"select service, auth_value from access where client='"+screenSharingAgent+"'")
 	if exit := (*runner.ExitError)(nil); errors.As(err, &exit) && strings.Contains(exit.FullStderr, "unable to open database") {
 		return false, fmt.Errorf("can't tell whether viewers can take control: %w", prefs.ErrNoAccess)

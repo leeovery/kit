@@ -458,7 +458,7 @@ func (a *app) build(ctx context.Context, command, logName string, face render.Fa
 		{steps.FeatureTouchIDSudo, func() engine.Step { return steps.TouchIDSudo(observed, r.admin, a.SudoLocal) }},
 		{steps.FeatureRemoteLogin, func() engine.Step { return steps.RemoteLogin(observed, r.admin) }},
 		{steps.FeatureFileSharing, func() engine.Step { return steps.FileSharing(observed, r.admin) }},
-		{steps.FeatureScreenSharing, func() engine.Step { return steps.ScreenSharing(observed) }},
+		{steps.FeatureScreenSharing, func() engine.Step { return steps.ScreenSharing(observed, a.TCC) }},
 	} {
 		if !features.on(system.name) {
 			continue

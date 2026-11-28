@@ -240,8 +240,8 @@ its first line (a minute's timeout), each failing one an item of the `checks` st
 Config, Checks), which the status document carries. What only the person at the Mac can do
 about a check is a to-do, an item with a title, why, steps, what kit watches for, a group and,
 for a choice, its keys, raised at the end of applying (Steps by hand): restoring application
-settings (`prefs`, paused), a Time Machine disk to add, Arq's backup plan to set up, Screen Sharing to turn on in System Settings; titled the
-same wherever the item shows. The rest (disk space, a stale backup, commits that won't push)
+settings (`prefs`, paused), a Time Machine disk to add, Arq's backup plan to set up, Screen
+Sharing to turn on in System Settings; titled the same wherever the item shows. The rest (disk space, a stale backup, commits that won't push)
 are how the Mac stands, not to-dos. Full Disk Access isn't one for apps' settings alone: a
 grant takes effect only once the terminal restarts, so kit couldn't watch for it. With
 backup exclusions to apply, held for want of it, at a terminal, it is one all the same, as they
@@ -1234,14 +1234,20 @@ on only when launchd lists its label enabled: one it doesn't list is off, as eac
 says Disabled. The first three are applied through sudo. `screen-sharing` is on only when
 viewers can take control as well: macOS grants Screen Sharing's agent
 (`com.apple.screensharing.agent`) screen capture and posting events, both allowed in the
-system's TCC database, read with `sqlite3 -readonly`. That database is SIP's, so only System
-Settings (or MDM) grants them, and turning Screen Sharing on there enables the service with
-them: launchctl alone, as kit once did, starts a service whose viewers can only watch. So
-`screen-sharing` has no apply: off, or on without control, it's a to-do (Checks above), its
-card opening System Settings at Sharing and kit watching for control; turning the feature off
-only undeclares it. The database unreadable, without Full Disk Access, its check fails, saying
-so, never ok. A snapshot declares it as its service is, as the person switched it, reading no grants; a feature it can't look at is left out, saying why, the rest declared. A step whose apply needs an administrator's password says so (`Admin`), and
-`kit apply` asks for the password as the run starts, the step waiting for the answer, and
+system's TCC database (the injected `TCC` path), read with the system's `sqlite3`, its output
+pinned (`-init /dev/null -batch -readonly -list -noheader -separator '|'`), so no
+`~/.sqliterc` changes it. That database is SIP's, so only System Settings (or MDM) grants
+them, and turning Screen Sharing on there enables the service with them: launchctl alone, as
+kit once did, starts a service whose viewers can only watch. So `screen-sharing` has no
+apply: off, or on without control, it's a to-do (Checks above), its card opening System
+Settings at Sharing at the end of a whole `kit apply` at a terminal, and kit watching for
+control. It isn't drift: `kit reconcile` names it so, as any step whose items aren't drift,
+and says `kit status` tells how it stands. Turning the feature off only undeclares it. A read
+of the grants that fails says it can't tell, never ok, naming Full Disk Access when sqlite3
+couldn't open the database. A snapshot declares it as its service is, as the person switched
+it, reading no grants; a feature it can't look at is left out, the rest declared, and the
+Features row on kit setup's screen says what it missed. A step whose apply needs an
+administrator's password says so (`Admin`), and `kit apply` asks for the password as the run starts, the step waiting for the answer, and
 `kit reconcile` before anything is applied, as for the kinds whose installs need it: asked once
 at a terminal; without one, the step waits.
 

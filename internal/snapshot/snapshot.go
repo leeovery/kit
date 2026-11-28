@@ -72,14 +72,15 @@ type Mac struct {
 // Look is how a part of a snapshot stands as Find looks at the Mac: its
 // label; what's being done, while it's looked at; once Looked, how many
 // things it found, by name when they have names of their own (the features
-// on, the backup tools set up), or why it couldn't be looked at.
+// on, the backup tools set up), or why it couldn't be looked at (Err), or
+// why some of it couldn't (Missed).
 type Look struct {
-	Label  string
-	Doing  string
-	Looked bool
-	Found  int
-	Names  []string
-	Err    error
+	Label       string
+	Doing       string
+	Looked      bool
+	Found       int
+	Names       []string
+	Err, Missed error
 }
 
 // FoldersLabel is the label of the home folder's folders, as Find tells
@@ -98,7 +99,7 @@ func (m Mac) look(l Look) {
 func (m Mac) lookAt(label string, find func() Part) Part {
 	m.look(Look{Label: label, Doing: "reading what's here"})
 	p := find()
-	m.look(Look{Label: label, Looked: true, Found: len(p.Lines), Names: p.names, Err: p.Err})
+	m.look(Look{Label: label, Looked: true, Found: len(p.Lines), Names: p.names, Err: p.Err, Missed: p.Missed})
 	return p
 }
 

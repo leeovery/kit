@@ -115,7 +115,7 @@ system's. It also saves the keys `[prefs keys]` names and the settings files `[p
 names. They go to the `prefs` branch of kit-config, which the first save makes.
 
 **Screen Sharing.** The feature that lets another Mac see and control this one. kit checks that
-viewers can take control, which macOS grants only in System Settings. A `kit apply` at a
+viewers can take control, which macOS grants only in System Settings. A whole `kit apply` at a
 terminal opens System Settings at Sharing for you to turn Screen Sharing on.
 
 **The hourly run.** On the hour, launchd opens kit.app, which runs `kit nightly`. It runs the jobs

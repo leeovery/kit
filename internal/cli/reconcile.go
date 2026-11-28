@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/drift"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
@@ -118,9 +119,12 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 	for _, arg := range args {
 		if _, ok := r.drifters[arg]; ok {
 			kinds = append(kinds, arg)
-		} else {
-			ids = append(ids, arg)
+			continue
 		}
+		if err := notDrift(r, arg); err != nil {
+			return err
+		}
+		ids = append(ids, arg)
 	}
 	// At a terminal, asking, the heading shows at once, and what kit's doing
 	// while it looks.
@@ -183,6 +187,17 @@ func (a *app) driftItems(ctx context.Context, r *run, only []string) ([]driftIte
 		}
 	}
 	return items, nil
+}
+
+// notDrift is why kit reconcile can't settle arg when it's a step of the
+// run, or one of a step's items, whose items aren't drift, as Screen
+// Sharing's and Time Machine's are the person's to do: nil otherwise.
+func notDrift(r *run, arg string) error {
+	name, _, _ := strings.Cut(arg, ":")
+	if _, drifts := r.drifters[name]; drifts || !slices.ContainsFunc(r.steps, func(s engine.Step) bool { return s.Name == name }) {
+		return nil
+	}
+	return fmt.Errorf("%s isn't drift, so kit reconcile has nothing to settle: kit status says how it stands, and a whole kit apply at a terminal raises what's yours to do", name)
 }
 
 // decide is what the flags say to do with the item id.

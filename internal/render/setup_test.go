@@ -383,6 +383,17 @@ func TestSetupScreenRowsNeverBreak(t *testing.T) {
 	}
 }
 
+// A part some of which couldn't be looked at, as a feature launchctl
+// couldn't tell of, needs you: what it found, then what it missed.
+func TestSetupScreenSaysWhatAPartMissed(t *testing.T) {
+	f := setupFace(nil, started(setup.SnapshotStep)...)
+	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "Features", Found: true, Count: 1, Names: []string{"Touch ID for sudo"}, Missed: "Remote Login: launchctl exited 1\nFile Sharing: launchctl exited 1"})
+	text := ansi.Strip(strings.Join(f.View(140, 40), "\n"))
+	if want := "▲ Features  Touch ID for sudo · not looked at: Remote Login: launchctl exited 1 File Sharing: launchctl exited 1"; !strings.Contains(text, want) {
+		t.Errorf("drew\n%s\nwant it to hold\n%s", text, want)
+	}
+}
+
 // Stopped while the snapshot looks, as the engine ends a run stopped: a
 // part cut short says it stopped, never that it failed; the snapshot's own
 // row says nothing more; each step after it, the engine saying the run was

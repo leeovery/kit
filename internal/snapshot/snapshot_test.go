@@ -187,7 +187,19 @@ func TestAFeatureThatCantBeLookedAtLeavesTheRest(t *testing.T) {
 			homebrew(fake, "", "", "")
 			fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n" + tt.listed + "}\n").Exits(tt.exit)
 			write(t, filepath.Dir(m.SudoLocal), map[string]string{"sudo_local": "auth       sufficient     pam_tid.so\n"})
+			var mu sync.Mutex
+			var told error
+			m.Looks = func(l snapshot.Look) {
+				mu.Lock()
+				defer mu.Unlock()
+				if l.Label == "Features" && l.Looked {
+					told = l.Missed
+				}
+			}
 			s := take(t, m)
+			if (told == nil) != (tt.missed == "") {
+				t.Errorf("the Features look told %v missed; want %q", told, tt.missed)
+			}
 			if got := declarations(t, m); !strings.Contains(got, tt.want) {
 				t.Errorf("laptop/declarations =\n%s\nwant it to hold\n%s", got, tt.want)
 			}

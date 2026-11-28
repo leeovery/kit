@@ -318,6 +318,8 @@ func (f *SetupFace) found(s event.Step, width int) []look.Row {
 			row.State, row.Says = look.Skipped, look.Muted("stopped")
 		case p.Err != "":
 			row.State, row.Says = look.Failed, look.Words(look.Failed, p.Err)
+		case p.Found && p.Missed != "":
+			row.State, row.Says = look.NeedsYou, look.Says(append(muted(p.Names), look.Words(look.NeedsYou, "not looked at: "+p.Missed))...)
 		case p.Found && p.Count == 0:
 			row.State, row.Says = look.Done, look.Muted("none")
 		case p.Found && len(p.Names) > 0:

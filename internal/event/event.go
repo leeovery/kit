@@ -297,16 +297,18 @@ type DeviceCode struct {
 // snapshot looks at the Mac a kind at a time: waiting its turn, it says
 // nothing; being looked at, what's being done (Doing); once Found, how many
 // things it found (Count), by name when they have names of their own
-// (Names), or why it couldn't look (Err).
+// (Names), or why it couldn't look (Err), or why it couldn't look at some
+// of it (Missed).
 type Finding struct {
-	Time  time.Time
-	Step  string
-	Part  string
-	Doing string
-	Found bool
-	Count int
-	Names []string
-	Err   string
+	Time   time.Time
+	Step   string
+	Part   string
+	Doing  string
+	Found  bool
+	Count  int
+	Names  []string
+	Err    string
+	Missed string
 }
 
 func (e Finding) At() time.Time { return e.Time }
