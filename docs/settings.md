@@ -13,7 +13,7 @@ every git setting, but only the power settings you declare.
 kit defaults add com.apple.dock:tilesize
 ```
 
-kit reads the value and writes the line in the form `defaults write` takes:
+kit writes the line in the form `defaults write` takes:
 
 ```text
 [macos settings]
@@ -27,7 +27,7 @@ kit power add charger:sleep --shared
 kit git-config add pull.rebase
 ```
 
-Each lands in its own section, in sorted order, then kit commits and pushes kit-config. The
+Each lands in its own section, then kit commits and pushes kit-config. The
 power setting goes in `shared/declarations`:
 
 ```text
@@ -46,9 +46,8 @@ pull.rebase true
 
 - **`kit apply` sets what's missing.** On a new Mac, or for a line you wrote by hand, kit writes
   the declared value.
-- **You see the change at once.** After kit sets, unsets or puts back a setting, it restarts
-  what shows it: the Dock, Finder, Control Center or the menu bar. It reloads keyboard
-  shortcuts too.
+- **You see the change at once.** After kit changes a setting, it restarts what
+  shows it, such as the Dock, Finder, Control Center or the menu bar, and reloads keyboard shortcuts.
 - **A change by hand is never undone behind your back.** If a declared setting changes on the
   Mac, `kit apply` leaves it. It's drift, and you choose to keep the new value or put the
   declared one back.
@@ -79,8 +78,7 @@ showing it. `--revert` puts the old value back. See
 
 ## What macOS changes by itself is ignored
 
-macOS writes some values on its own. kit ignores them, so they never show up as
-drift:
+macOS writes some values on its own, and kit ignores them:
 
 - window sizes and positions, and the columns of a table;
 - recent files, folders and places;
@@ -100,7 +98,8 @@ git is different: every global setting that kit-config doesn't declare shows up.
 - **An app keeps its own settings elsewhere.** A setting in the domain of an app is saved with
   the rest of that app: see [Apps' settings](apps-settings.md).
 - **Remote Login, File Sharing, Screen Sharing and Touch ID for sudo** are features, switched
-  on with `kit feature on`.
+  on with `kit feature on`. kit checks that Screen Sharing viewers can take control. Only System
+  Settings grants control, so `kit apply` opens it for you to turn Screen Sharing on.
 
 ## Reference
 
@@ -115,9 +114,8 @@ git is different: every global setting that kit-config doesn't declare shows up.
 | `remove --shared` | Needed to remove a shared line |
 | `kit reconcile` | Settles what changed by hand |
 
-A power source is `charger`, `battery`,
-`all` or `ups`. Each of these commands takes `--json`, and `--help` says what it needs and
-what it changes.
+A power source is `charger`, `battery`, `all` or `ups`. Each command takes `--json` and
+`--help`.
 
 ## Related
 

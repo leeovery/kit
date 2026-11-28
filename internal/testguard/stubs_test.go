@@ -30,7 +30,7 @@ func TestStubsStandInForEveryStubbedProgram(t *testing.T) {
 		}
 		names = append(names, e.Name())
 	}
-	want := []string{"agntc", "brew", "bun", "claude", "codesign", "composer", "curl", "defaults", "diskutil", "ditto", "dns-sd", "gh", "git", "go", "ioreg", "killall", "launchctl", "mas", "mdfind", "mdutil", "mount", "mount_apfs", "npm", "op", "open", "osascript", "pkgutil", "pmset", "pnpm", "rsync", "scutil", "ssh", "sudo", "sw_vers", "swiftc", "sysctl", "system_profiler", "systemsetup", "tmutil", "tmux", "umount", "uv", "yarn"}
+	want := []string{"agntc", "brew", "bun", "claude", "codesign", "composer", "curl", "defaults", "diskutil", "ditto", "dns-sd", "gh", "git", "go", "ioreg", "killall", "launchctl", "mas", "mdfind", "mdutil", "mount", "mount_apfs", "npm", "op", "open", "osascript", "pkgutil", "pmset", "pnpm", "rsync", "scutil", "sqlite3", "ssh", "sudo", "sw_vers", "swiftc", "sysctl", "system_profiler", "systemsetup", "tmutil", "tmux", "umount", "uv", "yarn"}
 	if !slices.Equal(names, want) {
 		t.Errorf("stubs = %q, want %q", names, want)
 	}

@@ -147,6 +147,7 @@ func TestASnapshotDeclaresTheMacAsItStands(t *testing.T) {
 	fake.On("git", "config", "--global", "--list", "-z").Prints("user.name\nSome One\x00core.editor\nmicro\x00include.path\na\x00include.path\nb\x00")
 	setting(fake, "com.apple.dock", "<key>tilesize</key><integer>60</integer><key>version</key><integer>1</integer>")
 	fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\"com.openssh.sshd\" => enabled\n\t\"com.apple.smbd\" => disabled\n\t\"com.apple.screensharing\" => enabled\n}\n")
+	fake.On("/usr/bin/sqlite3", "-readonly", "/Library/Application Support/com.apple.TCC/TCC.db", "select service, auth_value from access where client='com.apple.screensharing.agent'").Prints("kTCCServicePostEvent|2\nkTCCServiceScreenCapture|2\n")
 	write(t, filepath.Dir(m.SudoLocal), map[string]string{"sudo_local": "auth       sufficient     pam_tid.so\n"})
 	fake.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>AutoBackup</key><true/><key>Destinations</key><array><dict/></array></dict></plist>")
 	fake.On("tmutil", "status").Prints("Running = 0;\n")

@@ -342,7 +342,7 @@ func (m Mac) featuresPart(ctx context.Context) Part {
 	}
 	admin := &steps.Admin{}
 	var errs []error
-	for _, s := range []engine.Step{steps.TouchIDSudo(m.Run, admin, m.SudoLocal), steps.RemoteLogin(m.Run, admin), steps.FileSharing(m.Run, admin), steps.ScreenSharing(m.Run, admin)} {
+	for _, s := range []engine.Step{steps.TouchIDSudo(m.Run, admin, m.SudoLocal), steps.RemoteLogin(m.Run, admin), steps.FileSharing(m.Run, admin), steps.ScreenSharing(m.Run)} {
 		res := s.Check(ctx)
 		switch {
 		case res.State == check.Failed:

@@ -328,7 +328,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		}
 	}
 	if !opts.DryRun && !p.HasFullDiskAccess() {
-		return report, errNoAccess
+		return report, ErrNoAccess
 	}
 	unlock, err := p.lockCapture(ctx)
 	if err != nil {

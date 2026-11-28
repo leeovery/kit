@@ -214,9 +214,9 @@ func (p *Prefs) HasFullDiskAccess() bool {
 	return !found
 }
 
-// errNoAccess is why capture and restore won't run without Full Disk
-// Access.
-var errNoAccess = errors.New("no Full Disk Access: grant it to the app or terminal kit runs in (System Settings › Privacy & Security › Full Disk Access)")
+// ErrNoAccess is why capture and restore won't run without Full Disk
+// Access, and why what only it can read can't be told.
+var ErrNoAccess = errors.New("no Full Disk Access: grant it to the app or terminal kit runs in (System Settings › Privacy & Security › Full Disk Access)")
 
 // hardwareID is the Mac's hardware UUID, as ioreg reports it.
 var hardwareID = regexp.MustCompile(`"IOPlatformUUID" = "([^"]+)"`)

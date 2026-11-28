@@ -422,7 +422,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		return report, ErrPaused
 	}
 	if !p.HasFullDiskAccess() {
-		return report, errNoAccess
+		return report, ErrNoAccess
 	}
 	unlock, err := p.lockCapture(ctx)
 	if err != nil {
